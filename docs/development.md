@@ -36,6 +36,18 @@ Always submit a complete logical operation as one `ApplyAsync` call. It validate
 
 Use `SemanticMerge.Plan(base, current, incoming)` to obtain a merge plan. Unresolved plans cannot produce edits. Apply entity and resource edits together with `ApplyAsync`. A Git merge commit must record both parents after a successful merge.
 
+## Read-only queries for clients
+
+These helpers interpret canonical data the same way in every client. They never change the repository.
+
+- `ScheduleQueries.Span(trip, item)` resolves a display span for every time precision. Day parts use the recommended ranges from the specification; unscheduled parents are aggregated from their children (`Derived`). `IsUnscheduled`, `Participants`, `PrimaryPlace` and `Route` cover the other common questions.
+- `ScheduleCategories.Classify(trip, item)` returns a `ScheduleKind` from the transport or accommodation component, otherwise from the inheritable `category` and the standard vocabulary in `Standard`. `TransportTypes` and `Statuses` list the core values.
+- `TripSummaries` provides place names for overviews, per-currency cost totals (`Costs`) without conversion, Git email to person mapping and reverse references.
+- `ChangeSummary.Between(before, after)` turns a semantic diff into added, updated and removed entities with the changed top-level fields. Markdown changes are attributed to the entity that references the file.
+- `TripItinerary.Build(trip, labels, culture)` produces a day-by-day reading of the plan. `TripExport.Html` and `TripExport.Ics` use it; clients pass translated `ExportLabels`.
+- `GitRepository.SyncStatusAsync(remote)` compares the current branch with the last fetched remote-tracking ref without network access.
+- `TravelRepository.NormalizeAsync()` rewrites files in the reference YAML style; the CLI exposes it as `travelrepo format`.
+
 ## Future automation adapters
 
 A future `TravelRepo.Mcp` package can adapt the existing command/query APIs. It should call repository commands and validation rather than editing YAML independently. No AI runtime is loaded by these libraries.

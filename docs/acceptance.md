@@ -2,6 +2,8 @@
 
 Audit date: 2026-09-30. **Overall release status: BLOCKED.**
 
+**Interface rebuild, 2026-10-04 (branch `modernize`).** The desktop interface was rebuilt on a design system following the brand and UX references: icon sidebar, trip header with variant switcher and save state, tabbed inspector, pinnable Inbox, library with covers, a new timetable, list, map with opt-in OpenStreetMap, redesigned pages and dialogs, and a sample trip. TravelRepo gained client-facing queries, change summaries, itinerary exports and a cleaner YAML writer. Verification for this pass: full test suites, `dotnet format`, headless captures in light, dark and German, and native X11 runs on a virtual display (Xvfb, no window manager) covering click selection, menus, pickers, drag-create and edits. It did not include new GNOME, KDE or Windows sessions, so the platform gates below are unchanged. See `docs/usability-review.md` in Jourfold.
+
 Native user testing reopened six UI sections. Their revised workflows now pass the stated local regressions, with 70 of 76 required sections covered and six external verification gates still BLOCKED. The earlier percentage did not establish native desktop usability. CachyOS focus/icon behavior needs a retest, and further visual refinement remains NOT COMPLETE as follow-up design work. See `docs/usability-review.md` in Jourfold for the detailed review and limits.
 
 PASS means the complete required block has implementation and the stated code/test evidence. Cross-platform execution is separately gated in sections 2, 3, 65, 71 and 75. Live GitHub authentication, discovery, private publishing and privacy checks passed; invitations remain pending in section 57. The release is not accepted until all blocked gates pass.
@@ -12,14 +14,14 @@ Both repositories were built after deleting their source/test/sample bin and obj
 | --- | --- | --- |
 | 2. Supported platforms | BLOCKED | Windows x64 self-contained artifact builds, but native Windows 11 execution is unavailable. GNOME 46 and KDE Plasma 5.27 X11 sessions exercised on Ubuntu 24.04. Revised forms retained activation in Ubuntu GNOME; CachyOS/GNOME focus and overview-icon retest, plus full platform/scaling/desktop integration checklist, remain required. |
 | 3. First-run behavior | BLOCKED | Linux native empty-library/create flow and compatible system Git pass. Bundled MinGit is pinned and packaged, but its fallback must execute on a clean Windows machine. |
-| 4. Trip library | PASS | Local/remote library groups, derived dates, cover preview, places and content modification time; LocalStore rebuildable FTS and MainWindow library rendering. |
-| 5. Create trip | PASS | Minimal wizard with chosen empty destination, calendar dates, searchable language/timezone choices and explicit participant Save/Cancel. Actual form and real repository creation tests pass. |
+| 4. Trip library | PASS | Library cards with trip cover or generated cover, effective dates, place summary, last opened and local/shared state; filters, search, missing-folder recovery; LocalStore rebuildable FTS. Headless captures of the empty and populated library. |
+| 5. Create trip | PASS | Skippable three-step wizard: only the title is required; dates, main timezone, content language, own name, companions and folder (default `Documents/Jourfold`, changeable) are optional. Real repository creation and wizard tests pass. |
 | 6. Open existing trip | PASS | Schema and semantic validation on open, compatible unknown-data retention, external reload tests and reviewed malformed-entity recovery test. |
 | 7. Repair and rollback | PASS | Recovery journals and preview/apply restore with stale-state checks; MalformedEntityOpenOffersReviewedRestoreWithoutDroppingUnknownData verifies the UI orchestration. |
 | 8. Autosave | PASS | Repository transactions, external recovery journals and inspector autosave; stale-write tests. |
 | 9. Undo / redo | PASS | Workspace reversible edit batches, optimistic validation and external invalidation; application tests. |
-| 10. Create Version | PASS | Semantic change summary drives editable natural-language suggestions; real version commits and machine-readable trailers tested; native KDE Create Version exercised. |
-| 11. Human-readable history | PASS | Localized activity headings, trip-person author mapping, expandable semantic changes and Advanced refs/author/committer/parents/trailers; native version history inspected. |
+| 10. Create Version | PASS | Create Version sheet lists TravelRepo `ChangeSummary` entries and suggests an editable message from them; real version commits with machine-readable trailers tested. |
+| 11. Human-readable history | PASS | Timeline with trip-person author mapping, relative times, expandable semantic changes from `ChangeSummary` and restore; Advanced mode adds commit, parents, refs, author/committer and trailers. |
 | 12. Git interoperability | PASS | Real Git backend; local-only config, remotes and external changes tested. |
 | 13. Git identity | PASS | Repository-local identity and trip-local person identity fields. |
 | 14. HTTPS and SSH remotes | PASS | Live SDK HTTPS push/fetch/clone and SSH clone/version/push/fetch passed on 2026-09-30; HTTPS safe fast-forward matched SSH commit. GNOME Secret Service persistence passed. Windows execution remains gated separately. |
@@ -28,8 +30,8 @@ Both repositories were built after deleting their source/test/sample bin and obj
 | 17. Conflict-free semantic auto-merge | PASS | DivergentSyncOffersCancellableGraceAndRecordsARealMerge tests cancellation and automatic merge/push with real divergent remotes. Schema-invalid results are ineligible. |
 | 18. Variants | PASS | Real branches, metadata, rename, switch and archive implemented; integration tests. |
 | 19. Variant discovery | PASS | for-each-ref plus branch-tip manifest reads; no checkout enumeration. |
-| 20. Variant comparison | PASS | ComparisonView has side-by-side timetable and structured tabs, Markdown and binary/resource differences; headless comparison test. |
-| 21. Semantic merge | PASS | Three-way ID/field/resource merge with conservative ordered-sequence handling; all four conflict actions tested through reviewed two-parent commits and archive. |
+| 20. Variant comparison | PASS | Side-by-side day timetable marking added, removed and changed items by icon and label, plus a field-level details view with Markdown and resource changes; headless comparison test. |
+| 21. Semantic merge | PASS | Three-way ID/field/resource merge with conservative ordered-sequence handling; all conflicts are resolved in one sheet with Keep, Take, Keep both and Write result; all four actions tested through reviewed two-parent commits and archive. |
 | 22. TravelRepo serialization | PASS | YamlDotNet safe document envelope, JSON Schema 2020-12 and separate semantic validation. |
 | 23. Stable IDs | PASS | UUIDv7 IDs, ID-based references and rename test. |
 | 24. Trip manifest | PASS | Manifest schema, optional dates/timezone/cover/participants and extensions. |
@@ -39,26 +41,26 @@ Both repositories were built after deleting their source/test/sample bin and obj
 | 28. Schedule items | PASS | Per-file schema/components and inspector backed by domain validation. Typed date/time, numeric and reference forms replace raw storage-string input; usability regressions pass. |
 | 29. Timezone correctness | PASS | Noda Time exact resolution and real Berlin DST/Tokyo tests. |
 | 30. Flexible time | PASS | All six precision states, fixtures and materialization tests. Combined picker form preserves day-part timezone and unknown compatible time fields; overnight range validation is tested. |
-| 31. Timetable | PASS | Existing drop/move/resize tests plus empty-range drag-to-create, context Add/Delete, explicit zoom, calendar navigation and preserved scroll. Native CachyOS confirmation remains within platform gate 2. |
+| 31. Timetable | PASS | Rebuilt timetable: category colours and icons, side-by-side overlaps, all-day and stay strip, nested group frames, now line, drag to move, resize and create, Alt+arrow moves, preserved scroll. Real pointer tests in headless mode and native X11 click, drag-create and picker checks. Native GNOME/KDE confirmation of the new UI remains within platform gate 2. |
 | 32. Nested blocks | PASS | Core cycle checks and aggregate ranges, indented timetable children, parent/child inspector navigation and aggregate duration; nesting fixtures and domain tests. |
 | 33. Inheritance | PASS | Core bounded inheritance tests; inspector shows local/inherited provenance and reset for participants, tags, default place, display and category. |
 | 34. Constraints and warnings | PASS | Structured dependency, earliest-start and arrive-before constraints with offsets; overlap and cached travel-estimate warnings tested without blocking valid edits. |
 | 35. Participants in schedule | PASS | Shared-lane/overnight tests pass. Assignment uses explicit available/assigned lists, Save/Cancel and one undoable selection update; actual form regression passes. |
 | 36. Transport | PASS | Transport enums, endpoints, stops and structured fields in schema/editor. |
 | 37. Accommodation | PASS | Structured accommodation place, zoned check-in/out, guests, rooms, booking and documents; schema validation and application editing tests. |
-| 38. Inbox | PASS | Normal schedule/note/document entities populate the collapsible pinned Inbox; note materialization and canonical drag/drop tested; keyboard scheduling offered. |
+| 38. Inbox | PASS | Unscheduled schedule items and unlinked notes/documents in a collapsible, pinnable panel with quick capture and filters; drag onto the timetable materializes canonical time; keyboard scheduling available. |
 | 39. Bookings | PASS | Booking entity, travelers/items/documents/price editor and smoke test. |
 | 40. Tasks | PASS | Independent task schema/editor and smoke test. |
 | 41. Comments | PASS | Comment target/author/time/body/mentions editors, related-comment rendering and branch-specific entities; accommodation/comment integration test. |
 | 42. Documents and rich content | PASS | Repeated Markdown/image/PDF/link/reference content, CommonMark and inline image rendering, content edit/remove and external document opening; coherent Markdown/resource undo tests. |
 | 43. Content-addressed assets | PASS | SHA-256 assets, metadata separation and duplicate/large-file tests. |
-| 44. Files view | PASS | Document list, metadata/content FTS, related entity links, reference/duplicate counts, image preview, replacement and external-open controls; document resource/search tests. |
+| 44. Files view | PASS | File tiles with image previews, type, size and usage count; content search; related entities; replacement, external opening, cover selection; files dropped on the window are imported as content-addressed documents. |
 | 45. Expenses | PASS | Decimal-string money, multi-currency schema and expense editor. |
 | 46. Historical conversion | PASS | Conversion context schema; no automatic current-rate rewriting. |
 | 48. Collections | PASS | Collection references and editor. |
-| 49. Map | PASS | Offline local coordinate/route map with shared entity selection; no API key. |
-| 50. Command palette | PASS | Ctrl+K command/search surface, navigation, variants, creation commands. |
-| 51. Quick Add | PASS | Quick-add paths for all required common types. |
+| 49. Map | PASS | Web Mercator map from trip coordinates with category markers, transport routes and shared selection; fully offline by default. OpenStreetMap tiles and Nominatim address search are opt-in, cached, rate-limited and attributed; no API key. |
+| 50. Command palette | PASS | Ctrl+K palette with live search over trip content (FTS), navigation and commands, grouped results and keyboard navigation. |
+| 51. Quick Add | PASS | One Quick Add sheet for activity, food, sight, transport, stay, booking, task, note, place, person, expense, budget and collection; transport modes as chips; places created by name; one undoable edit. Tests build schema-valid entities for every type. |
 | 52. Search | PASS | Rebuildable SQLite FTS index for canonical fields and Markdown. |
 | 53. GitHub authentication | PASS | Real GitHub App device authorization approved on 2026-09-30; token persisted through Jourfold OsSecretStore and reused by fresh instances. No client secret or App private key used. |
 | 54. GitHub discovery | PASS | Live granted-installation manifest discovery and Jourfold discovery command selected, cloned and opened private OWNER/jourfold-smoke with scripted dialog choices. |
@@ -66,11 +68,11 @@ Both repositories were built after deleting their source/test/sample bin and obj
 | 56. GitHub privacy warning | PASS | Live provider distinguishes public/private visibility; ordinary client open shows warning for a configured public GitHub remote. No push to the public repository was performed. |
 | 57. GitHub collaborators | BLOCKED | Invitation endpoint and UI are implemented and HTTP-tested. User chose to proceed without a collaborator for initial testing; no live invitation has been sent. |
 | 58. Share behavior | PASS | Context-specific publish/invite/share/variant actions and explicit access guidance; credential-free ShareLink round-trip and rejection tests; protocol registration in packaging. |
-| 59. Export | PASS | PDF, UTF-8 folded ICS and print HTML; automated export smoke. |
+| 59. Export | PASS | TravelRepo `TripItinerary` drives a day-by-day PDF (Jourfold) and print HTML (TravelRepo) with localized labels; ICS uses resolved spans for every precision with location and status. Export tests pass; PDF output inspected. |
 | 60. Plugins | PASS | Versioned public contracts, trusted separate-process JSON-RPC host, declarative native controls, unknown-data retention and packaged example; real process contract test. |
 | 61. Provider extensibility | PASS | Capability interfaces and reusable GitHub implementation. |
 | 62. Advanced Mode | PASS | Advanced diagnostics include path, refs, all remotes, raw Git status, schema/custom-component data and provider/plugin diagnostics; ordinary flows stay in normal mode. |
-| 63. Localization | PASS | EN/DE resources and parity pass. Switching language now refreshes the derived sharing label; human language names and new forms are localized. |
+| 63. Localization | PASS | English and German complete for the redesigned interface; parity test passes; German layout captured and long labels checked. |
 | 64. Units and locale | PASS | SI distance conversion and locale tests; display settings are local. |
 | 65. Accessibility | BLOCKED | Keyboard shortcuts, inspector focus, automation names, logical controls, scaling/high contrast and non-color state implemented/tested. Full OS screen-reader and keyboard-only native audit remains unverified. |
 | 66. Multiple windows | PASS | Window registry and filesystem write ownership; ownership test. |
@@ -80,7 +82,7 @@ Both repositories were built after deleting their source/test/sample bin and obj
 | 70. MCP / agent readiness | PASS | Public repository/Git/merge commands and queries; no AI runtime. |
 | 71. Security and secrets | BLOCKED | GNOME credential persistence and live authenticated transport passed; App token and Basic encoding absent from inspected canonical files, Git configs and validation logs. Windows Credential Manager verification remains pending. |
 | 72. Large files | PASS | 25 MB pre-import confirmation and tests. |
-| 73. Testing | PASS | 37 TravelRepo and 41 Jourfold tests pass after the usability revision. Clean builds, real Git copy tests, typed-form/headless pointer/keyboard regressions and Ubuntu GNOME activation observations are recorded. |
+| 73. Testing | PASS | 54 TravelRepo and 45 Jourfold tests pass after the interface rebuild, including itinerary/export, change summaries, sync status, YAML writer round trips, Quick Add validity, real pointer selection and drag tests. `dotnet format --verify-no-changes` passes in both repositories. |
 | 74. End-to-end release smoke tests | PASS | Local 21-step smoke and headless gestures pass. Live GitHub authentication, discovery, private creation/publish and privacy checks passed; collaborator invitation is separately pending in section 57. |
 | 75. CI | BLOCKED | Windows/Linux workflows are prepared. GitHub CLI is authenticated; private source-repository creation/push approval and hosted CI execution remain pending. Windows installer compilation/native checks remain pending. |
 | 76. Samples and conformance fixtures | PASS | All required named sample categories and conformance tests. |
