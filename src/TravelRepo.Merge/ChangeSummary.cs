@@ -72,6 +72,18 @@ public sealed record ChangeSummary(IReadOnlyList<EntityChange> Entities, IReadOn
 
     private static int Order(string type) => type switch
     {
-        "trip" => 0, "schedule_item" => 1, "booking" => 2, "place" => 3, "person" => 4, "task" => 5, "expense" => 6, "budget" => 7, "document" => 8, "note" => 9, "comment" => 10, "collection" => 11, _ => 12
+        "trip" => 0,
+        "schedule_item" => 1,
+        "booking" => 2,
+        "place" => 3,
+        "person" => 4,
+        "task" => 5,
+        "expense" => 6,
+        "budget" => 7,
+        "document" => 8,
+        "note" => 9,
+        "comment" => 10,
+        "collection" => 11,
+        _ => 12
     };
 }
