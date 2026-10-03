@@ -26,6 +26,8 @@ public sealed class GitHubProvider(HttpClient http, ISecretStore secrets, string
         if (!response.IsSuccessStatusCode) throw new DomainException("github.http." + (int)response.StatusCode, "GitHub request failed. Check authorization and repository permissions.");
         var text = await response.Content.ReadAsStringAsync(ct); return string.IsNullOrWhiteSpace(text) ? new JsonObject() : JsonNode.Parse(text)!;
     }
+    /// <summary>Whether a user token is stored. Does not contact GitHub.</summary>
+    public async Task<bool> IsConnectedAsync(CancellationToken ct = default) => await secrets.ReadAsync(TokenKey, ct) is not null;
     public async Task<DeviceAuthorization> BeginAsync(CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(clientId)) throw new DomainException("github.setup", "A GitHub App client ID must be configured. See provider setup documentation.");
