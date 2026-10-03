@@ -570,6 +570,8 @@ A conflict detection system may warn when the same participant is expected in in
 
 Clients must not automatically block such plans unless the repository would become technically invalid.
 
+An item with an `accommodation` component describes a stay that runs alongside other plans. Overlap with a stay is not a schedule conflict.
+
 ## 21. Travel gaps
 
 Clients may derive expected travel gaps between schedule items.

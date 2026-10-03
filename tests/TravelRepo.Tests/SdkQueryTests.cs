@@ -186,4 +186,16 @@ public sealed class SdkQueryTests : IDisposable
         var status = await git.SyncStatusAsync("origin");
         Assert.Equal((1, 0), (status.Ahead, status.Behind)); Assert.Equal(SyncState.LocalChanges, status.State);
     }
+
+    [Fact]
+    public void StaysDoNotProduceOverlapWarnings()
+    {
+        var alex = Entity.Create("person", "Alex"); JsonObject With() => new() { ["inherit"] = false, ["values"] = new JsonArray(alex.Id.ToString()) };
+        var stay = Item("Hotel", Exact("2027-05-14T15:00:00", "2027-05-16T11:00:00")); stay.Data["components"]!["accommodation"] = new JsonObject(); stay.Data["participants"] = With();
+        var dinner = Item("Dinner", Exact("2027-05-14T19:00:00", "2027-05-14T21:00:00")); dinner.Data["participants"] = With();
+        var bar = Item("Bar", Exact("2027-05-14T20:00:00", "2027-05-14T22:00:00")); bar.Data["participants"] = With();
+        var warnings = SemanticValidation.Validate(Trip(alex, stay, dinner, bar)).Where(d => d.Code == "plan.overlap").ToArray();
+        Assert.Single(warnings);
+        Assert.DoesNotContain(warnings, w => w.Path == stay.Id.ToString());
+    }
 }
