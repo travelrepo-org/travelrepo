@@ -188,9 +188,10 @@ public static class TripSummaries
     /// <summary>Distinct place names in schedule order, for library cards and overviews.</summary>
     public static IReadOnlyList<string> PlaceNames(TripSnapshot trip, int max = 3)
     {
-        var ordered = trip.Entities.Values.Where(e => e.Type == "schedule_item")
-            .Select(e => (Item: e, Span: ScheduleQueries.Span(trip, e))).OrderBy(x => x.Span.Start ?? Instant.MaxValue)
-            .Select(x => ScheduleQueries.PrimaryPlace(trip, x.Item)).OfType<Entity>()
+        // Stays and activity places describe a trip better than airports and stations, which come last.
+        var items = trip.Entities.Values.Where(e => e.Type == "schedule_item").Select(e => (Item: e, Span: ScheduleQueries.Span(trip, e))).OrderBy(x => x.Span.Start ?? Instant.MaxValue).ToArray();
+        var ordered = items.Where(x => x.Item.Data["components"]?["transport"] is null).Select(x => ScheduleQueries.PrimaryPlace(trip, x.Item)).OfType<Entity>()
+            .Concat(items.Select(x => ScheduleQueries.PrimaryPlace(trip, x.Item)).OfType<Entity>())
             .Concat(trip.Entities.Values.Where(e => e.Type == "place").OrderBy(e => e.Title, StringComparer.CurrentCulture));
         return ordered.Select(p => p.Title).Where(t => t.Length > 0).Distinct(StringComparer.CurrentCultureIgnoreCase).Take(max).ToArray();
     }

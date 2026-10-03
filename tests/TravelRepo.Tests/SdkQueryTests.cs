@@ -119,7 +119,7 @@ public sealed class SdkQueryTests : IDisposable
         var stay = Item("Stay", Exact("2027-05-14T15:00:00", "2027-05-15T10:00:00")); stay.Data["components"]!["accommodation"] = new JsonObject { ["place"] = hotel.Id.ToString() };
         Entity Expense(string value, string currency, bool estimated, string type = "expense") { var e = Entity.Create(type, "Cost"); e.Data["amount"] = new JsonObject { ["value"] = value, ["currency"] = currency }; if (type == "expense") e.Data["estimated"] = estimated; return e; }
         var trip = Trip(alex, station, hotel, train, stay, Expense("100.50", "EUR", false), Expense("20", "EUR", true), Expense("12000", "JPY", false), Expense("500", "EUR", false, "budget"));
-        Assert.Equal(["Kyoto Station", "Ryokan"], TripSummaries.PlaceNames(trip));
+        Assert.Equal(["Ryokan", "Kyoto Station"], TripSummaries.PlaceNames(trip));
         Assert.Equal("Alex", Assert.Single(ScheduleQueries.Participants(trip, train)).Title);
         Assert.Equal(hotel.Id, ScheduleQueries.PrimaryPlace(trip, stay)!.Id);
         var eur = TripSummaries.Costs(trip).Single(c => c.Currency == "EUR");
