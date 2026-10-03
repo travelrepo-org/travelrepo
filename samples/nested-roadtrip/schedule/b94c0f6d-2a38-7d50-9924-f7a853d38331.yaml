@@ -1,0 +1,14 @@
+{
+  "id": "b94c0f6d-2a38-7d50-9924-f7a853d38331",
+  "type": "schedule_item",
+  "title": "Coastal stop",
+  "extensions": {},
+  "status": "idea",
+  "time": null,
+  "children": [],
+  "participants": {
+    "inherit": true,
+    "values": []
+  },
+  "components": {}
+}

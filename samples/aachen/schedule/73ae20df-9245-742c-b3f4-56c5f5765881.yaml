@@ -1,0 +1,27 @@
+{
+  "id": "73ae20df-9245-742c-b3f4-56c5f5765881",
+  "type": "schedule_item",
+  "title": "Explore Aachen weekend",
+  "extensions": {},
+  "status": "planned",
+  "time": {
+    "precision": "exact",
+    "start": {
+      "local": "2027-05-12T13:20:00",
+      "timezone": "Europe/Berlin"
+    },
+    "end": {
+      "local": "2027-05-12T15:00:00",
+      "timezone": "Europe/Berlin"
+    }
+  },
+  "participants": {
+    "inherit": false,
+    "values": [
+      "f678cffe-8c4f-70c6-9a82-1236aadd31de",
+      "20b06242-4dd7-7dde-b81b-65385587ea7b"
+    ]
+  },
+  "components": {},
+  "children": []
+}

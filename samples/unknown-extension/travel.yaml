@@ -1,0 +1,23 @@
+{
+  "schema": {
+    "name": "TravelRepo",
+    "version": "1.0"
+  },
+  "id": "9bcd0988-60ca-7e77-a35c-4b10fa1228c2",
+  "title": "Custom provider data",
+  "language": "en",
+  "default_timezone": "Europe/Berlin",
+  "participants": [
+    "fd57c3c3-e9c7-7a32-899c-892c01da0c11",
+    "5d09c373-da16-7695-b9db-e9db829b5704"
+  ],
+  "variant": {
+    "id": "9d03e2d6-d1ad-7b6a-92a6-62578f2bb6b3",
+    "title": "Current Plan",
+    "role": "primary",
+    "state": "active",
+    "parent": null,
+    "created_at": "2027-01-01T00:00:00Z"
+  },
+  "extensions": {}
+}

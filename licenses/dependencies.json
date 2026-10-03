@@ -1,0 +1,78 @@
+{
+  "Humanizer.Core/2.14.1": {
+    "license": "MIT",
+    "project": "https://github.com/Humanizr/Humanizer"
+  },
+  "Json.More.Net/2.1.1": {
+    "license": "MIT",
+    "project": "https://github.com/json-everything/json-everything"
+  },
+  "JsonPointer.Net/5.3.1": {
+    "license": "MIT",
+    "project": "https://github.com/json-everything/json-everything"
+  },
+  "JsonSchema.Net/7.3.4": {
+    "license": "MIT",
+    "project": "https://github.com/json-everything/json-everything"
+  },
+  "Microsoft.CodeCoverage/17.14.1": {
+    "license": "MIT",
+    "project": "https://github.com/microsoft/vstest"
+  },
+  "Microsoft.NET.Test.Sdk/17.14.1": {
+    "license": "MIT",
+    "project": "https://github.com/microsoft/vstest"
+  },
+  "Microsoft.TestPlatform.ObjectModel/17.14.1": {
+    "license": "MIT",
+    "project": "https://github.com/microsoft/vstest"
+  },
+  "Microsoft.TestPlatform.TestHost/17.14.1": {
+    "license": "MIT",
+    "project": "https://github.com/microsoft/vstest"
+  },
+  "Newtonsoft.Json/13.0.3": {
+    "license": "MIT",
+    "project": "https://www.newtonsoft.com/json"
+  },
+  "NodaTime/3.2.2": {
+    "license": "Apache-2.0",
+    "project": "https://nodatime.org/"
+  },
+  "YamlDotNet/16.3.0": {
+    "license": "MIT",
+    "project": "https://github.com/aaubry/YamlDotNet/wiki"
+  },
+  "xunit.abstractions/2.0.3": {
+    "license": "https://raw.githubusercontent.com/xunit/xunit/master/license.txt",
+    "project": "https://github.com/xunit/xunit"
+  },
+  "xunit.analyzers/1.18.0": {
+    "license": "Apache-2.0",
+    "project": null
+  },
+  "xunit.assert/2.9.3": {
+    "license": "Apache-2.0",
+    "project": null
+  },
+  "xunit.core/2.9.3": {
+    "license": "Apache-2.0",
+    "project": null
+  },
+  "xunit.extensibility.core/2.9.3": {
+    "license": "Apache-2.0",
+    "project": null
+  },
+  "xunit.extensibility.execution/2.9.3": {
+    "license": "Apache-2.0",
+    "project": null
+  },
+  "xunit.runner.visualstudio/3.1.5": {
+    "license": "Apache-2.0",
+    "project": null
+  },
+  "xunit/2.9.3": {
+    "license": "Apache-2.0",
+    "project": null
+  }
+}

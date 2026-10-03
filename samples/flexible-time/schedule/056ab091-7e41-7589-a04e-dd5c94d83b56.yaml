@@ -1,0 +1,13 @@
+{
+  "id": "056ab091-7e41-7589-a04e-dd5c94d83b56",
+  "type": "schedule_item",
+  "title": "all_day",
+  "extensions": {},
+  "status": "idea",
+  "components": {},
+  "children": [],
+  "time": {
+    "precision": "all_day",
+    "date": "2027-05-13"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "id": "669afb3f-38b4-7df8-9f47-910f4e1b17d5",
+  "type": "schedule_item",
+  "title": "Flight to Tokyo",
+  "extensions": {},
+  "status": "planned",
+  "time": {
+    "precision": "exact",
+    "start": {
+      "local": "2027-05-12T13:20:00",
+      "timezone": "Europe/Berlin"
+    },
+    "end": {
+      "local": "2027-05-13T08:35:00",
+      "timezone": "Asia/Tokyo"
+    }
+  },
+  "participants": {
+    "inherit": false,
+    "values": [
+      "c3416734-e021-7185-91a7-0d5e9bf6aa7c",
+      "c20217c5-c564-7e91-8fc0-4f5dc957a80d"
+    ]
+  },
+  "components": {
+    "transport": {
+      "type": "flight",
+      "carrier": "ANA",
+      "flight_number": "NH204",
+      "arrival": {
+        "place": "7fe11023-66fc-78e9-8370-5951e8eb1044"
+      }
+    }
+  },
+  "children": []
+}

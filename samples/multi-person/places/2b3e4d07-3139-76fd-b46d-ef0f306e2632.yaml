@@ -1,0 +1,11 @@
+{
+  "id": "2b3e4d07-3139-76fd-b46d-ef0f306e2632",
+  "type": "place",
+  "name": "Shared plans",
+  "extensions": {},
+  "timezone": "Europe/Berlin",
+  "location": {
+    "latitude": -41.2865,
+    "longitude": 174.7762
+  }
+}

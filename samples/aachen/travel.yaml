@@ -1,0 +1,23 @@
+{
+  "schema": {
+    "name": "TravelRepo",
+    "version": "1.0"
+  },
+  "id": "14baf6ed-c4f6-71f6-b95a-cb49aa2b67b4",
+  "title": "Aachen weekend",
+  "language": "en",
+  "default_timezone": "Europe/Berlin",
+  "participants": [
+    "f678cffe-8c4f-70c6-9a82-1236aadd31de",
+    "20b06242-4dd7-7dde-b81b-65385587ea7b"
+  ],
+  "variant": {
+    "id": "b1331713-426a-7b25-b514-de07486f6902",
+    "title": "Current Plan",
+    "role": "primary",
+    "state": "active",
+    "parent": null,
+    "created_at": "2027-01-01T00:00:00Z"
+  },
+  "extensions": {}
+}

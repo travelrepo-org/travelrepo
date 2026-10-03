@@ -1,0 +1,11 @@
+{
+  "id": "f10df9b0-d718-70e7-94f3-7e73dbafe312",
+  "type": "place",
+  "name": "New Zealand",
+  "extensions": {},
+  "timezone": "Pacific/Auckland",
+  "location": {
+    "latitude": -41.2865,
+    "longitude": 174.7762
+  }
+}

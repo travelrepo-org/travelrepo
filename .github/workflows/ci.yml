@@ -1,0 +1,30 @@
+name: TravelRepo CI
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  verify:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: dotnet restore --locked-mode
+      - run: dotnet build TravelRepo.sln -c Release --no-restore
+      - run: dotnet format TravelRepo.sln --verify-no-changes --no-restore
+      - run: dotnet test TravelRepo.sln -c Release --no-build --logger trx
+      - run: python eng/verify.py
+      - run: dotnet pack TravelRepo.sln -c Release --no-build -o artifacts/packages
+      - uses: actions/upload-artifact@v4
+        with:
+          name: travelrepo-${{ matrix.os }}
+          path: artifacts/

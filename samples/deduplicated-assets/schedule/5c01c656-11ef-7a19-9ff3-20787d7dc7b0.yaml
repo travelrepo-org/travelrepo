@@ -1,0 +1,27 @@
+{
+  "id": "5c01c656-11ef-7a19-9ff3-20787d7dc7b0",
+  "type": "schedule_item",
+  "title": "Explore Shared documents",
+  "extensions": {},
+  "status": "planned",
+  "time": {
+    "precision": "exact",
+    "start": {
+      "local": "2027-05-12T13:20:00",
+      "timezone": "Etc/UTC"
+    },
+    "end": {
+      "local": "2027-05-12T15:00:00",
+      "timezone": "Etc/UTC"
+    }
+  },
+  "participants": {
+    "inherit": false,
+    "values": [
+      "db54a584-4516-7221-b3bb-4b05ac060a60",
+      "dc5947a2-633a-765e-8c3a-e22929a20558"
+    ]
+  },
+  "components": {},
+  "children": []
+}

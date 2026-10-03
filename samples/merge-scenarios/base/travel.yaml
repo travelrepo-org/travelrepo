@@ -1,0 +1,17 @@
+{
+  "schema": {
+    "name": "TravelRepo",
+    "version": "1.0"
+  },
+  "id": "d7adbb90-2e8c-708f-9291-19acd0f41b29",
+  "title": "Merge scenarios",
+  "language": "en",
+  "variant": {
+    "id": "e12d1c85-3046-74ff-bf06-03ed222d3461",
+    "title": "Current Plan",
+    "role": "primary",
+    "state": "active",
+    "created_at": "2027-01-01T00:00:00Z"
+  },
+  "extensions": {}
+}

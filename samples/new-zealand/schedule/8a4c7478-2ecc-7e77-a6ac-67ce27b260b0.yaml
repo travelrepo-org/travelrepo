@@ -1,0 +1,38 @@
+{
+  "id": "8a4c7478-2ecc-7e77-a6ac-67ce27b260b0",
+  "type": "schedule_item",
+  "title": "Explore New Zealand",
+  "extensions": {},
+  "status": "planned",
+  "time": {
+    "precision": "exact",
+    "start": {
+      "local": "2027-05-12T13:20:00",
+      "timezone": "Pacific/Auckland"
+    },
+    "end": {
+      "local": "2027-05-12T15:00:00",
+      "timezone": "Pacific/Auckland"
+    }
+  },
+  "participants": {
+    "inherit": false,
+    "values": [
+      "1ce010af-472e-7262-820e-c76834174911",
+      "612d0364-1bdb-71bf-b528-e7f2be1c3043"
+    ]
+  },
+  "components": {
+    "transport": {
+      "type": "car",
+      "stops": [
+        {
+          "place": "f10df9b0-d718-70e7-94f3-7e73dbafe312"
+        }
+      ]
+    }
+  },
+  "children": [
+    "3a7c6a01-ac86-7ba9-b17c-7d407932d8c3"
+  ]
+}

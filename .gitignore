@@ -1,0 +1,42 @@
+# .NET
+bin/
+obj/
+artifacts/
+TestResults/
+*.user
+*.suo
+
+# IDEs
+.vs/
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs and local diagnostics
+*.log
+logs/
+
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+secrets/
+*.pfx
+*.p12
+
+# Coverage
+coverage/
+coverage.*
+*.coverage
+*.coveragexml
+
+# NuGet
+*.nupkg
+*.snupkg
+
+# Packaging output
+dist/
+packages-out/

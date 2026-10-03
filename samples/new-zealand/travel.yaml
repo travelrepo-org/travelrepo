@@ -1,0 +1,23 @@
+{
+  "schema": {
+    "name": "TravelRepo",
+    "version": "1.0"
+  },
+  "id": "80fbe310-51ec-7d93-90c8-0739a6742e42",
+  "title": "New Zealand",
+  "language": "en",
+  "default_timezone": "Pacific/Auckland",
+  "participants": [
+    "1ce010af-472e-7262-820e-c76834174911",
+    "612d0364-1bdb-71bf-b528-e7f2be1c3043"
+  ],
+  "variant": {
+    "id": "8275f45a-a8f5-78e1-ac4f-483ba4a55fff",
+    "title": "Current Plan",
+    "role": "primary",
+    "state": "active",
+    "parent": null,
+    "created_at": "2027-01-01T00:00:00Z"
+  },
+  "extensions": {}
+}

@@ -1,0 +1,40 @@
+{
+  "id": "7fa49237-59d7-7d37-9c00-6f5f82812497",
+  "type": "schedule_item",
+  "title": "Explore Custom provider data",
+  "extensions": {
+    "org.example.future": {
+      "nested": [
+        1,
+        false,
+        {
+          "preserve": "001.20"
+        }
+      ]
+    }
+  },
+  "status": "planned",
+  "time": {
+    "precision": "exact",
+    "start": {
+      "local": "2027-05-12T13:20:00",
+      "timezone": "Europe/Berlin"
+    },
+    "end": {
+      "local": "2027-05-12T15:00:00",
+      "timezone": "Europe/Berlin"
+    }
+  },
+  "participants": {
+    "inherit": false,
+    "values": [
+      "fd57c3c3-e9c7-7a32-899c-892c01da0c11",
+      "5d09c373-da16-7695-b9db-e9db829b5704"
+    ]
+  },
+  "components": {},
+  "children": [],
+  "unknown_core": {
+    "retain": true
+  }
+}

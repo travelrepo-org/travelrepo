@@ -1,0 +1,38 @@
+{
+  "id": "3255049b-ac4d-719d-89c0-aaf3c080394a",
+  "type": "schedule_item",
+  "title": "Explore Nested roadtrip",
+  "extensions": {},
+  "status": "planned",
+  "time": {
+    "precision": "exact",
+    "start": {
+      "local": "2027-05-12T13:20:00",
+      "timezone": "Pacific/Auckland"
+    },
+    "end": {
+      "local": "2027-05-12T15:00:00",
+      "timezone": "Pacific/Auckland"
+    }
+  },
+  "participants": {
+    "inherit": false,
+    "values": [
+      "2e626095-ddb2-717b-8399-acb05d25ee9a",
+      "4f5787b8-f844-73df-9088-e516e7f5f41b"
+    ]
+  },
+  "components": {
+    "transport": {
+      "type": "car",
+      "stops": [
+        {
+          "place": "a11c389c-b379-7589-928d-625e07a6c9c4"
+        }
+      ]
+    }
+  },
+  "children": [
+    "b94c0f6d-2a38-7d50-9924-f7a853d38331"
+  ]
+}

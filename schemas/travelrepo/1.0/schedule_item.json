@@ -1,0 +1,543 @@
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+    },
+    "type": {
+      "const": "schedule_item"
+    },
+    "extensions": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": true
+    },
+    "title": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "idea",
+        "planned",
+        "reserved",
+        "confirmed",
+        "completed",
+        "cancelled"
+      ]
+    },
+    "time": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "precision": {
+              "enum": [
+                "exact",
+                "approximate",
+                "window",
+                "day_part",
+                "all_day"
+              ]
+            },
+            "start": {
+              "type": "object",
+              "properties": {
+                "local": {
+                  "type": "string",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?$"
+                },
+                "timezone": {
+                  "type": "string"
+                },
+                "offset": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "local",
+                "timezone"
+              ],
+              "additionalProperties": true
+            },
+            "end": {
+              "type": "object",
+              "properties": {
+                "local": {
+                  "type": "string",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?$"
+                },
+                "timezone": {
+                  "type": "string"
+                },
+                "offset": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "local",
+                "timezone"
+              ],
+              "additionalProperties": true
+            },
+            "earliest": {
+              "type": "object",
+              "properties": {
+                "local": {
+                  "type": "string",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?$"
+                },
+                "timezone": {
+                  "type": "string"
+                },
+                "offset": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "local",
+                "timezone"
+              ],
+              "additionalProperties": true
+            },
+            "latest": {
+              "type": "object",
+              "properties": {
+                "local": {
+                  "type": "string",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?$"
+                },
+                "timezone": {
+                  "type": "string"
+                },
+                "offset": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "local",
+                "timezone"
+              ],
+              "additionalProperties": true
+            },
+            "date": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "day_part": {
+              "enum": [
+                "morning",
+                "afternoon",
+                "evening",
+                "night"
+              ]
+            },
+            "timezone": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "precision"
+          ],
+          "additionalProperties": true,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "precision": {
+                    "const": "exact"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "start"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "precision": {
+                    "const": "approximate"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "start"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "precision": {
+                    "const": "window"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "earliest",
+                  "latest"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "precision": {
+                    "const": "all_day"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "date"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "precision": {
+                    "const": "day_part"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "date",
+                  "day_part",
+                  "timezone"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "participants": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "inherit": {
+              "type": "boolean"
+            },
+            "values": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+              }
+            }
+          },
+          "required": [
+            "inherit",
+            "values"
+          ],
+          "additionalProperties": true
+        }
+      ]
+    },
+    "components": {
+      "type": "object",
+      "properties": {
+        "transport": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "enum": [
+                "flight",
+                "train",
+                "bus",
+                "car",
+                "taxi",
+                "rideshare",
+                "ferry",
+                "ship",
+                "bicycle",
+                "walking",
+                "other"
+              ]
+            },
+            "carrier": {
+              "type": "string"
+            },
+            "operator": {
+              "type": "string"
+            },
+            "departure": {
+              "type": "object",
+              "properties": {
+                "place": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                },
+                "terminal": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "gate": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "platform": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": true
+            },
+            "arrival": {
+              "type": "object",
+              "properties": {
+                "place": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                },
+                "terminal": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "gate": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "platform": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": true
+            },
+            "stops": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "place": {
+                    "type": "string",
+                    "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                  },
+                  "terminal": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "gate": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "platform": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": true
+              }
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": true
+        },
+        "booking": {
+          "type": "object",
+          "properties": {
+            "ref": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+            }
+          },
+          "additionalProperties": true
+        },
+        "accommodation": {
+          "type": "object",
+          "properties": {
+            "place": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+            },
+            "guests": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+              }
+            },
+            "booking": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+            },
+            "documents": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+              }
+            },
+            "check_in": {
+              "type": "object",
+              "properties": {
+                "local": {
+                  "type": "string",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?$"
+                },
+                "timezone": {
+                  "type": "string"
+                },
+                "offset": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "local",
+                "timezone"
+              ],
+              "additionalProperties": true
+            },
+            "check_out": {
+              "type": "object",
+              "properties": {
+                "local": {
+                  "type": "string",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?$"
+                },
+                "timezone": {
+                  "type": "string"
+                },
+                "offset": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "local",
+                "timezone"
+              ],
+              "additionalProperties": true
+            },
+            "rooms": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "required": [],
+      "additionalProperties": true
+    },
+    "children": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+      }
+    },
+    "content": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "document": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+          },
+          "entity": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "constraints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "additionalProperties": true
+      }
+    }
+  },
+  "required": [
+    "id",
+    "type",
+    "title",
+    "status"
+  ],
+  "additionalProperties": true,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://travelrepo.org/schema/1.0/schedule_item.json"
+}
