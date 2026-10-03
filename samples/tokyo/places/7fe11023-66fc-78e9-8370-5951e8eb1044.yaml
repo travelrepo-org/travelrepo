@@ -1,11 +1,8 @@
-{
-  "id": "7fe11023-66fc-78e9-8370-5951e8eb1044",
-  "type": "place",
-  "name": "Tokyo",
-  "extensions": {},
-  "timezone": "Asia/Tokyo",
-  "location": {
-    "latitude": 35.6812,
-    "longitude": 139.7671
-  }
-}
+id: 7fe11023-66fc-78e9-8370-5951e8eb1044
+type: place
+name: Tokyo
+extensions: {}
+timezone: Asia/Tokyo
+location:
+  latitude: 35.6812
+  longitude: 139.7671

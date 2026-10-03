@@ -1,11 +1,8 @@
-{
-  "id": "9985a1f1-5932-7f2b-bca5-3175da923284",
-  "type": "place",
-  "name": "Aachen weekend",
-  "extensions": {},
-  "timezone": "Europe/Berlin",
-  "location": {
-    "latitude": 50.7753,
-    "longitude": 6.0839
-  }
-}
+id: 9985a1f1-5932-7f2b-bca5-3175da923284
+type: place
+name: Aachen weekend
+extensions: {}
+timezone: Europe/Berlin
+location:
+  latitude: 50.7753
+  longitude: 6.0839

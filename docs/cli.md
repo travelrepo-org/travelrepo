@@ -16,6 +16,7 @@ Commands:
 - `diff PATH REVISION`: semantic changes from the specified Git version to the working tree.
 - `repair PATH`: inspect diagnostics and show the recovery journal location.
 - `repair PATH --apply`: recover interrupted transactions if their files still match recorded before/after images. Unknown corruption is reported without guessing or deleting data.
+- `format [PATH]`: rewrite canonical files in the reference YAML style. Data and IDs are unchanged.
 - `version PATH MESSAGE`: create a real Git version with machine-readable trailers.
 - `export PATH OUTPUT.ics`: timezone-correct calendar export.
 - `export PATH OUTPUT.html`: print-friendly HTML.

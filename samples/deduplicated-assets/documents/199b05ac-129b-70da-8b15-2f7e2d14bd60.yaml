@@ -1,11 +1,8 @@
-{
-  "id": "199b05ac-129b-70da-8b15-2f7e2d14bd60",
-  "type": "document",
-  "name": "shared-reservation.pdf",
-  "extensions": {},
-  "media_type": "application/pdf",
-  "blob": {
-    "algorithm": "sha256",
-    "hash": "c3b0f0017a4dd7ab73a3a560d4815f07eb0ed23e5b6eaf2723595803eb4a8661"
-  }
-}
+id: 199b05ac-129b-70da-8b15-2f7e2d14bd60
+type: document
+name: shared-reservation.pdf
+extensions: {}
+media_type: application/pdf
+blob:
+  algorithm: sha256
+  hash: c3b0f0017a4dd7ab73a3a560d4815f07eb0ed23e5b6eaf2723595803eb4a8661

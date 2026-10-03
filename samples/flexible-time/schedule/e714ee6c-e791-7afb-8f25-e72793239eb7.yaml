@@ -1,27 +1,20 @@
-{
-  "id": "e714ee6c-e791-7afb-8f25-e72793239eb7",
-  "type": "schedule_item",
-  "title": "Explore Flexible plans",
-  "extensions": {},
-  "status": "planned",
-  "time": {
-    "precision": "exact",
-    "start": {
-      "local": "2027-05-12T13:20:00",
-      "timezone": "Europe/Berlin"
-    },
-    "end": {
-      "local": "2027-05-12T15:00:00",
-      "timezone": "Europe/Berlin"
-    }
-  },
-  "participants": {
-    "inherit": false,
-    "values": [
-      "c9b95a9a-6cfa-76f8-9d7c-08af01fbb9fa",
-      "bb2f01e5-1e63-7aba-aa5a-c85bcd573dfc"
-    ]
-  },
-  "components": {},
-  "children": []
-}
+id: e714ee6c-e791-7afb-8f25-e72793239eb7
+type: schedule_item
+title: Explore Flexible plans
+extensions: {}
+status: planned
+time:
+  precision: exact
+  start:
+    local: "2027-05-12T13:20:00"
+    timezone: Europe/Berlin
+  end:
+    local: "2027-05-12T15:00:00"
+    timezone: Europe/Berlin
+participants:
+  inherit: false
+  values:
+  - c9b95a9a-6cfa-76f8-9d7c-08af01fbb9fa
+  - bb2f01e5-1e63-7aba-aa5a-c85bcd573dfc
+components: {}
+children: []

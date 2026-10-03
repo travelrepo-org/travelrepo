@@ -1,11 +1,8 @@
-{
-  "id": "a11c389c-b379-7589-928d-625e07a6c9c4",
-  "type": "place",
-  "name": "Nested roadtrip",
-  "extensions": {},
-  "timezone": "Pacific/Auckland",
-  "location": {
-    "latitude": -41.2865,
-    "longitude": 174.7762
-  }
-}
+id: a11c389c-b379-7589-928d-625e07a6c9c4
+type: place
+name: Nested roadtrip
+extensions: {}
+timezone: Pacific/Auckland
+location:
+  latitude: -41.2865
+  longitude: 174.7762

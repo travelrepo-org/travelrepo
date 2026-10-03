@@ -65,6 +65,11 @@ public sealed class GitCliBackend(string? executable = null, ICredentialBroker? 
 public sealed record Variant(string Branch, string Commit, Entity Manifest, bool IsRemote = false);
 public sealed record VersionEntry(string Commit, string Parents, string Author, string Email, string Timestamp, string Message, bool ApplicationGenerated, string Committer = "", string CommitterEmail = "", string Refs = "");
 public enum SyncState { LocalOnly, Synced, LocalChanges, Diverged, RemoteChanges }
+/// <summary>Local view of synchronization state, computed from the last fetch without network access.</summary>
+public sealed record SyncStatus(string Branch, string? Remote, bool HasLocalChanges, bool RemoteBranchExists, int Ahead, int Behind)
+{
+    public SyncState State => Remote is null ? SyncState.LocalOnly : HasLocalChanges ? SyncState.LocalChanges : Ahead > 0 && Behind > 0 ? SyncState.Diverged : Behind > 0 ? SyncState.RemoteChanges : Ahead > 0 || !RemoteBranchExists ? SyncState.LocalChanges : SyncState.Synced;
+}
 
 /// <summary>Git-backed versions, variants and safe synchronization. Mutations are serialized per service instance.</summary>
 public sealed partial class GitRepository(TravelRepository repository, IGitBackend backend)
@@ -102,6 +107,17 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
     public Task<string> StatusAsync(CancellationToken ct = default) => Run(ct, "status", "--porcelain=v1", "-z");
     public Task<string> CurrentBranchAsync(CancellationToken ct = default) => Run(ct, "symbolic-ref", "--short", "HEAD");
     public Task<string> HeadAsync(CancellationToken ct = default) => Run(ct, "rev-parse", "HEAD");
+    /// <summary>Compare the current branch with its remote-tracking ref from the last fetch. Never contacts the remote.</summary>
+    public async Task<SyncStatus> SyncStatusAsync(string? remote, CancellationToken ct = default)
+    {
+        var branch = await CurrentBranchAsync(ct); var dirty = !string.IsNullOrEmpty(await StatusAsync(ct));
+        if (remote is null) return new(branch, null, dirty, false, 0, 0);
+        var target = "refs/remotes/" + remote + "/" + branch;
+        var exists = await backend.ExecuteAsync(Repository.Root, ["rev-parse", "--verify", "--quiet", target], cancellationToken: ct);
+        if (exists.ExitCode != 0) return new(branch, remote, dirty, false, 0, 0);
+        var counts = (await Run(ct, "rev-list", "--left-right", "--count", "HEAD..." + target)).Split('\t', ' ');
+        return new(branch, remote, dirty, true, int.Parse(counts[0], System.Globalization.CultureInfo.InvariantCulture), int.Parse(counts[^1], System.Globalization.CultureInfo.InvariantCulture));
+    }
     private async Task<string> CreateVersionCoreAsync(string message, string action = "user-version", CancellationToken ct = default)
     {
         {

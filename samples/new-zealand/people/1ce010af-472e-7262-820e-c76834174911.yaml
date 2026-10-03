@@ -1,6 +1,4 @@
-{
-  "id": "1ce010af-472e-7262-820e-c76834174911",
-  "type": "person",
-  "display_name": "Alex",
-  "extensions": {}
-}
+id: 1ce010af-472e-7262-820e-c76834174911
+type: person
+display_name: Alex
+extensions: {}

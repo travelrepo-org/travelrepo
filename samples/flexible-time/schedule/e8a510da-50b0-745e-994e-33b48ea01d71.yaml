@@ -1,20 +1,15 @@
-{
-  "id": "e8a510da-50b0-745e-994e-33b48ea01d71",
-  "type": "schedule_item",
-  "title": "window",
-  "extensions": {},
-  "status": "idea",
-  "components": {},
-  "children": [],
-  "time": {
-    "precision": "window",
-    "earliest": {
-      "local": "2027-05-13T14:00:00",
-      "timezone": "Europe/Berlin"
-    },
-    "latest": {
-      "local": "2027-05-13T18:00:00",
-      "timezone": "Europe/Berlin"
-    }
-  }
-}
+id: e8a510da-50b0-745e-994e-33b48ea01d71
+type: schedule_item
+title: window
+extensions: {}
+status: idea
+components: {}
+children: []
+time:
+  precision: window
+  earliest:
+    local: "2027-05-13T14:00:00"
+    timezone: Europe/Berlin
+  latest:
+    local: "2027-05-13T18:00:00"
+    timezone: Europe/Berlin

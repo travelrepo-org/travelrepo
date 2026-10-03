@@ -1,11 +1,8 @@
-{
-  "id": "1ff79a12-4dc2-766b-b30c-e6b8575d1b2e",
-  "type": "document",
-  "name": "reservation.pdf",
-  "extensions": {},
-  "media_type": "application/pdf",
-  "blob": {
-    "algorithm": "sha256",
-    "hash": "c3b0f0017a4dd7ab73a3a560d4815f07eb0ed23e5b6eaf2723595803eb4a8661"
-  }
-}
+id: 1ff79a12-4dc2-766b-b30c-e6b8575d1b2e
+type: document
+name: reservation.pdf
+extensions: {}
+media_type: application/pdf
+blob:
+  algorithm: sha256
+  hash: c3b0f0017a4dd7ab73a3a560d4815f07eb0ed23e5b6eaf2723595803eb4a8661
