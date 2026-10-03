@@ -198,23 +198,52 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
         if (ancestor.ExitCode == 0) { await PushCoreAsync(remote, ct); return SyncState.Synced; }
         return SyncState.Diverged;
     }
+    /// <summary>Read a committed version. All blobs are read through one <c>git cat-file --batch</c> process.</summary>
     public async Task<TripSnapshot> SnapshotAsync(string revision, CancellationToken ct = default)
     {
         var commit = await Run(ct, "rev-parse", "--verify", revision + "^{commit}");
-        var paths = (await Run(ct, "ls-tree", "-r", "--name-only", "-z", commit)).Split('\0', StringSplitOptions.RemoveEmptyEntries); var entities = new Dictionary<Guid, Entity>(); Entity? manifest = null;
-        foreach (var path in paths.Where(p => p.EndsWith(".yaml", StringComparison.Ordinal)))
+        var listing = await backend.ExecuteAsync(Repository.Root, ["ls-tree", "-r", "-z", commit], cancellationToken: ct);
+        if (listing.ExitCode != 0) throw new DomainException("git.failed", "Git ls-tree failed. Check repository state.");
+        var entries = new List<(string Blob, string Path)>();
+        foreach (var row in listing.Output.Split('\0', StringSplitOptions.RemoveEmptyEntries))
         {
-            var e = YamlCodec.Read(await Run(ct, "show", commit + ":" + path)); if (SchemaValidation.Validate(e).Count > 0) throw new DomainException("snapshot.invalid", "A version contains invalid data.");
-            if (path == "travel.yaml") manifest = e; else entities.Add(e.Id, e);
+            var tab = row.IndexOf('\t'); if (tab < 0) continue;
+            var meta = row[..tab].Split(' '); if (meta.Length < 3 || meta[1] != "blob") continue;
+            var path = row[(tab + 1)..];
+            if (path.EndsWith(".yaml", StringComparison.Ordinal) || path.StartsWith("documents/", StringComparison.Ordinal) || path.StartsWith("assets/", StringComparison.Ordinal)) entries.Add((meta[2], path));
         }
-        var resources = new Dictionary<string, byte[]>();
-        foreach (var path in paths.Where(p => !p.EndsWith(".yaml", StringComparison.Ordinal) && (p.StartsWith("documents/", StringComparison.Ordinal) || p.StartsWith("assets/", StringComparison.Ordinal))))
+        var blobs = await ReadBlobsAsync(entries.Select(e => e.Blob).Distinct().ToArray(), ct);
+        var entities = new Dictionary<Guid, Entity>(); Entity? manifest = null; var resources = new Dictionary<string, byte[]>();
+        foreach (var (blob, path) in entries)
         {
-            var r = await backend.ExecuteAsync(Repository.Root, ["show", commit + ":" + path], cancellationToken: ct);
-            if (r.ExitCode != 0 || r.Bytes is null) throw new DomainException("snapshot.resource", "Cannot read a versioned resource.");
-            resources[path] = r.Bytes;
+            var bytes = blobs[blob];
+            if (path.EndsWith(".yaml", StringComparison.Ordinal))
+            {
+                if (path != "travel.yaml" && !TravelRepository.Folders.Values.Append(".travelrepo").Any(f => path.StartsWith(f + "/", StringComparison.Ordinal))) continue;
+                var e = YamlCodec.Read(System.Text.Encoding.UTF8.GetString(bytes)); if (SchemaValidation.Validate(e).Count > 0) throw new DomainException("snapshot.invalid", "A version contains invalid data.");
+                if (path == "travel.yaml") manifest = e; else entities.Add(e.Id, e);
+            }
+            else resources[path] = bytes;
         }
         return new(manifest ?? throw new DomainException("manifest.missing", "Version is not a TravelRepo."), entities) { Resources = resources };
+    }
+
+    private async Task<Dictionary<string, byte[]>> ReadBlobsAsync(IReadOnlyList<string> ids, CancellationToken ct)
+    {
+        var result = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        if (ids.Count == 0) return result;
+        var output = await backend.ExecuteAsync(Repository.Root, ["cat-file", "--batch"], string.Join('\n', ids) + "\n", ct);
+        if (output.ExitCode != 0 || output.Bytes is not { } data) throw new DomainException("snapshot.resource", "Cannot read versioned content.");
+        var position = 0;
+        foreach (var id in ids)
+        {
+            var newline = Array.IndexOf(data, (byte)'\n', position); if (newline < 0) throw new DomainException("snapshot.resource", "Cannot read versioned content.");
+            var header = System.Text.Encoding.ASCII.GetString(data, position, newline - position).Split(' ');
+            if (header.Length != 3 || header[0] != id) throw new DomainException("snapshot.resource", "Cannot read versioned content.");
+            var size = int.Parse(header[2], System.Globalization.CultureInfo.InvariantCulture);
+            result[id] = data.AsSpan(newline + 1, size).ToArray(); position = newline + 1 + size + 1;
+        }
+        return result;
     }
     public Task<string> MergeBaseAsync(string other, CancellationToken ct = default) => Run(ct, "merge-base", "HEAD", other);
     public async Task<IReadOnlyList<VersionEntry>> HistoryAsync(CancellationToken ct = default)
