@@ -198,4 +198,25 @@ public sealed class SdkQueryTests : IDisposable
         Assert.Single(warnings);
         Assert.DoesNotContain(warnings, w => w.Path == stay.Id.ToString());
     }
+
+    [Fact]
+    public void ItineraryAndExportsReadLikeAPlan()
+    {
+        var alex = Entity.Create("person", "Alex <script>"); var station = Entity.Create("place", "Kyoto Station"); station.Data["address"] = new JsonObject { ["formatted"] = "Shimogyo, Kyoto" };
+        var train = Item("Train", Exact("2027-05-14T09:00:00", "2027-05-14T11:00:00")); train.Data["components"]!["transport"] = new JsonObject { ["type"] = "train", ["carrier"] = "JR", ["arrival"] = new JsonObject { ["place"] = station.Id.ToString() } };
+        train.Data["participants"] = new JsonObject { ["inherit"] = false, ["values"] = new JsonArray(alex.Id.ToString()) }; train.Data["status"] = "confirmed";
+        var walk = Item("Evening walk", new JsonObject { ["precision"] = "day_part", ["date"] = "2027-05-15", ["day_part"] = "evening", ["timezone"] = "Asia/Tokyo" }); walk.Data["default_place"] = station.Id.ToString();
+        var idea = Item("Onsen");
+        var manifest = Entity.CreateTrip("Kyoto", "en", "Asia/Tokyo"); manifest.Data["dates"] = new JsonObject { ["start"] = "2027-05-14", ["end"] = "2027-05-16" };
+        var trip = new TripSnapshot(manifest, new[] { alex, station, train, walk, idea }.ToDictionary(e => e.Id));
+        var it = TripItinerary.Build(trip, culture: System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Equal([1, 2], it.Days.Select(d => d.Number));
+        Assert.Equal("09:00–11:00", it.Days[0].Entries[0].Time); Assert.Equal("Kyoto Station · JR", it.Days[0].Entries[0].Where);
+        Assert.Equal("Evening", it.Days[1].Entries[0].Time); Assert.Equal("Onsen", Assert.Single(it.Unscheduled).Item.Title);
+        var html = TripExport.Html(trip, culture: System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Contains("Day 1", html); Assert.Contains("Not scheduled yet", html); Assert.DoesNotContain("<script>", html); Assert.Contains("Alex &lt;script&gt;", html);
+        var ics = TripExport.Ics(trip);
+        Assert.Contains("LOCATION:Kyoto Station\\, Shimogyo\\, Kyoto", ics.Replace("\r\n ", ""));
+        Assert.Contains("DTSTART:20270515T080000Z", ics); Assert.Contains("STATUS:CONFIRMED", ics); Assert.DoesNotContain("Onsen", ics);
+    }
 }
