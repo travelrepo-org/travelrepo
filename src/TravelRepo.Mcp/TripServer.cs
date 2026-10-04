@@ -58,7 +58,7 @@ public static class TripServer
     }
 
     private static string Instructions(TripServerOptions options) =>
-        "These tools work on one travel plan (a TravelRepo trip)" + (options.ClientName is { Length: > 0 } client ? " that the user also has open in " + client : "") + ". "
+        "These tools work on one travel plan (a TravelRepo trip)" + (options.ClientName is { Length: > 0 } client ? " that the user plans in " + client : "") + ". "
         + "Call read_guide once before your first change; it explains entities, times and the rules for editing. "
         + "Start with get_trip and get_schedule to see what exists. "
         + (options.ReadOnly
