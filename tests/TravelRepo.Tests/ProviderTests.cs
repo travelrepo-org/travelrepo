@@ -16,6 +16,30 @@ public class ProviderTests
     private sealed class Handler(Func<HttpRequestMessage, Task<HttpResponseMessage>> action) : HttpMessageHandler
     { protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => action(request); }
     private static HttpResponseMessage Json(object value) => new(HttpStatusCode.OK) { Content = JsonContent.Create(value) };
+    private sealed class MemorySecrets : ISecretStore
+    {
+        public Dictionary<string, string> Values { get; } = [];
+        public Task<string?> ReadAsync(string key, CancellationToken ct = default) => Task.FromResult(Values.GetValueOrDefault(key));
+        public Task WriteAsync(string key, string value, CancellationToken ct = default) { Values[key] = value; return Task.CompletedTask; }
+        public Task DeleteAsync(string key, CancellationToken ct = default) { Values.Remove(key); return Task.CompletedTask; }
+    }
+    [Fact]
+    public async Task AccountShowsTheSignedInUserAndSignOutForgetsTheToken()
+    {
+        var secrets = new MemorySecrets(); var status = HttpStatusCode.OK;
+        var provider = new GitHubProvider(new HttpClient(new Handler(r =>
+        {
+            Assert.Equal("/user", r.RequestUri!.AbsolutePath); Assert.StartsWith("TravelRepo/" + TravelRepoInfo.Version, r.Headers.UserAgent.ToString());
+            return Task.FromResult(status == HttpStatusCode.OK ? Json(new { login = "alex", name = "Alex Example", avatar_url = "https://avatars.githubusercontent.com/u/1", html_url = "https://github.com/alex" }) : new HttpResponseMessage(status));
+        })), secrets, "test-client");
+        Assert.Null(await provider.AccountAsync());
+        secrets.Values["github.user-token"] = "token";
+        var account = await provider.AccountAsync();
+        Assert.Equal(new ProviderAccount("alex", "Alex Example", new Uri("https://avatars.githubusercontent.com/u/1"), new Uri("https://github.com/alex")), account);
+        status = HttpStatusCode.Unauthorized; Assert.Null(await provider.AccountAsync());
+        status = HttpStatusCode.InternalServerError; await Assert.ThrowsAsync<DomainException>(() => provider.AccountAsync());
+        await provider.SignOutAsync(); Assert.False(await provider.IsConnectedAsync()); Assert.Empty(secrets.Values);
+    }
     [Fact]
     public async Task PublishingDefaultsPrivateAndPrivacyIsExposed()
     {
