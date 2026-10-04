@@ -1,0 +1,81 @@
+name: Release
+# Runs when a maintainer publishes a GitHub release. The release tag must be v + <Version> from
+# Directory.Build.props. The workflow builds and tests the tagged commit and attaches the NuGet packages
+# to the release. If anything fails, the release goes back to draft so nobody uses it; fix the problem
+# and publish it again.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag of a published release to check and build again, for example v0.2.0
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.event.release.tag_name || inputs.tag }}
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - run: python3 eng/version.py --check-tag "$TAG" --github
+  verify:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: dotnet restore --locked-mode
+      - run: dotnet build TravelRepo.sln -c Release --no-restore
+      - run: dotnet test TravelRepo.sln -c Release --no-build
+      - run: python eng/verify.py
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - run: dotnet restore --locked-mode
+      - run: dotnet pack TravelRepo.sln -c Release --no-restore -o artifacts/packages
+      - name: Attach packages to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" artifacts/packages/*.nupkg --clobber --repo "$GITHUB_REPOSITORY"
+  return-to-draft:
+    needs: [version, verify, publish]
+    if: failure() && github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Turn the release back into a draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "$TAG" --draft=true --repo "$GITHUB_REPOSITORY"
+          echo "::error::The release $TAG failed its checks and is a draft again. See the failed job above, fix it, then publish the release again."

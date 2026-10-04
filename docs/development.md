@@ -18,7 +18,7 @@ Canonical YAML is converted into a safe JSON-compatible tree, validated against 
 
 ## Versions
 
-`Directory.Build.props` holds the only copy of the SDK version (`Version`) and the public `RepositoryUrl`. Every assembly and package takes both from there. Release tags are `v` followed by that version. The trip format version is separate: `TravelRepoInfo.FormatVersion` must match the schema directory under `schemas/travelrepo/`.
+`Directory.Build.props` holds the only copy of the SDK version (`Version`) and the public `RepositoryUrl`. Every assembly and package takes both from there. To release, set `Version` on `main`, then publish a GitHub release with the tag `v<Version>`. The release workflow (`.github/workflows/release.yml`) checks the tag against `Version` (`python3 eng/version.py --check-tag v1.2.3`), builds and tests on Linux and Windows, and attaches the NuGet packages to the release. If anything fails, it turns the release back into a draft. The trip format version is separate: `TravelRepoInfo.FormatVersion` must match the schema directory under `schemas/travelrepo/`.
 
 ## Public API
 
