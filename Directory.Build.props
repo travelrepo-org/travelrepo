@@ -10,7 +10,7 @@
     <Version>0.1.0</Version>
     <Authors>TravelRepo contributors</Authors>
     <!-- Public source repository, shown by clients such as Jourfold and used as NuGet package metadata. -->
-    <RepositoryUrl></RepositoryUrl>
+    <RepositoryUrl>https://github.com/travelrepo-org/travelrepo</RepositoryUrl>
     <PackageProjectUrl>$(RepositoryUrl)</PackageProjectUrl>
   </PropertyGroup>
   <ItemGroup>
