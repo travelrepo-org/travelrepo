@@ -1,8 +1,8 @@
 name: Release
-# Runs when a maintainer publishes a GitHub release. The release tag must be v + <Version> from
-# Directory.Build.props. The workflow builds and tests the tagged commit and attaches the NuGet packages
-# to the release. If anything fails, the release goes back to draft so nobody uses it; fix the problem
-# and publish it again.
+# Runs when a maintainer publishes a GitHub release, preferably as a pre-release. The release tag must be
+# v + <Version> from Directory.Build.props. The workflow builds and tests the tagged commit, attaches the NuGet
+# packages and then turns a pre-release with a plain version tag into a full release. If anything fails, the
+# release goes back to draft so nobody uses it; fix the problem and publish it again.
 on:
   release:
     types: [published]
@@ -66,6 +66,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$TAG" artifacts/packages/*.nupkg --clobber --repo "$GITHUB_REPOSITORY"
+      - name: Turn the pre-release into a full release
+        # Publish as a pre-release; once everything is attached, a tag without a suffix (v1.2.3) becomes a full,
+        # latest release. Tags with a suffix (v1.2.3-beta.1) stay pre-releases.
+        if: github.event_name == 'release' && github.event.release.prerelease && !contains(env.TAG, '-')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$TAG" --prerelease=false --latest --repo "$GITHUB_REPOSITORY"
   return-to-draft:
     needs: [version, verify, publish]
     if: failure() && github.event_name == 'release'
