@@ -1,16 +1,12 @@
-{
-  "id": "7ce45310-f72b-7b23-92aa-e0dfa320b192",
-  "type": "schedule_item",
-  "title": "approximate",
-  "extensions": {},
-  "status": "idea",
-  "components": {},
-  "children": [],
-  "time": {
-    "precision": "approximate",
-    "start": {
-      "local": "2027-05-13T13:00:00",
-      "timezone": "Europe/Berlin"
-    }
-  }
-}
+id: 7ce45310-f72b-7b23-92aa-e0dfa320b192
+type: schedule_item
+title: approximate
+extensions: {}
+status: idea
+components: {}
+children: []
+time:
+  precision: approximate
+  start:
+    local: "2027-05-13T13:00:00"
+    timezone: Europe/Berlin

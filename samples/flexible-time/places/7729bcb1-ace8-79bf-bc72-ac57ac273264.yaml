@@ -1,11 +1,8 @@
-{
-  "id": "7729bcb1-ace8-79bf-bc72-ac57ac273264",
-  "type": "place",
-  "name": "Flexible plans",
-  "extensions": {},
-  "timezone": "Europe/Berlin",
-  "location": {
-    "latitude": -41.2865,
-    "longitude": 174.7762
-  }
-}
+id: 7729bcb1-ace8-79bf-bc72-ac57ac273264
+type: place
+name: Flexible plans
+extensions: {}
+timezone: Europe/Berlin
+location:
+  latitude: -41.2865
+  longitude: 174.7762

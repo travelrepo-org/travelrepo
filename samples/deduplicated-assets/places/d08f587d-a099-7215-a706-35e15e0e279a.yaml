@@ -1,11 +1,8 @@
-{
-  "id": "d08f587d-a099-7215-a706-35e15e0e279a",
-  "type": "place",
-  "name": "Shared documents",
-  "extensions": {},
-  "timezone": "Etc/UTC",
-  "location": {
-    "latitude": -41.2865,
-    "longitude": 174.7762
-  }
-}
+id: d08f587d-a099-7215-a706-35e15e0e279a
+type: place
+name: Shared documents
+extensions: {}
+timezone: Etc/UTC
+location:
+  latitude: -41.2865
+  longitude: 174.7762

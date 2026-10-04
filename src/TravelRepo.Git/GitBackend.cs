@@ -65,6 +65,11 @@ public sealed class GitCliBackend(string? executable = null, ICredentialBroker? 
 public sealed record Variant(string Branch, string Commit, Entity Manifest, bool IsRemote = false);
 public sealed record VersionEntry(string Commit, string Parents, string Author, string Email, string Timestamp, string Message, bool ApplicationGenerated, string Committer = "", string CommitterEmail = "", string Refs = "");
 public enum SyncState { LocalOnly, Synced, LocalChanges, Diverged, RemoteChanges }
+/// <summary>Local view of synchronization state, computed from the last fetch without network access.</summary>
+public sealed record SyncStatus(string Branch, string? Remote, bool HasLocalChanges, bool RemoteBranchExists, int Ahead, int Behind)
+{
+    public SyncState State => Remote is null ? SyncState.LocalOnly : HasLocalChanges ? SyncState.LocalChanges : Ahead > 0 && Behind > 0 ? SyncState.Diverged : Behind > 0 ? SyncState.RemoteChanges : Ahead > 0 || !RemoteBranchExists ? SyncState.LocalChanges : SyncState.Synced;
+}
 
 /// <summary>Git-backed versions, variants and safe synchronization. Mutations are serialized per service instance.</summary>
 public sealed partial class GitRepository(TravelRepository repository, IGitBackend backend)
@@ -102,6 +107,17 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
     public Task<string> StatusAsync(CancellationToken ct = default) => Run(ct, "status", "--porcelain=v1", "-z");
     public Task<string> CurrentBranchAsync(CancellationToken ct = default) => Run(ct, "symbolic-ref", "--short", "HEAD");
     public Task<string> HeadAsync(CancellationToken ct = default) => Run(ct, "rev-parse", "HEAD");
+    /// <summary>Compare the current branch with its remote-tracking ref from the last fetch. Never contacts the remote.</summary>
+    public async Task<SyncStatus> SyncStatusAsync(string? remote, CancellationToken ct = default)
+    {
+        var branch = await CurrentBranchAsync(ct); var dirty = !string.IsNullOrEmpty(await StatusAsync(ct));
+        if (remote is null) return new(branch, null, dirty, false, 0, 0);
+        var target = "refs/remotes/" + remote + "/" + branch;
+        var exists = await backend.ExecuteAsync(Repository.Root, ["rev-parse", "--verify", "--quiet", target], cancellationToken: ct);
+        if (exists.ExitCode != 0) return new(branch, remote, dirty, false, 0, 0);
+        var counts = (await Run(ct, "rev-list", "--left-right", "--count", "HEAD..." + target)).Split('\t', ' ');
+        return new(branch, remote, dirty, true, int.Parse(counts[0], System.Globalization.CultureInfo.InvariantCulture), int.Parse(counts[^1], System.Globalization.CultureInfo.InvariantCulture));
+    }
     private async Task<string> CreateVersionCoreAsync(string message, string action = "user-version", CancellationToken ct = default)
     {
         {
@@ -182,23 +198,52 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
         if (ancestor.ExitCode == 0) { await PushCoreAsync(remote, ct); return SyncState.Synced; }
         return SyncState.Diverged;
     }
+    /// <summary>Read a committed version. All blobs are read through one <c>git cat-file --batch</c> process.</summary>
     public async Task<TripSnapshot> SnapshotAsync(string revision, CancellationToken ct = default)
     {
         var commit = await Run(ct, "rev-parse", "--verify", revision + "^{commit}");
-        var paths = (await Run(ct, "ls-tree", "-r", "--name-only", "-z", commit)).Split('\0', StringSplitOptions.RemoveEmptyEntries); var entities = new Dictionary<Guid, Entity>(); Entity? manifest = null;
-        foreach (var path in paths.Where(p => p.EndsWith(".yaml", StringComparison.Ordinal)))
+        var listing = await backend.ExecuteAsync(Repository.Root, ["ls-tree", "-r", "-z", commit], cancellationToken: ct);
+        if (listing.ExitCode != 0) throw new DomainException("git.failed", "Git ls-tree failed. Check repository state.");
+        var entries = new List<(string Blob, string Path)>();
+        foreach (var row in listing.Output.Split('\0', StringSplitOptions.RemoveEmptyEntries))
         {
-            var e = YamlCodec.Read(await Run(ct, "show", commit + ":" + path)); if (SchemaValidation.Validate(e).Count > 0) throw new DomainException("snapshot.invalid", "A version contains invalid data.");
-            if (path == "travel.yaml") manifest = e; else entities.Add(e.Id, e);
+            var tab = row.IndexOf('\t'); if (tab < 0) continue;
+            var meta = row[..tab].Split(' '); if (meta.Length < 3 || meta[1] != "blob") continue;
+            var path = row[(tab + 1)..];
+            if (path.EndsWith(".yaml", StringComparison.Ordinal) || path.StartsWith("documents/", StringComparison.Ordinal) || path.StartsWith("assets/", StringComparison.Ordinal)) entries.Add((meta[2], path));
         }
-        var resources = new Dictionary<string, byte[]>();
-        foreach (var path in paths.Where(p => !p.EndsWith(".yaml", StringComparison.Ordinal) && (p.StartsWith("documents/", StringComparison.Ordinal) || p.StartsWith("assets/", StringComparison.Ordinal))))
+        var blobs = await ReadBlobsAsync(entries.Select(e => e.Blob).Distinct().ToArray(), ct);
+        var entities = new Dictionary<Guid, Entity>(); Entity? manifest = null; var resources = new Dictionary<string, byte[]>();
+        foreach (var (blob, path) in entries)
         {
-            var r = await backend.ExecuteAsync(Repository.Root, ["show", commit + ":" + path], cancellationToken: ct);
-            if (r.ExitCode != 0 || r.Bytes is null) throw new DomainException("snapshot.resource", "Cannot read a versioned resource.");
-            resources[path] = r.Bytes;
+            var bytes = blobs[blob];
+            if (path.EndsWith(".yaml", StringComparison.Ordinal))
+            {
+                if (path != "travel.yaml" && !TravelRepository.Folders.Values.Append(".travelrepo").Any(f => path.StartsWith(f + "/", StringComparison.Ordinal))) continue;
+                var e = YamlCodec.Read(System.Text.Encoding.UTF8.GetString(bytes)); if (SchemaValidation.Validate(e).Count > 0) throw new DomainException("snapshot.invalid", "A version contains invalid data.");
+                if (path == "travel.yaml") manifest = e; else entities.Add(e.Id, e);
+            }
+            else resources[path] = bytes;
         }
         return new(manifest ?? throw new DomainException("manifest.missing", "Version is not a TravelRepo."), entities) { Resources = resources };
+    }
+
+    private async Task<Dictionary<string, byte[]>> ReadBlobsAsync(IReadOnlyList<string> ids, CancellationToken ct)
+    {
+        var result = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        if (ids.Count == 0) return result;
+        var output = await backend.ExecuteAsync(Repository.Root, ["cat-file", "--batch"], string.Join('\n', ids) + "\n", ct);
+        if (output.ExitCode != 0 || output.Bytes is not { } data) throw new DomainException("snapshot.resource", "Cannot read versioned content.");
+        var position = 0;
+        foreach (var id in ids)
+        {
+            var newline = Array.IndexOf(data, (byte)'\n', position); if (newline < 0) throw new DomainException("snapshot.resource", "Cannot read versioned content.");
+            var header = System.Text.Encoding.ASCII.GetString(data, position, newline - position).Split(' ');
+            if (header.Length != 3 || header[0] != id) throw new DomainException("snapshot.resource", "Cannot read versioned content.");
+            var size = int.Parse(header[2], System.Globalization.CultureInfo.InvariantCulture);
+            result[id] = data.AsSpan(newline + 1, size).ToArray(); position = newline + 1 + size + 1;
+        }
+        return result;
     }
     public Task<string> MergeBaseAsync(string other, CancellationToken ct = default) => Run(ct, "merge-base", "HEAD", other);
     public async Task<IReadOnlyList<VersionEntry>> HistoryAsync(CancellationToken ct = default)

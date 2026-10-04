@@ -1,15 +1,12 @@
-{
-  "id": "56b02e23-eb61-7660-a893-1b99cbeab51d",
-  "type": "schedule_item",
-  "title": "day_part",
-  "extensions": {},
-  "status": "idea",
-  "components": {},
-  "children": [],
-  "time": {
-    "precision": "day_part",
-    "date": "2027-05-13",
-    "day_part": "afternoon",
-    "timezone": "Europe/Berlin"
-  }
-}
+id: 56b02e23-eb61-7660-a893-1b99cbeab51d
+type: schedule_item
+title: day_part
+extensions: {}
+status: idea
+components: {}
+children: []
+time:
+  precision: day_part
+  date: "2027-05-13"
+  day_part: afternoon
+  timezone: Europe/Berlin

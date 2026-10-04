@@ -16,6 +16,10 @@ The CLI and libraries target `net10.0`. Consumers may reference NuGet packages i
 
 Canonical YAML is converted into a safe JSON-compatible tree, validated against embedded JSON Schema 2020-12, and then checked by `SemanticValidation`. YAML comments are non-semantic and are not preserved. Unknown fields, namespaces and compatible custom types are retained.
 
+## Versions
+
+`Directory.Build.props` holds the only copy of the SDK version (`Version`) and the public `RepositoryUrl`. Every assembly and package takes both from there. Release tags are `v` followed by that version. The trip format version is separate: `TravelRepoInfo.FormatVersion` must match the schema directory under `schemas/travelrepo/`.
+
 ## Public API
 
 ```csharp
@@ -35,6 +39,19 @@ Always submit a complete logical operation as one `ApplyAsync` call. It validate
 `ZonedTime` resolves exact local time through Noda Time. Ambiguous local times require `Offset`; nonexistent exact times are rejected. Money is represented as decimal strings.
 
 Use `SemanticMerge.Plan(base, current, incoming)` to obtain a merge plan. Unresolved plans cannot produce edits. Apply entity and resource edits together with `ApplyAsync`. A Git merge commit must record both parents after a successful merge.
+
+## Read-only queries for clients
+
+These helpers interpret canonical data the same way in every client. They never change the repository.
+
+- `ScheduleQueries.Span(trip, item)` resolves a display span for every time precision. Day parts use the recommended ranges from the specification; unscheduled parents are aggregated from their children (`Derived`). `IsUnscheduled`, `Participants`, `PrimaryPlace` and `Route` cover the other common questions.
+- `ScheduleCategories.Classify(trip, item)` returns a `ScheduleKind` from the transport or accommodation component, otherwise from the inheritable `category` and the standard vocabulary in `Standard`. `TransportTypes` and `Statuses` list the core values.
+- `TripSummaries` provides place names for overviews, per-currency cost totals (`Costs`) without conversion, Git email to person mapping and reverse references.
+- `ChangeSummary.Between(before, after)` turns a semantic diff into added, updated and removed entities with the changed top-level fields. Markdown changes are attributed to the entity that references the file.
+- `TripItinerary.Build(trip, labels, culture)` produces a day-by-day reading of the plan. `TripExport.Html` and `TripExport.Ics` use it; clients pass translated `ExportLabels`.
+- `GitRepository.SyncStatusAsync(remote)` compares the current branch with the last fetched remote-tracking ref without network access.
+- `TravelRepository.NormalizeAsync()` rewrites files in the reference YAML style; the CLI exposes it as `travelrepo format`.
+- `TravelRepoInfo` reports the SDK `Version`, the build's `InformationalVersion` (with the source commit), the written `FormatVersion`, the `License` and the `RepositoryUrl`, for about screens and bug reports.
 
 ## Future automation adapters
 

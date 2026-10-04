@@ -148,6 +148,12 @@
           "TravelRepo.Repository": "[0.1.0, )"
         }
       },
+      "travelrepo.plugins.abstractions": {
+        "type": "Project",
+        "dependencies": {
+          "TravelRepo.Core": "[0.1.0, )"
+        }
+      },
       "travelrepo.providers.abstractions": {
         "type": "Project",
         "dependencies": {

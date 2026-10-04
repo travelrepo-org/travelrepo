@@ -52,14 +52,20 @@ public static class YamlCodec
     {
         var stream = new YamlStream(new YamlDocument(ToYaml(entity.Data)));
         using var writer = new StringWriter(CultureInfo.InvariantCulture); stream.Save(writer, false);
-        return writer.ToString().Replace("\r\n", "\n", StringComparison.Ordinal);
+        var text = writer.ToString().Replace("\r\n", "\n", StringComparison.Ordinal);
+        // The explicit document end marker is noise in single-document files.
+        return text.EndsWith("\n...\n", StringComparison.Ordinal) ? text[..^4] : text;
     }
+    // Plain scalars are only used where every common YAML 1.1 and 1.2 parser reads the same string.
+    private static readonly System.Text.RegularExpressions.Regex PlainText = new(@"^\p{L}[\p{L}\p{M}\p{N} _\-./+()'&,]*$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    private static readonly HashSet<string> Reserved = new(StringComparer.OrdinalIgnoreCase) { "y", "n", "yes", "no", "true", "false", "on", "off", "null", "nan", "inf" };
+    internal static bool IsPlainSafe(string value) => value.Length is > 0 and <= 120 && !char.IsWhiteSpace(value[^1]) && !value.Contains("  ", StringComparison.Ordinal) && !Reserved.Contains(value) && (PlainText.IsMatch(value) || Guid.TryParseExact(value, "D", out _));
     private static YamlNode ToYaml(JsonNode? node)
     {
         if (node is JsonObject obj) return new YamlMappingNode(obj.Select(p => new KeyValuePair<YamlNode, YamlNode>(new YamlScalarNode(p.Key), ToYaml(p.Value))));
         if (node is JsonArray array) return new YamlSequenceNode(array.Select(ToYaml));
         if (node is null) return new YamlScalarNode("null") { Style = ScalarStyle.Plain };
-        if (node is JsonValue v && v.TryGetValue<string>(out var s)) return new YamlScalarNode(s) { Style = s.Contains('\n') ? ScalarStyle.Literal : ScalarStyle.DoubleQuoted };
+        if (node is JsonValue v && v.TryGetValue<string>(out var s)) return new YamlScalarNode(s) { Style = s.Contains('\n') ? ScalarStyle.Literal : IsPlainSafe(s) ? ScalarStyle.Plain : ScalarStyle.DoubleQuoted };
         return new YamlScalarNode(node.ToJsonString()) { Style = ScalarStyle.Plain };
     }
 }

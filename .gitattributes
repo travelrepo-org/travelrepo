@@ -1,0 +1,11 @@
+# Check out text files with LF on every platform, matching .editorconfig and dotnet format.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.woff2 binary
+*.pdf binary
+*.zip binary

@@ -1,20 +1,16 @@
-{
-  "schema": {
-    "name": "TravelRepo",
-    "version": "1.0"
-  },
-  "id": "2592a36c-7342-74ed-a8ef-00ca8ba5bd93",
-  "title": "Open trip",
-  "language": "en",
-  "default_timezone": "Etc/UTC",
-  "participants": [],
-  "variant": {
-    "id": "aa978006-a283-7710-80a1-d9b3c2e9d5e4",
-    "title": "Current Plan",
-    "role": "primary",
-    "state": "active",
-    "parent": null,
-    "created_at": "2027-01-01T00:00:00Z"
-  },
-  "extensions": {}
-}
+schema:
+  name: TravelRepo
+  version: "1.0"
+id: 2592a36c-7342-74ed-a8ef-00ca8ba5bd93
+title: Open trip
+language: en
+default_timezone: Etc/UTC
+participants: []
+variant:
+  id: aa978006-a283-7710-80a1-d9b3c2e9d5e4
+  title: Current Plan
+  role: primary
+  state: active
+  parent: null
+  created_at: "2027-01-01T00:00:00Z"
+extensions: {}

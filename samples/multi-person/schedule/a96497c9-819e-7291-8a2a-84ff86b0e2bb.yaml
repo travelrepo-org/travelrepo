@@ -1,27 +1,20 @@
-{
-  "id": "a96497c9-819e-7291-8a2a-84ff86b0e2bb",
-  "type": "schedule_item",
-  "title": "Explore Shared plans",
-  "extensions": {},
-  "status": "planned",
-  "time": {
-    "precision": "exact",
-    "start": {
-      "local": "2027-05-12T13:20:00",
-      "timezone": "Europe/Berlin"
-    },
-    "end": {
-      "local": "2027-05-12T15:00:00",
-      "timezone": "Europe/Berlin"
-    }
-  },
-  "participants": {
-    "inherit": false,
-    "values": [
-      "28e21c9d-d75e-73e3-ab41-c25fc68f85f8",
-      "e3d0fc0e-ba9e-7bfd-9ca7-caf8d499913b"
-    ]
-  },
-  "components": {},
-  "children": []
-}
+id: a96497c9-819e-7291-8a2a-84ff86b0e2bb
+type: schedule_item
+title: Explore Shared plans
+extensions: {}
+status: planned
+time:
+  precision: exact
+  start:
+    local: "2027-05-12T13:20:00"
+    timezone: Europe/Berlin
+  end:
+    local: "2027-05-12T15:00:00"
+    timezone: Europe/Berlin
+participants:
+  inherit: false
+  values:
+  - 28e21c9d-d75e-73e3-ab41-c25fc68f85f8
+  - e3d0fc0e-ba9e-7bfd-9ca7-caf8d499913b
+components: {}
+children: []

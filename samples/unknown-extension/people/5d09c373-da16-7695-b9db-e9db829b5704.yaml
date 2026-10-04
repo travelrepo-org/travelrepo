@@ -1,6 +1,4 @@
-{
-  "id": "5d09c373-da16-7695-b9db-e9db829b5704",
-  "type": "person",
-  "display_name": "Carla",
-  "extensions": {}
-}
+id: 5d09c373-da16-7695-b9db-e9db829b5704
+type: person
+display_name: Carla
+extensions: {}

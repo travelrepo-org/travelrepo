@@ -106,6 +106,8 @@ public static class SemanticValidation
                 {
                     bool Ancestor(Guid parent, Guid child) { while (parents.TryGetValue(child, out child)) if (child == parent) return true; return false; }
                     if (Ancestor(schedule[i].Id, schedule[j].Id) || Ancestor(schedule[j].Id, schedule[i].Id)) continue;
+                    // A stay runs in the background of everything else; being at a hotel never conflicts with an activity.
+                    if (schedule[i].Data["components"]?["accommodation"] is JsonObject || schedule[j].Data["components"]?["accommodation"] is JsonObject) continue;
                     var a = TripQueries.Range(trip, schedule[i]); var b = TripQueries.Range(trip, schedule[j]);
                     var p = TripQueries.Resolve(trip, schedule[i].Id, "participants").Value as JsonArray;
                     var q = TripQueries.Resolve(trip, schedule[j].Id, "participants").Value as JsonArray;

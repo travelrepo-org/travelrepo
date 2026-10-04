@@ -1,11 +1,8 @@
-{
-  "id": "a1707adf-1d7e-7119-b62c-a98ab35a33f7",
-  "type": "place",
-  "name": "Custom provider data",
-  "extensions": {},
-  "timezone": "Europe/Berlin",
-  "location": {
-    "latitude": -41.2865,
-    "longitude": 174.7762
-  }
-}
+id: a1707adf-1d7e-7119-b62c-a98ab35a33f7
+type: place
+name: Custom provider data
+extensions: {}
+timezone: Europe/Berlin
+location:
+  latitude: -41.2865
+  longitude: 174.7762

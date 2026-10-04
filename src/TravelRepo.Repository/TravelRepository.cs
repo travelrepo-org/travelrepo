@@ -24,7 +24,19 @@ public sealed partial class TravelRepository
     {
         Root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
         if (new DirectoryInfo(Root).LinkTarget is not null) throw new DomainException("path.symlink", "Open the actual repository directory, not a symbolic link.");
-        RecoveryRoot = recoveryRoot ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TravelRepo", "recovery", Hash(Encoding.UTF8.GetBytes(Root)));
+        RecoveryRoot = Path.GetFullPath(recoveryRoot ?? Path.Combine(DefaultStateRoot(), "TravelRepo", "recovery", Hash(Encoding.UTF8.GetBytes(Root))));
+    }
+    /// <summary>
+    /// Per-user state directory for recovery journals. It must be absolute; a relative fallback would scatter
+    /// journals into whatever directory the process happened to start in.
+    /// </summary>
+    public static string DefaultStateRoot()
+    {
+        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify);
+        if (Path.IsPathFullyQualified(local)) return local;
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify);
+        if (Path.IsPathFullyQualified(home)) return Path.Combine(home, ".local", "share");
+        throw new DomainException("recovery.location", "No per-user data directory is available for recovery journals. Set HOME or pass a recovery directory.");
     }
     public static string Hash(byte[] data) => Convert.ToHexStringLower(SHA256.HashData(data));
     public string SafePath(string relative)

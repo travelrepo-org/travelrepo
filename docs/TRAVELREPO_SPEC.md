@@ -269,6 +269,13 @@ Recommended constraints:
 
 Clients should minimize unrelated formatting churn to keep Git diffs readable.
 
+Reference writer style (TravelRepo 1.0 SDK):
+- block mappings and sequences, two-space indentation, no document markers,
+- plain scalars only for strings that every common YAML 1.1 and 1.2 parser reads identically (text starting with a letter, UUIDs); dates, times, numeric-looking text and reserved words such as `yes` or `null` are double-quoted,
+- literal block style for multi-line text.
+
+`travelrepo format PATH` rewrites an existing repository in this style without changing data.
+
 ## 9. Forward compatibility
 
 Unknown extension data must be preserved during read-write cycles.
@@ -487,6 +494,8 @@ Recommended standard day-part values:
 - evening
 - night
 
+Recommended display ranges, used when a client needs to place a day part on a timetable: morning 08:00 to 12:00, afternoon 12:00 to 17:00, evening 17:00 to 21:00, night 21:00 to midnight. These are presentation defaults, never stored data.
+
 ### 16.5 All day
 
 ```yaml
@@ -560,6 +569,8 @@ Items may involve:
 A conflict detection system may warn when the same participant is expected in incompatible places or overlapping activities.
 
 Clients must not automatically block such plans unless the repository would become technically invalid.
+
+An item with an `accommodation` component describes a stay that runs alongside other plans. Overlap with a stay is not a schedule conflict.
 
 ## 21. Travel gaps
 
@@ -636,6 +647,25 @@ Restaurants should normally be represented as:
 - optional booking,
 - optional expense,
 rather than requiring a dedicated top-level restaurant entity type.
+
+### 25.1 Standard categories
+
+The inheritable `category` field holds one string. Recommended values:
+
+- activity
+- sightseeing
+- food
+- culture
+- nature
+- shopping
+- nightlife
+- meeting
+- free_time
+- transport
+- accommodation
+- other
+
+Clients may use the category for icons, colors and grouping. A `transport` or `accommodation` component takes precedence over the category when classifying an item. Custom categories use reverse-domain names, for example `com.example.wine_tasting`, and are treated as `other` by clients that do not know them.
 
 ## 26. Status
 

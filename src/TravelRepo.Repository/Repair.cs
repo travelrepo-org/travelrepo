@@ -37,6 +37,29 @@ public sealed partial class TravelRepository
         }
         return result;
     }
+    /// <summary>
+    /// Rewrite every canonical entity file in the reference serialization style. Data is unchanged; only
+    /// formatting differs. Returns the number of rewritten files. Invalid repositories are left untouched.
+    /// </summary>
+    public async Task<int> NormalizeAsync(CancellationToken ct = default)
+    {
+        await gate.WaitAsync(ct);
+        try
+        {
+            Directory.CreateDirectory(RecoveryRoot); await using var ownership = new FileStream(Path.Combine(RecoveryRoot, "writer.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            var state = await ReadAsync(ct);
+            if (state.Diagnostics.Any(d => d.Severity == Severity.Error)) throw new DomainException("repository.invalid", "Repair the invalid repository before formatting it.");
+            var changes = new List<FileChange>();
+            foreach (var stored in state.Files.Values)
+            {
+                var bytes = Encoding.UTF8.GetBytes(YamlCodec.Write(stored.Entity));
+                if (Hash(bytes) != stored.Hash) changes.Add(new(stored.Path, bytes));
+            }
+            if (changes.Count > 0) await WriteTransactionAsync(changes, ct);
+            return changes.Count;
+        }
+        finally { gate.Release(); }
+    }
     public async Task<RepositoryState> ApplyRestoreAsync(RepairPlan reviewed, CancellationToken ct = default)
     {
         await gate.WaitAsync(ct);

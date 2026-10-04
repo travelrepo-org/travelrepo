@@ -9,7 +9,7 @@ try
 {
     if (args.Length == 0 || args[0] is "--help" or "help")
     {
-        Console.WriteLine("travelrepo validate [path]\ntravelrepo inspect [path]\ntravelrepo diff <path> <revision>\ntravelrepo repair <path> [--apply]\ntravelrepo export <path> <output.ics|output.html>\ntravelrepo init <path> <title>\ntravelrepo version <path> <message>"); return 0;
+        Console.WriteLine("travelrepo validate [path]\ntravelrepo inspect [path]\ntravelrepo diff <path> <revision>\ntravelrepo repair <path> [--apply]\ntravelrepo export <path> <output.ics|output.html>\ntravelrepo init <path> <title>\ntravelrepo format [path]\ntravelrepo version <path> <message>"); return 0;
     }
     var path = args.Length > 1 ? args[1] : "."; var repo = new TravelRepository(path);
     if (args[0] == "init") { await repo.InitializeAsync(Entity.CreateTrip(args.ElementAtOrDefault(2) ?? Path.GetFileName(Path.GetFullPath(path)))); await new GitRepository(repo, new GitCliBackend()).InitializeAsync("Traveler", "traveler@localhost"); return 0; }
@@ -23,6 +23,7 @@ try
         return 0;
     }
     if (args[0] == "repair" && args.Contains("--apply")) await repo.RecoverAsync();
+    if (args[0] == "format") { Console.WriteLine($"Formatted {await repo.NormalizeAsync()} file(s)."); return 0; }
     var state = await repo.ReadAsync();
     switch (args[0])
     {
