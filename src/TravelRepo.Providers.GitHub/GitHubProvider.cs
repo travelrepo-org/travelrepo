@@ -9,13 +9,13 @@ using TravelRepo.Serialization;
 namespace TravelRepo.Providers.GitHub;
 
 /// <summary>GitHub App device authorization and capability-based hosting integration.</summary>
-public sealed class GitHubProvider(HttpClient http, ISecretStore secrets, string clientId) : IProviderAuthentication, IRepositoryDiscoveryProvider, IRepositoryCreationProvider, IRepositoryPrivacyProvider, ICollaboratorProvider, IUserSearchProvider, IShareProvider
+public sealed class GitHubProvider(HttpClient http, ISecretStore secrets, string clientId) : IProviderAuthentication, IProviderAccount, IRepositoryDiscoveryProvider, IRepositoryCreationProvider, IRepositoryPrivacyProvider, ICollaboratorProvider, IUserSearchProvider, IShareProvider
 {
     private const string TokenKey = "github.user-token";
     private async Task<JsonNode> Send(HttpMethod method, string uri, object? body = null, bool authenticated = true, CancellationToken ct = default)
     {
         using var request = new HttpRequestMessage(method, uri.StartsWith("https://", StringComparison.Ordinal) ? uri : "https://api.github.com/" + uri);
-        request.Headers.UserAgent.ParseAdd("TravelRepo/0.1.0"); request.Headers.Accept.ParseAdd("application/json"); request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
+        request.Headers.UserAgent.ParseAdd("TravelRepo/" + TravelRepoInfo.Version); request.Headers.Accept.ParseAdd("application/json"); request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
         if (authenticated)
         {
             var token = await secrets.ReadAsync(TokenKey, ct) ?? throw new DomainException("github.authentication", "Connect GitHub first.");
@@ -28,6 +28,17 @@ public sealed class GitHubProvider(HttpClient http, ISecretStore secrets, string
     }
     /// <summary>Whether a user token is stored. Does not contact GitHub.</summary>
     public async Task<bool> IsConnectedAsync(CancellationToken ct = default) => await secrets.ReadAsync(TokenKey, ct) is not null;
+    public async Task<ProviderAccount?> AccountAsync(CancellationToken ct = default)
+    {
+        if (!await IsConnectedAsync(ct)) return null;
+        JsonNode user;
+        try { user = await Send(HttpMethod.Get, "user", ct: ct); }
+        catch (DomainException ex) when (ex.Code == "github.http.401") { return null; }
+        static Uri? Link(JsonNode? value) => Uri.TryCreate(value?.ToString(), UriKind.Absolute, out var uri) && uri.Scheme == "https" ? uri : null;
+        var name = user["name"]?.ToString();
+        return new(user["login"]!.ToString(), string.IsNullOrWhiteSpace(name) ? null : name, Link(user["avatar_url"]), Link(user["html_url"]));
+    }
+    public Task SignOutAsync(CancellationToken ct = default) => secrets.DeleteAsync(TokenKey, ct);
     public async Task<DeviceAuthorization> BeginAsync(CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(clientId)) throw new DomainException("github.setup", "A GitHub App client ID must be configured. See provider setup documentation.");
