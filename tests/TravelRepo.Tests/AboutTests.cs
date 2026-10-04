@@ -6,7 +6,7 @@ namespace TravelRepo.Tests;
 public sealed class AboutTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "travelrepo-plugin-" + Guid.NewGuid());
-    public void Dispose() { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    public void Dispose() => TestFiles.Delete(root);
 
     [Fact]
     public void SdkReportsItsVersionAndFormat()

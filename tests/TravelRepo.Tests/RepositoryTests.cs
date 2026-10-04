@@ -7,7 +7,7 @@ namespace TravelRepo.Tests;
 public sealed class RepositoryTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "travelrepo-tests-" + Guid.NewGuid());
-    public void Dispose() { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    public void Dispose() => TestFiles.Delete(root);
     private async Task<(TravelRepository, GitRepository)> Create(string folder = "trip")
     {
         var repo = new TravelRepository(Path.Combine(root, folder), Path.Combine(root, "recovery-" + folder)); await repo.InitializeAsync(Entity.CreateTrip("Aachen")); var git = new GitRepository(repo, new GitCliBackend()); await git.InitializeAsync("Test", "test@example.invalid"); return (repo, git);

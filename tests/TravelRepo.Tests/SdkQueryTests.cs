@@ -12,7 +12,7 @@ namespace TravelRepo.Tests;
 public sealed class SdkQueryTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "travelrepo-sdk-" + Guid.NewGuid());
-    public void Dispose() { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    public void Dispose() => TestFiles.Delete(root);
 
     private static TripSnapshot Trip(params Entity[] entities)
     {
