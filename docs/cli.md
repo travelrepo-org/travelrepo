@@ -20,6 +20,7 @@ Commands:
 - `version PATH MESSAGE`: create a real Git version with machine-readable trailers.
 - `export PATH OUTPUT.ics`: timezone-correct calendar export.
 - `export PATH OUTPUT.html`: print-friendly HTML.
+- `mcp [PATH] [--read-only]`: serve the trip to an AI assistant over the Model Context Protocol on standard input and output. See [AI assistants](mcp.md).
 
 The default path for inspect/validate is the current directory. The CLI never changes global Git configuration. Generic remotes use normal Git SSH configuration and credential helpers.
 
