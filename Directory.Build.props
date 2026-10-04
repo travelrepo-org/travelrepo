@@ -7,7 +7,7 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <Deterministic>true</Deterministic>
     <!-- The single source of the TravelRepo SDK version. Release tags are v$(Version). -->
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Authors>TravelRepo contributors</Authors>
     <!-- Public source repository, shown by clients such as Jourfold and used as NuGet package metadata. -->
     <RepositoryUrl>https://github.com/travelrepo-org/travelrepo</RepositoryUrl>
