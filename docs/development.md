@@ -16,6 +16,10 @@ The CLI and libraries target `net10.0`. Consumers may reference NuGet packages i
 
 Canonical YAML is converted into a safe JSON-compatible tree, validated against embedded JSON Schema 2020-12, and then checked by `SemanticValidation`. YAML comments are non-semantic and are not preserved. Unknown fields, namespaces and compatible custom types are retained.
 
+## Versions
+
+`Directory.Build.props` holds the only copy of the SDK version (`Version`) and the public `RepositoryUrl`. Every assembly and package takes both from there. Release tags are `v` followed by that version. The trip format version is separate: `TravelRepoInfo.FormatVersion` must match the schema directory under `schemas/travelrepo/`.
+
 ## Public API
 
 ```csharp
@@ -47,6 +51,7 @@ These helpers interpret canonical data the same way in every client. They never 
 - `TripItinerary.Build(trip, labels, culture)` produces a day-by-day reading of the plan. `TripExport.Html` and `TripExport.Ics` use it; clients pass translated `ExportLabels`.
 - `GitRepository.SyncStatusAsync(remote)` compares the current branch with the last fetched remote-tracking ref without network access.
 - `TravelRepository.NormalizeAsync()` rewrites files in the reference YAML style; the CLI exposes it as `travelrepo format`.
+- `TravelRepoInfo` reports the SDK `Version`, the build's `InformationalVersion` (with the source commit), the written `FormatVersion`, the `License` and the `RepositoryUrl`, for about screens and bug reports.
 
 ## Future automation adapters
 

@@ -22,7 +22,7 @@ public sealed record Entity(JsonObject Data)
     }
     public static Entity CreateTrip(string title, string language = "en", string? timezone = null) => new(new JsonObject
     {
-        ["schema"] = new JsonObject { ["name"] = "TravelRepo", ["version"] = "1.0" },
+        ["schema"] = new JsonObject { ["name"] = "TravelRepo", ["version"] = TravelRepoInfo.FormatVersion },
         ["id"] = Guid.CreateVersion7().ToString(),
         ["title"] = title,
         ["language"] = language,
