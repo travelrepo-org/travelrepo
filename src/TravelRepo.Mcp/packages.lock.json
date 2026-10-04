@@ -2,6 +2,16 @@
   "version": 1,
   "dependencies": {
     "net10.0": {
+      "ModelContextProtocol.Core": {
+        "type": "Direct",
+        "requested": "[2.2.0, )",
+        "resolved": "2.2.0",
+        "contentHash": "FeBfXU6T8k+jw4afg4sfxdEX2rL/e5oKOk9ROOGztu9k47+7Bz08sdaToYt2XvMY1opNbwxYQOFMj6wH9TInhA==",
+        "dependencies": {
+          "Microsoft.Extensions.AI.Abstractions": "10.8.3",
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.10"
+        }
+      },
       "Humanizer.Core": {
         "type": "Transitive",
         "resolved": "2.14.1",
@@ -47,15 +57,6 @@
           "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.10"
         }
       },
-      "ModelContextProtocol.Core": {
-        "type": "Transitive",
-        "resolved": "2.2.0",
-        "contentHash": "FeBfXU6T8k+jw4afg4sfxdEX2rL/e5oKOk9ROOGztu9k47+7Bz08sdaToYt2XvMY1opNbwxYQOFMj6wH9TInhA==",
-        "dependencies": {
-          "Microsoft.Extensions.AI.Abstractions": "10.8.3",
-          "Microsoft.Extensions.Logging.Abstractions": "10.0.10"
-        }
-      },
       "NodaTime": {
         "type": "Transitive",
         "resolved": "3.2.2",
@@ -78,37 +79,10 @@
           "TravelRepo.Repository": "[0.2.0, )"
         }
       },
-      "travelrepo.mcp": {
-        "type": "Project",
-        "dependencies": {
-          "ModelContextProtocol.Core": "[2.2.0, )",
-          "TravelRepo.Git": "[0.2.0, )",
-          "TravelRepo.Merge": "[0.2.0, )"
-        }
-      },
       "travelrepo.merge": {
         "type": "Project",
         "dependencies": {
           "TravelRepo.Repository": "[0.2.0, )"
-        }
-      },
-      "travelrepo.plugins.abstractions": {
-        "type": "Project",
-        "dependencies": {
-          "TravelRepo.Core": "[0.2.0, )"
-        }
-      },
-      "travelrepo.providers.abstractions": {
-        "type": "Project",
-        "dependencies": {
-          "TravelRepo.Core": "[0.2.0, )"
-        }
-      },
-      "travelrepo.providers.github": {
-        "type": "Project",
-        "dependencies": {
-          "TravelRepo.Providers.Abstractions": "[0.2.0, )",
-          "TravelRepo.Serialization": "[0.2.0, )"
         }
       },
       "travelrepo.repository": {

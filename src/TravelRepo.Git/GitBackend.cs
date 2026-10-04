@@ -125,7 +125,7 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
             if (state.Diagnostics.Any(d => d.Severity == Severity.Error)) throw new DomainException("version.invalid", "Repair validation errors before creating a version.");
             await StageAsync(ct);
             await CheckIndexAsync(ct);
-            var result = await backend.ExecuteAsync(Repository.Root, ["commit", "-F", "-"], message.Trim() + "\n\nTravelRepo-Version: 1\nTravelRepo-Action: " + action.Replace("\n", "") + "\nTravelRepo-Client: TravelRepo/0.1.0\n", ct);
+            var result = await backend.ExecuteAsync(Repository.Root, ["commit", "-F", "-"], message.Trim() + "\n\nTravelRepo-Version: 1\nTravelRepo-Action: " + action.Replace("\n", "") + "\nTravelRepo-Client: TravelRepo/" + TravelRepoInfo.Version + "\n", ct);
             if (result.ExitCode != 0) throw new DomainException("version.failed", "No version was created. Check that changes exist and a local identity is configured.");
             return await HeadAsync(ct);
         }
@@ -255,7 +255,7 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
     private async Task<string> RecordMergeCoreAsync(string otherCommit, string message, CancellationToken ct = default)
     {
         var old = await HeadAsync(ct); await StageAsync(ct); await CheckIndexAsync(ct); var tree = await Run(ct, "write-tree");
-        var commit = await backend.ExecuteAsync(Repository.Root, ["commit-tree", tree, "-p", old, "-p", otherCommit, "-F", "-"], message + "\n\nTravelRepo-Version: 1\nTravelRepo-Action: semantic-merge\nTravelRepo-Client: TravelRepo/0.1.0\n", ct);
+        var commit = await backend.ExecuteAsync(Repository.Root, ["commit-tree", tree, "-p", old, "-p", otherCommit, "-F", "-"], message + "\n\nTravelRepo-Version: 1\nTravelRepo-Action: semantic-merge\nTravelRepo-Client: TravelRepo/" + TravelRepoInfo.Version + "\n", ct);
         if (commit.ExitCode != 0) throw new DomainException("merge.commit", "Unable to create merge version.");
         await Run(ct, "update-ref", "HEAD", commit.Output.Trim(), old); return commit.Output.Trim();
     }

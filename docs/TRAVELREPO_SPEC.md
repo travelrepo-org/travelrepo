@@ -1111,6 +1111,8 @@ The core API should consist of clear domain commands and queries so that future 
 
 AI-specific runtime behavior is not required by TravelRepo v1.
 
+Convention: the reference implementation ships an agent guide at `skills/travelrepo/SKILL.md` and an optional local MCP server (`travelrepo mcp`, library `TravelRepo.Mcp`) that adapts the domain commands without bypassing validation. Neither is part of the file format; a repository is valid without them.
+
 ## 53. Non-goals for TravelRepo v1
 
 Not required for the first complete implementation:

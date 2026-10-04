@@ -79,7 +79,7 @@ Both repositories were built after deleting their source/test/sample bin and obj
 | 67. Issue reporting and privacy | PASS | No analytics/upload runtime; editable report copied only on user action. |
 | 68. CLI | PASS | CLI validate/inspect/diff/repair plus init/version/export. |
 | 69. Open SDK boundary | PASS | TravelRepo has no Avalonia/Jourfold dependencies; documented SDK and schemas. |
-| 70. MCP / agent readiness | PASS | Public repository/Git/merge commands and queries; no AI runtime. |
+| 70. MCP / agent readiness | PASS | Public repository/Git/merge commands and queries; no AI runtime. Optional local MCP server (`travelrepo mcp`, `TravelRepo.Mcp`) and agent guide `skills/travelrepo/SKILL.md` documented in `docs/mcp.md`; MCP tests cover validated edits, concurrent writes and read-only mode. |
 | 71. Security and secrets | BLOCKED | GNOME credential persistence and live authenticated transport passed; App token and Basic encoding absent from inspected canonical files, Git configs and validation logs. Windows Credential Manager verification remains pending. |
 | 72. Large files | PASS | 25 MB pre-import confirmation and tests. |
 | 73. Testing | PASS | 54 TravelRepo and 45 Jourfold tests pass after the interface rebuild, including itinerary/export, change summaries, sync status, YAML writer round trips, Quick Add validity, real pointer selection and drag tests. `dotnet format --verify-no-changes` passes in both repositories. |

@@ -72,12 +72,41 @@ public static class YamlCodec
 
 public static class SchemaValidation
 {
-    private static readonly Dictionary<string, JsonSchema> Schemas = Load();
-    private static Dictionary<string, JsonSchema> Load()
+    private static readonly Dictionary<string, string> Texts = LoadTexts();
+    private static readonly Dictionary<string, JsonSchema> Schemas = Texts.ToDictionary(p => p.Key, p => JsonSchema.FromText(p.Value));
+    private static Dictionary<string, string> LoadTexts()
     {
         var assembly = typeof(SchemaValidation).Assembly;
         return assembly.GetManifestResourceNames().Where(n => n.EndsWith(".json", StringComparison.Ordinal)).ToDictionary(n => n.Split('.')[^2], n =>
-        { using var stream = assembly.GetManifestResourceStream(n)!; using var reader = new StreamReader(stream); return JsonSchema.FromText(reader.ReadToEnd()); });
+        { using var stream = assembly.GetManifestResourceStream(n)!; using var reader = new StreamReader(stream); return reader.ReadToEnd(); });
+    }
+
+    /// <summary>Entity types with a bundled JSON Schema, including <c>trip</c> and the fallback <c>custom</c>.</summary>
+    public static IReadOnlyList<string> Types => [.. Texts.Keys.Order(StringComparer.Ordinal)];
+
+    /// <summary>The JSON Schema text for an entity type, or null when the type has none (custom types use <c>custom</c>).</summary>
+    public static string? SchemaText(string type) => Texts.GetValueOrDefault(type);
+
+    /// <summary>
+    /// The failed rules of a <c>schema.invalid</c> diagnostic as short lines, for example
+    /// "location: Required properties [longitude] are not present". Empty when the message is not a schema result.
+    /// The deepest failures come first. Rules that only report a non-matching alternative (such as a different
+    /// time precision) are left out when a more specific failure exists.
+    /// </summary>
+    public static IReadOnlyList<string> Explain(string message, int max = 8)
+    {
+        try
+        {
+            var failures = (JsonNode.Parse(message)?["details"] as JsonArray ?? []).OfType<JsonObject>()
+                .Where(d => d["errors"] is JsonObject)
+                .SelectMany(d => ((JsonObject)d["errors"]!).Select(e => (At: d["instanceLocation"]?.ToString().Trim('/').Replace('/', '.') ?? "", Text: e.Value?.ToString().Replace("\"", "") ?? "")))
+                .Distinct().ToArray();
+            static bool Alternative((string At, string Text) f) => f.Text.StartsWith("Expected ", StringComparison.Ordinal) || f.Text.StartsWith("Value is ", StringComparison.Ordinal);
+            var specific = failures.Where(f => !Alternative(f)).ToArray();
+            return (specific.Length > 0 ? specific : failures).OrderByDescending(f => f.At.Count(c => c == '.') + (f.At.Length > 0 ? 1 : 0))
+                .Select(f => f.At.Length > 0 ? f.At + ": " + f.Text : f.Text).Take(max).ToArray();
+        }
+        catch (System.Text.Json.JsonException) { return []; }
     }
     public static IReadOnlyList<Diagnostic> Validate(Entity entity)
     {
