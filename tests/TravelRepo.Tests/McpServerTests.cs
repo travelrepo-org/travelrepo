@@ -127,6 +127,27 @@ public sealed class McpServerTests : IDisposable
     }
 
     [Fact]
+    public async Task AConfirmationMailIsAttachedAndRead()
+    {
+        var (repo, _) = await Trip(); var client = await Connect(repo.Root);
+        var booking = (await Call(client, "create_entity", """{"type":"booking","data":{"title":"Lakeview Lodge"}}"""))["id"]!.ToString();
+        var file = Path.Combine(root, "confirmation.eml"); await File.WriteAllBytesAsync(file, DocumentTests.Confirmation());
+        var imported = await Call(client, "import_document", JsonSerializer.Serialize(new { path = file, attach_to = booking, split_attachments = true }));
+        var documents = imported["documents"]!.AsArray();
+        Assert.Equal(["confirmation.eml", "ticket.pdf", "Earlier offer.eml"], documents.Select(d => d!["name"]!.ToString()).ToArray());
+        var trip = (await repo.ReadAsync()).Trip;
+        Assert.Equal(3, TripCommands.AttachedDocuments(trip, trip.Find(Guid.Parse(booking))!).Count);
+
+        var mail = await Call(client, "read_document", JsonSerializer.Serialize(new { id = documents[0]!["id"]!.ToString() }));
+        Assert.Equal("Your booking 4711 is confirmed", mail["mail"]!["subject"]!.ToString());
+        Assert.Contains("Check-in from 15:00", mail["text"]!.ToString());
+        var ticket = await Call(client, "read_document", JsonSerializer.Serialize(new { id = documents[1]!["id"]!.ToString() }));
+        Assert.Contains("Booking 4711", ticket["text"]!.ToString());
+        Assert.Contains("absolute path", await Call(client, "import_document", JsonSerializer.Serialize(new { path = "relative.eml" }), expectError: true));
+        Assert.True((await Call(client, "validate"))["valid"]!.GetValue<bool>());
+    }
+
+    [Fact]
     public async Task EditsFromOtherProgramsAreSeenAndNotOverwritten()
     {
         var (repo, _) = await Trip(); var client = await Connect(repo.Root);

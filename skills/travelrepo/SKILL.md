@@ -106,6 +106,10 @@ content:
 
 With the MCP tools, use `add_note`; it creates the Markdown file and the entry together.
 
+## Files and confirmations
+
+Attached files are `document` entities; their content is stored once by hash. `read_document` returns the text of a PDF or the headers, text and attachment names of an e-mail saved as `.eml`, which is how booking confirmations usually arrive. Use it to fill in booking references, check-in times or seat numbers. `import_document` copies a local file into the trip and can attach it to a booking or stay; with `split_attachments` it also adds the tickets attached to an e-mail. Only import files the travellers asked you to add.
+
 ## Checking your work
 
 After a series of changes, call `validate` (or run `travelrepo validate`) and `get_schedule` for the affected days. Then tell the person what you changed, with titles and times, so they can review it in Jourfold.

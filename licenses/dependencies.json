@@ -1,4 +1,8 @@
 {
+  "BouncyCastle.Cryptography/2.7.0": {
+    "license": "MIT",
+    "project": "https://www.bouncycastle.org/stable/nuget/csharp/website"
+  },
   "Humanizer.Core/2.14.1": {
     "license": "MIT",
     "project": "https://github.com/Humanizr/Humanizer"
@@ -43,6 +47,10 @@
     "license": "MIT",
     "project": "https://github.com/microsoft/vstest"
   },
+  "MimeKit/4.18.1": {
+    "license": "MIT",
+    "project": "https://www.mimekit.net/"
+  },
   "ModelContextProtocol.Core/2.2.0": {
     "license": "Apache-2.0",
     "project": "https://csharp.sdk.modelcontextprotocol.io/"
@@ -54,6 +62,14 @@
   "NodaTime/3.2.2": {
     "license": "Apache-2.0",
     "project": "https://nodatime.org/"
+  },
+  "PdfPig/0.1.16": {
+    "license": "Apache-2.0",
+    "project": "https://github.com/UglyToad/PdfPig"
+  },
+  "System.Security.Cryptography.Pkcs/10.0.13": {
+    "license": "MIT",
+    "project": "https://dot.net/"
   },
   "YamlDotNet/16.3.0": {
     "license": "MIT",

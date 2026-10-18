@@ -8,6 +8,10 @@ TravelRepo is Apache-2.0.
 - JsonSchema.Net and dependencies: MIT, https://github.com/json-everything/json-everything
 - MCP C# SDK (ModelContextProtocol.Core, used by TravelRepo.Mcp): Apache-2.0, https://github.com/modelcontextprotocol/csharp-sdk
 - Microsoft.Extensions.AI.Abstractions and Microsoft.Extensions.Logging.Abstractions (dependencies of the MCP SDK): MIT, https://github.com/dotnet/extensions and https://github.com/dotnet/runtime
+- MimeKit (used by TravelRepo.Documents to read e-mail): MIT, https://github.com/jstedfast/MimeKit
+- BouncyCastle.Cryptography (dependency of MimeKit): MIT, https://github.com/bcgit/bc-csharp
+- PdfPig (used by TravelRepo.Documents to read PDF text): Apache-2.0, https://github.com/UglyToad/PdfPig
+- System.Security.Cryptography.Pkcs (dependency of MimeKit): MIT, https://github.com/dotnet/runtime
 - xUnit and test tools: Apache-2.0/MIT; development dependencies only.
 
 Resolved package versions and their NuGet license metadata are recorded in `licenses/dependencies.json`. Git is invoked as a separate system process; its executable is not part of TravelRepo's NuGet libraries.

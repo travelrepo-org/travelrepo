@@ -294,6 +294,57 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         };
     });
 
+    [McpServerTool(Name = "read_document", Title = "Read an attached file", ReadOnly = true, Idempotent = true, OpenWorld = false)]
+    [Description("Returns the text of an attached file (document entity): the text of a PDF, or the subject, sender, date, text and attachment names of an e-mail (.eml). Scanned PDFs without a text layer have no text. Use it to read booking confirmations.")]
+    public Task<string> ReadDocument([Description("The document entity id.")] string id, [Description("At most this many characters of text.")] int max_characters = 20000, CancellationToken ct = default) => Run(async () =>
+    {
+        var state = await repository.ReadAsync(ct); var document = Find(state.Trip, id);
+        if (document.Type != "document") throw new McpException("This entity is not a file. Files are entities of type document.");
+        var media = document.Data["media_type"]?.ToString() ?? "application/octet-stream"; var hash = document.Data["blob"]?["hash"]?.ToString() ?? "";
+        var bytes = hash.Length == 64 ? state.Trip.Resources.GetValueOrDefault("assets/sha256/" + hash[..2] + "/" + hash) : null;
+        if (bytes is null) throw new McpException("The file's content is missing from the trip.");
+        var limit = Math.Clamp(max_characters, 100, 200_000); var text = TravelRepo.Documents.DocumentText.Extract(bytes, media, limit + 1);
+        var result = new JsonObject { ["id"] = document.Id.ToString(), ["name"] = document.Title, ["media_type"] = media, ["size"] = bytes.Length, ["text"] = text is null ? null : text.Length > limit ? text[..limit] : text, ["truncated"] = text?.Length > limit };
+        if (TravelRepo.Documents.Mail.IsMail(media))
+        {
+            var mail = TravelRepo.Documents.Mail.Read(bytes);
+            result["mail"] = new JsonObject { ["subject"] = mail.Subject, ["from"] = string.Join(", ", mail.From), ["date"] = mail.Date?.ToString("O", CultureInfo.InvariantCulture), ["attachments"] = new JsonArray(mail.Attachments.Select(a => (JsonNode)new JsonObject { ["name"] = a.FileName, ["media_type"] = a.MediaType, ["size"] = a.Content.Length }).ToArray()) };
+        }
+        if (text is null) result["note"] = "This kind of file has no readable text here.";
+        return result;
+    });
+
+    [McpServerTool(Name = "import_document", Title = "Attach a file", Destructive = false, OpenWorld = false)]
+    [Description("Copies a local file into the trip as a document, for example a booking confirmation saved as .eml or .pdf, and optionally attaches it to an entity such as a booking or a stay. With split_attachments an e-mail's attached files (tickets, invoices) are added as documents too. Files over 25 MB are refused.")]
+    public Task<string> ImportDocument(
+        [Description("Absolute path of the file on this computer.")] string path,
+        [Description("Optional id of the entity to attach the file to.")] string? attach_to = null,
+        [Description("For an e-mail: also add its attached files as separate documents.")] bool split_attachments = false,
+        CancellationToken ct = default) => Run(async () =>
+    {
+        if (!Path.IsPathFullyQualified(path) || !File.Exists(path)) throw new McpException("No file at " + path + ". Pass an absolute path to an existing file.");
+        if (new FileInfo(path).Length > 25 * 1024 * 1024) throw new McpException("The file is larger than 25 MB. Ask the travellers to add it themselves if it should be part of the trip.");
+        var bytes = await File.ReadAllBytesAsync(path, ct); var media = TravelRepo.Documents.MediaTypes.FromFileName(path);
+        var files = new List<(string Name, string Media, byte[] Bytes)> { (Path.GetFileName(path), media, bytes) };
+        if (split_attachments && TravelRepo.Documents.Mail.IsMail(media))
+            files.AddRange(TravelRepo.Documents.Mail.Read(bytes).Attachments.Where(a => a.Content.Length > 0 && a.Content.Length <= 25 * 1024 * 1024).Select(a => (a.FileName, a.MediaType, a.Content)));
+        var created = new List<Entity>();
+        await Write(state =>
+        {
+            created.Clear(); var edits = new List<EntityEdit>(); var resources = new List<ResourceEdit>();
+            var owner = attach_to is null ? null : Find(state.Trip, attach_to);
+            foreach (var (name, type, content) in files)
+            {
+                var (document, resource) = TravelRepository.PrepareDocument(content, name, type);
+                created.Add(document); edits.Add(new(document.Id, document)); if (!resources.Any(r => r.Path == resource.Path)) resources.Add(resource);
+                if (owner is not null) owner = TripCommands.AttachDocument(owner, document);
+            }
+            if (owner is not null) edits.Add(new(owner.Id, owner));
+            return (edits, resources);
+        }, ct);
+        return new JsonObject { ["documents"] = new JsonArray(created.Select(d => (JsonNode)new JsonObject { ["id"] = d.Id.ToString(), ["name"] = d.Title, ["media_type"] = d.Data["media_type"]?.DeepClone() }).ToArray()), ["attached_to"] = attach_to };
+    });
+
     [McpServerTool(Name = "add_note", Title = "Add a note", Destructive = false, OpenWorld = false)]
     [Description("Adds a Markdown note to an entity, for example opening hours, tips or the reasons for a suggestion. The note appears under Notes in Jourfold.")]
     public Task<string> AddNote([Description("The entity id.")] string id, [Description("The note text in Markdown.")] string markdown, CancellationToken ct = default) => Run(async () =>
