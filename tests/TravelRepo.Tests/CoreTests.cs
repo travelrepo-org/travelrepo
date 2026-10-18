@@ -62,3 +62,20 @@ public class CoreTests
     }
 
 }
+
+public class SchemaConcurrencyTests
+{
+    [Fact]
+    public void ParallelValidationNeverSkipsRules()
+    {
+        // Validation runs on many threads at once, as with the MCP server and a client; every result must report the broken rule.
+        var invalid = Enumerable.Range(0, 400).Select(_ =>
+        {
+            var e = Entity.Create("schedule_item", "Stay");
+            e.Data["components"]!["accommodation"] = new JsonObject { ["check_in_window"] = new JsonObject { ["from"] = "25:00" } };
+            return e;
+        }).ToArray();
+        var results = invalid.AsParallel().WithDegreeOfParallelism(8).Select(e => SchemaValidation.Validate(e).Count).ToArray();
+        Assert.All(results, count => Assert.Equal(1, count));
+    }
+}
