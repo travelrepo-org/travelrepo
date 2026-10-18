@@ -155,7 +155,8 @@ public static class Stays
         try { return a.ToInstant() == b.ToInstant(); } catch (DomainException) { return a.Local == b.Local && a.Timezone == b.Timezone; }
     }
 
-    internal static ZonedTime? Zoned(JsonNode? node)
+    /// <summary>Reads a zoned time such as a check-in or a cancellation deadline; returns <c>null</c> when it is missing or invalid.</summary>
+    public static ZonedTime? Zoned(JsonNode? node)
     {
         if (node is not JsonObject o || o["local"] is null || o["timezone"] is null) return null;
         try { return ZonedTime.From(o); } catch (Exception ex) when (ex is DomainException or InvalidOperationException) { return null; }
