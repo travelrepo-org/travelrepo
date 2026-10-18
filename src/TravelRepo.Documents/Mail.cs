@@ -82,7 +82,8 @@ public static class Mail
     /// <summary>A file name without folders or characters that file systems reject.</summary>
     public static string SafeName(string name)
     {
-        var file = Path.GetFileName(name.Replace('\\', '/').Split('/').Last());
+        // Path.GetFileName is not used: on Windows it treats "a:b.pdf" as drive and file and drops "a:".
+        var file = name.Replace('\\', '/').Split('/').Last();
         var invalid = Path.GetInvalidFileNameChars().Concat(['<', '>', ':', '"', '|', '?', '*']).ToHashSet();
         var clean = new string(file.Select(c => invalid.Contains(c) || char.IsControl(c) ? '_' : c).ToArray()).Trim(' ', '.');
         return clean.Length == 0 ? "attachment" : clean.Length > 120 ? clean[..120] : clean;
