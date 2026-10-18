@@ -43,7 +43,7 @@ Each server serves exactly one trip folder. Add one entry per trip you want the 
 | `compare` | no | Entities that differ between a version or variant and the current files. |
 | `create_entity` | yes | New schedule item, place, person, booking, task, expense, budget, collection or note. |
 | `update_entity` | yes | JSON merge patch on any entity, including the trip manifest. |
-| `delete_entity` | yes | Deletes an entity and its notes; refuses while other entities still refer to it. |
+| `delete_entity` | yes | Deletes an entity and its notes and removes references to it from other entities. Comments on it are deleted too. Places, documents, notes and bookings that only it used are listed as `unused`, or deleted with `also_delete_unused`. |
 | `add_note` | yes | Adds a Markdown note to an entity. |
 | `create_version` | yes | Saves the current changes as a version. Assistants are told to do this only when asked. |
 

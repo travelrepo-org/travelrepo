@@ -220,17 +220,6 @@ public static class TripSummaries
     /// <summary>Map a Git author email to the trip-local person that declares it.</summary>
     public static Entity? PersonForGitEmail(TripSnapshot trip, string email) => trip.Entities.Values.FirstOrDefault(p => p.Type == "person" && p.Data["identities"]?["git"] is JsonArray identities && identities.Any(i => string.Equals(i?["email"]?.ToString(), email, StringComparison.OrdinalIgnoreCase)));
 
-    /// <summary>Entities that reference the given entity ID anywhere in their canonical data.</summary>
-    public static IReadOnlyList<Entity> ReferencesTo(TripSnapshot trip, Guid id)
-    {
-        var text = id.ToString();
-        bool Contains(JsonNode? node) => node switch
-        {
-            JsonObject o => o.Any(p => p.Key != "id" && Contains(p.Value)),
-            JsonArray a => a.Any(Contains),
-            JsonValue v => v.TryGetValue<string>(out var s) && s == text,
-            _ => false
-        };
-        return trip.All.Where(e => e.Id != id && Contains(e.Data)).ToArray();
-    }
+    /// <summary>Entities that reference the given entity ID anywhere in their canonical data, including extensions.</summary>
+    public static IReadOnlyList<Entity> ReferencesTo(TripSnapshot trip, Guid id) => TripReferences.To(trip, id).Select(r => r.Source).DistinctBy(e => e.Id).ToArray();
 }
