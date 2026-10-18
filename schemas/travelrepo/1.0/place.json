@@ -51,6 +51,21 @@
       "properties": {},
       "required": [],
       "additionalProperties": true
+    },
+    "contact": {
+      "type": "object",
+      "properties": {
+        "phone": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "website": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
     }
   },
   "required": [

@@ -124,6 +124,13 @@ public sealed class McpServerTests : IDisposable
         Assert.Equal(3, details["stay"]!["nights"]!.GetValue<int>()); Assert.Empty(details["stay"]!["issues"]!.AsArray());
         Assert.Equal("2027-05-17T10:00:00", details["entity"]!["time"]!["end"]!["local"]!.ToString());
         Assert.True((await Call(client, "validate"))["valid"]!.GetValue<bool>());
+
+        // Hours of the accommodation and a reminder for a task due today.
+        await Call(client, "update_entity", "{\"id\":\"" + first + "\",\"changes\":{\"components\":{\"accommodation\":{\"check_in_window\":{\"from\":\"15:00\",\"until\":\"20:00\"},\"access\":\"reception\"}}}}");
+        Assert.Equal("20:00", (await Call(client, "get_entity", "{\"id\":\"" + first + "\"}"))["stay"]!["check_in_hours"]!["until"]!.ToString());
+        var today = NodaTime.SystemClock.Instance.GetCurrentInstant().InZone(NodaTime.DateTimeZoneProviders.Tzdb["Asia/Tokyo"]).Date.ToString("yyyy-MM-dd", null);
+        await Call(client, "create_entity", "{\"type\":\"task\",\"data\":{\"title\":\"Pay the ryokan\",\"due\":{\"date\":\"" + today + "\"}}}");
+        Assert.Contains((await Call(client, "list_reminders"))["reminders"]!.AsArray(), r => r!["kind"]!.ToString() == "TaskDue" && r["urgent"]!.GetValue<bool>());
     }
 
     [Fact]

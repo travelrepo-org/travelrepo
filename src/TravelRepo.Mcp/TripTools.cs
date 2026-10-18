@@ -161,8 +161,33 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         ["nights"] = stay.Nights,
         ["check_in"] = stay.CheckIn?.ToJson(),
         ["check_out"] = stay.CheckOut?.ToJson(),
+        ["check_in_hours"] = stay.CheckInWindow?.ToJson(),
+        ["check_out_hours"] = stay.CheckOutWindow?.ToJson(),
+        ["hours_not_fixed"] = stay.CheckInApproximate || stay.CheckOutApproximate,
+        ["access"] = stay.Access,
+        ["free_cancellation_until"] = stay.FreeCancellationUntil?.ToJson(),
         ["issues"] = new JsonArray(Enum.GetValues<StayIssues>().Where(i => i != StayIssues.None && stay.Issues.HasFlag(i)).Select(i => (JsonNode)i.ToString()).ToArray())
     };
+
+    [McpServerTool(Name = "list_reminders", Title = "List reminders", ReadOnly = true, Idempotent = true, OpenWorld = false)]
+    [Description("Things the travellers should look at now: free cancellation deadlines within two weeks, tasks due, arrivals after a check-in window, nights without a place to stay, and bookings not confirmed shortly before they start. Urgent ones come first.")]
+    public Task<string> ListReminders(CancellationToken ct = default) => Run(async () =>
+    {
+        var trip = (await repository.ReadAsync(ct)).Trip; var zone = ScheduleQueries.TripZone(trip);
+        var reminders = TripReminders.For(trip, SystemClock.Instance.GetCurrentInstant());
+        return new JsonObject
+        {
+            ["reminders"] = new JsonArray(reminders.Select(r => (JsonNode)new JsonObject
+            {
+                ["kind"] = r.Kind.ToString(),
+                ["urgent"] = r.Urgent,
+                ["entity"] = r.Entity?.ToString(),
+                ["title"] = r.Title,
+                ["when"] = r.Moment is { } moment ? LocalDateTimePattern.ExtendedIso.Format(moment.InZone(zone).LocalDateTime) : null,
+                ["dates"] = new JsonArray(r.Dates.Select(d => (JsonNode)Date(d)!).ToArray())
+            }).ToArray())
+        };
+    });
 
     [McpServerTool(Name = "get_schema", Title = "Read an entity schema", ReadOnly = true, Idempotent = true, OpenWorld = false)]
     [Description("The JSON Schema that entities of one type must satisfy. Useful when a change is rejected as invalid.")]

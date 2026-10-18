@@ -68,6 +68,8 @@ components:
 
 A stay is one item for all its nights, not one item per night. `check_in` and `check_out` decide which nights it covers: from the check-in day to the day before check-out. Set `time` to the same span (`precision: exact`, `start` = check-in, `end` = check-out) so that other tools see it too; `update_entity` does this for you when you change check-in or check-out. If `time` says something else, check-in and check-out apply and validation warns with `stay.time_mismatch`. Without exact hours use 15:00 and 10:00. `list_stays` shows each stay's nights, nights without a stay, and stays that should be merged.
 
+Optional stay details, all inside `accommodation`: `check_in_window` and `check_out_window` with `from` and `until` as `HH:MM` (the accommodation's own hours, not your plan), `access` (`reception`, `self` for a key box or smart lock, `host`), `approximate: true` inside `check_in` or `check_out` when the hour is not fixed, `cancellation: { free_until: <zoned time>, note }`, `breakfast` (`included`, `available`, `none`), `parking: { included, note }` and `arrival_notes`. A booking can have `cancellation` too, and a place `contact: { phone, email, website }`. Never store key box codes or door codes in the trip. `list_reminders` shows deadlines and other things that need attention.
+
 A stay overlapping other plans is normal and not a conflict. Overlapping activities are allowed too; they are shown side by side.
 
 `children` lists the IDs of nested schedule items (for example the stops of a day trip). Children are separate entities with their own files.

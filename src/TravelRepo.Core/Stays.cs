@@ -32,6 +32,38 @@ public sealed record Stay(Entity Item, LocalDate? FirstNight, int Nights, ZonedT
     public bool Covers(LocalDate night) => FirstNight is { } first && night >= first && night < first.PlusDays(Nights);
     public IEnumerable<LocalDate> NightDates => FirstNight is { } first ? Enumerable.Range(0, Nights).Select(first.PlusDays) : [];
     public Guid? Place => Guid.TryParse(Item.Data["components"]?["accommodation"]?["place"]?.ToString(), out var id) ? id : null;
+    private JsonNode? Accommodation => Item.Data["components"]?["accommodation"];
+    /// <summary>The accommodation's check-in hours, for example 15:00 to 20:00, if known.</summary>
+    public StayWindow? CheckInWindow => StayWindow.Read(Accommodation?["check_in_window"]);
+    /// <summary>The accommodation's check-out hours, usually only an end such as 10:00, if known.</summary>
+    public StayWindow? CheckOutWindow => StayWindow.Read(Accommodation?["check_out_window"]);
+    /// <summary>How guests get in: <c>reception</c>, <c>self</c> (key box, smart lock) or <c>host</c>; other values are kept as written.</summary>
+    public string? Access => Accommodation?["access"]?.ToString();
+    /// <summary>True when the planned check-in hour is not fixed; only the day counts.</summary>
+    public bool CheckInApproximate => Accommodation?["check_in"]?["approximate"] is JsonValue v && v.TryGetValue<bool>(out var b) && b;
+    public bool CheckOutApproximate => Accommodation?["check_out"]?["approximate"] is JsonValue v && v.TryGetValue<bool>(out var b) && b;
+    /// <summary>The last moment the stay can be cancelled free of charge, if known.</summary>
+    public ZonedTime? FreeCancellationUntil => Stays.Zoned(Accommodation?["cancellation"]?["free_until"]);
+}
+
+/// <summary>A time window of an accommodation as local wall-clock times. Either end may be open.</summary>
+public sealed record StayWindow(LocalTime? From, LocalTime? Until)
+{
+    public static StayWindow? Read(JsonNode? node)
+    {
+        if (node is not JsonObject o) return null;
+        static LocalTime? Time(JsonNode? n) => n?.ToString() is { } text && LocalTimePattern.CreateWithInvariantCulture("HH:mm").Parse(text).TryGetValue(default, out var t) ? t : null;
+        var window = new StayWindow(Time(o["from"]), Time(o["until"]));
+        return window.From is null && window.Until is null ? null : window;
+    }
+    public JsonObject ToJson()
+    {
+        var o = new JsonObject();
+        if (From is { } from) o["from"] = LocalTimePattern.CreateWithInvariantCulture("HH:mm").Format(from);
+        if (Until is { } until) o["until"] = LocalTimePattern.CreateWithInvariantCulture("HH:mm").Format(until);
+        return o;
+    }
+    public bool Contains(LocalTime time) => (From is not { } from || time >= from) && (Until is not { } until || time <= until);
 }
 
 /// <summary>Stays that should be one stay over several nights, for example one item per night at the same place.</summary>
@@ -123,7 +155,7 @@ public static class Stays
         try { return a.ToInstant() == b.ToInstant(); } catch (DomainException) { return a.Local == b.Local && a.Timezone == b.Timezone; }
     }
 
-    private static ZonedTime? Zoned(JsonNode? node)
+    internal static ZonedTime? Zoned(JsonNode? node)
     {
         if (node is not JsonObject o || o["local"] is null || o["timezone"] is null) return null;
         try { return ZonedTime.From(o); } catch (Exception ex) when (ex is DomainException or InvalidOperationException) { return null; }
@@ -138,13 +170,18 @@ public static class Stays
     /// Returns a copy of the stay with the given check-in and check-out, and its <c>time</c> set to the same span, so
     /// clients that only read <c>time</c> see the same stay.
     /// </summary>
-    public static Entity WithSpan(Entity item, ZonedTime checkIn, ZonedTime checkOut)
+    /// <remarks>
+    /// <paramref name="checkInApproximate"/> and <paramref name="checkOutApproximate"/> mark hours that are not fixed;
+    /// when both are, the mirrored time is <c>approximate</c> too.
+    /// </remarks>
+    public static Entity WithSpan(Entity item, ZonedTime checkIn, ZonedTime checkOut, bool checkInApproximate = false, bool checkOutApproximate = false)
     {
         if (!IsStay(item)) throw new DomainException("stay.type", "Only a stay has check-in and check-out.");
         if (checkOut.ToInstant() <= checkIn.ToInstant()) throw new DomainException("time.order", "Check-out must be after check-in.");
         var copy = item.Copy(); var accommodation = (JsonObject)copy.Data["components"]!["accommodation"]!;
-        accommodation["check_in"] = checkIn.ToJson(); accommodation["check_out"] = checkOut.ToJson();
-        copy.Data["time"] = new JsonObject { ["precision"] = "exact", ["start"] = checkIn.ToJson(), ["end"] = checkOut.ToJson() };
+        JsonObject Moment(ZonedTime value, bool approximate) { var json = value.ToJson(); if (approximate) json["approximate"] = true; return json; }
+        accommodation["check_in"] = Moment(checkIn, checkInApproximate); accommodation["check_out"] = Moment(checkOut, checkOutApproximate);
+        copy.Data["time"] = new JsonObject { ["precision"] = checkInApproximate && checkOutApproximate ? "approximate" : "exact", ["start"] = checkIn.ToJson(), ["end"] = checkOut.ToJson() };
         return copy;
     }
 
@@ -156,8 +193,10 @@ public static class Stays
     {
         if (nights < 1) throw new DomainException("stay.nights", "A stay needs at least one night.");
         var stay = Resolve(trip, item) ?? throw new DomainException("stay.type", "Only a stay has nights.");
-        var arrive = stay.CheckIn is { } ci ? TimeOf(ci) : DefaultCheckIn; var leave = stay.CheckOut is { } co ? TimeOf(co) : DefaultCheckOut;
-        return WithSpan(item, At(firstNight, arrive, stay.Zone), At(firstNight.PlusDays(nights), leave, stay.Zone));
+        // Without a planned hour, the accommodation's own hours are the best guess, then the defaults. Guesses stay marked as not fixed.
+        var arrive = stay.CheckIn is { } ci ? TimeOf(ci) : stay.CheckInWindow?.From ?? DefaultCheckIn;
+        var leave = stay.CheckOut is { } co ? TimeOf(co) : stay.CheckOutWindow?.Until ?? DefaultCheckOut;
+        return WithSpan(item, At(firstNight, arrive, stay.Zone), At(firstNight.PlusDays(nights), leave, stay.Zone), stay.CheckIn is null || stay.CheckInApproximate, stay.CheckOut is null || stay.CheckOutApproximate);
     }
 
     private static LocalTime TimeOf(ZonedTime value) => LocalDateTimePattern.ExtendedIso.Parse(value.Local).Value.TimeOfDay;
@@ -169,7 +208,7 @@ public static class Stays
     public static Entity Align(TripSnapshot trip, Entity item)
     {
         if (Resolve(trip, item) is not { FirstNight: { } first } stay) return item;
-        if (stay.CheckIn is { } ci && stay.CheckOut is { } co && co.ToInstant() > ci.ToInstant()) return WithSpan(item, ci, co);
+        if (stay.CheckIn is { } ci && stay.CheckOut is { } co && co.ToInstant() > ci.ToInstant()) return WithSpan(item, ci, co, stay.CheckInApproximate, stay.CheckOutApproximate);
         return WithNights(trip, item, first, Math.Max(1, stay.Nights));
     }
 
@@ -241,7 +280,9 @@ public static class Stays
         var arrive = candidate.Stays.Where(s => s.CheckIn is not null && s.FirstNight == candidate.FirstNight).Select(s => TimeOf(s.CheckIn!)).DefaultIfEmpty(DefaultCheckIn).Min();
         var departure = candidate.FirstNight.PlusDays(candidate.Nights);
         var leave = candidate.Stays.Where(s => s.CheckOut is not null && s.DepartureDay == departure).Select(s => TimeOf(s.CheckOut!)).DefaultIfEmpty(DefaultCheckOut).Max();
-        var merged = WithSpan(keep.Item, At(candidate.FirstNight, arrive, keep.Zone), At(departure, leave, keep.Zone));
+        var arriveKnown = candidate.Stays.Any(s => s.CheckIn is not null && !s.CheckInApproximate && s.FirstNight == candidate.FirstNight);
+        var leaveKnown = candidate.Stays.Any(s => s.CheckOut is not null && !s.CheckOutApproximate && s.DepartureDay == departure);
+        var merged = WithSpan(keep.Item, At(candidate.FirstNight, arrive, keep.Zone), At(departure, leave, keep.Zone), !arriveKnown, !leaveKnown);
         var statuses = candidate.Stays.Select(s => s.Item.Data["status"]?.ToString() ?? "idea").ToArray();
         merged.Data["status"] = statuses.Where(s => s != "cancelled").OrderByDescending(s => Array.IndexOf(StatusOrder, s)).FirstOrDefault() ?? "cancelled";
         void Union(string key)

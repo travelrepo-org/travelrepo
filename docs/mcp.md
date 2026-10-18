@@ -37,6 +37,7 @@ Each server serves exactly one trip folder. Add one entry per trip you want the 
 | `list_entities` | no | Entities with id, title and, for schedule items, time and place; filter by type or text. |
 | `get_entity` | no | All fields of one entity, its note texts, its parent and what refers to it. |
 | `get_schedule` | no | The schedule day by day in the trip timezone, then the unscheduled ideas. |
+| `list_reminders` | no | Cancellation deadlines, tasks due, late arrivals, nights without a stay and unconfirmed bookings that need attention now. |
 | `list_stays` | no | Stays with the nights they cover, nights without a stay, and stays that should be merged. |
 | `read_document` | no | The text of an attached PDF, or the headers, text and attachment names of an attached e-mail. |
 | `get_schema` | no | The JSON Schema of an entity type. |
