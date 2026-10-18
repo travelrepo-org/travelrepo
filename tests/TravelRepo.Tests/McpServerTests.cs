@@ -103,6 +103,30 @@ public sealed class McpServerTests : IDisposable
     }
 
     [Fact]
+    public async Task StaysAreListedMovedAndMergedAsOneStay()
+    {
+        var (repo, _) = await Trip(); var client = await Connect(repo.Root);
+        var ryokan = (await Call(client, "create_entity", """{"type":"place","data":{"name":"Ryokan"}}"""))["id"]!.ToString();
+        string Night(string date) => "{\"type\":\"schedule_item\",\"data\":{\"title\":\"Ryokan\",\"status\":\"reserved\",\"time\":{\"precision\":\"day_part\",\"date\":\"" + date + "\",\"day_part\":\"night\",\"timezone\":\"Asia/Tokyo\"},\"components\":{\"accommodation\":{\"place\":\"" + ryokan + "\"}}}}";
+        var first = (await Call(client, "create_entity", Night("2027-05-14")))["id"]!.ToString();
+        var second = (await Call(client, "create_entity", Night("2027-05-15")))["id"]!.ToString();
+
+        var stays = await Call(client, "list_stays");
+        var suggestion = Assert.Single(stays["merge_suggestions"]!.AsArray())!;
+        Assert.Equal(2, suggestion["nights"]!.GetValue<int>());
+        var merged = await Call(client, "merge_stays", "{\"ids\":[\"" + first + "\",\"" + second + "\"]}");
+        Assert.Equal(first, merged["kept"]!.ToString()); Assert.Equal(2, merged["stay"]!["nights"]!.GetValue<int>());
+        Assert.Null((await repo.ReadAsync()).Trip.Find(Guid.Parse(second)));
+
+        // Moving the check-out moves the stay's general time with it.
+        await Call(client, "update_entity", "{\"id\":\"" + first + "\",\"changes\":{\"components\":{\"accommodation\":{\"check_out\":{\"local\":\"2027-05-17T10:00:00\",\"timezone\":\"Asia/Tokyo\"}}}}}");
+        var details = await Call(client, "get_entity", "{\"id\":\"" + first + "\"}");
+        Assert.Equal(3, details["stay"]!["nights"]!.GetValue<int>()); Assert.Empty(details["stay"]!["issues"]!.AsArray());
+        Assert.Equal("2027-05-17T10:00:00", details["entity"]!["time"]!["end"]!["local"]!.ToString());
+        Assert.True((await Call(client, "validate"))["valid"]!.GetValue<bool>());
+    }
+
+    [Fact]
     public async Task EditsFromOtherProgramsAreSeenAndNotOverwritten()
     {
         var (repo, _) = await Trip(); var client = await Connect(repo.Root);

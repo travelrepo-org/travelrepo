@@ -62,7 +62,11 @@ components:
     arrival: { place: <place ID> }
   accommodation:
     place: <place ID>
+    check_in: { local: 2027-05-12T15:00:00, timezone: Asia/Tokyo }
+    check_out: { local: 2027-05-15T10:00:00, timezone: Asia/Tokyo }
 ```
+
+A stay is one item for all its nights, not one item per night. `check_in` and `check_out` decide which nights it covers: from the check-in day to the day before check-out. Set `time` to the same span (`precision: exact`, `start` = check-in, `end` = check-out) so that other tools see it too; `update_entity` does this for you when you change check-in or check-out. If `time` says something else, check-in and check-out apply and validation warns with `stay.time_mismatch`. Without exact hours use 15:00 and 10:00. `list_stays` shows each stay's nights, nights without a stay, and stays that should be merged.
 
 A stay overlapping other plans is normal and not a conflict. Overlapping activities are allowed too; they are shown side by side.
 

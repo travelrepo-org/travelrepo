@@ -88,6 +88,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         var trip = (await repository.ReadAsync(ct)).Trip; var entity = Find(trip, id);
         var result = new JsonObject { ["entity"] = entity.Data.DeepClone() };
         if (entity.Type == "schedule_item") { result["when"] = When(trip, entity); result["place"] = ScheduleQueries.PrimaryPlace(trip, entity)?.Title; }
+        if (Stays.Resolve(trip, entity) is { } stay) result["stay"] = StayJson(stay);
         var notes = (entity.Data["content"] as JsonArray ?? []).OfType<JsonObject>().Where(c => c["type"]?.ToString() == "markdown" && c["file"] is not null)
             .Select(c => (JsonNode)new JsonObject { ["file"] = c["file"]!.ToString(), ["markdown"] = trip.Resources.TryGetValue(c["file"]!.ToString(), out var bytes) ? Encoding.UTF8.GetString(bytes) : null }).ToArray();
         if (notes.Length > 0) result["notes"] = new JsonArray(notes);
@@ -124,6 +125,44 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
             .Select(e => (JsonNode)Summary(trip, e).Also(o => o["duration"] = e.Data["duration"]?.DeepClone())).ToArray();
         return new JsonObject { ["timezone"] = zone.Id, ["days"] = days, ["not_scheduled"] = new JsonArray(ideas) };
     });
+
+    [McpServerTool(Name = "list_stays", Title = "List stays and nights", ReadOnly = true, Idempotent = true, OpenWorld = false)]
+    [Description("Lists the stays (items with an accommodation component) with the nights they cover, nights between the trip's first and last day without a stay or an overnight item, and stays that should be one stay, for example one item per night at the same place.")]
+    public Task<string> ListStays(CancellationToken ct = default) => Run(async () =>
+    {
+        var trip = (await repository.ReadAsync(ct)).Trip;
+        return new JsonObject
+        {
+            ["stays"] = new JsonArray(Stays.All(trip).Select(s => (JsonNode)StayJson(s).Also(o => { o["id"] = s.Item.Id.ToString(); o["title"] = s.Item.Title; o["place"] = s.Place is { } p ? trip.Find(p)?.Title : null; })).ToArray()),
+            ["nights_without_stay"] = new JsonArray(Stays.MissingNights(trip).Select(d => (JsonNode)Date(d)!).ToArray()),
+            ["merge_suggestions"] = new JsonArray(Stays.MergeCandidates(trip).Select(c => (JsonNode)new JsonObject { ["ids"] = new JsonArray(c.Stays.Select(s => (JsonNode)s.Item.Id.ToString()).ToArray()), ["first_night"] = Date(c.FirstNight), ["nights"] = c.Nights }).ToArray())
+        };
+    });
+
+    [McpServerTool(Name = "merge_stays", Title = "Merge stays into one", Destructive = true, OpenWorld = false)]
+    [Description("Merges stays that list_stays suggests merging into the first of them: it covers all their nights, keeps all notes, the most advanced status and the links to it; the others are deleted. Pass the ids of one suggestion.")]
+    public Task<string> MergeStays([Description("The ids of one merge suggestion from list_stays.")] string[] ids, CancellationToken ct = default) => Run(async () =>
+    {
+        StayMerge? done = null;
+        await Write(state =>
+        {
+            var wanted = ids.Select(id => Find(state.Trip, id).Id).ToHashSet();
+            var candidate = Stays.MergeCandidates(state.Trip).FirstOrDefault(c => c.Stays.Select(s => s.Item.Id).ToHashSet().SetEquals(wanted))
+                ?? throw new McpException("These stays are not a merge suggestion. Call list_stays and pass the ids of one suggestion.");
+            done = Stays.Merge(state.Trip, candidate);
+            return (done.Removed.Select(id => new EntityEdit(id, null)).Append(new EntityEdit(done.Kept.Id, done.Kept)).Concat(done.Redirected.Select(e => new EntityEdit(e.Id, e))).ToArray(), null);
+        }, ct);
+        return new JsonObject { ["kept"] = done!.Kept.Id.ToString(), ["removed"] = new JsonArray(done.Removed.Select(id => (JsonNode)id.ToString()).ToArray()), ["stay"] = StayJson(Stays.Resolve((await repository.ReadAsync(ct)).Trip, done.Kept)!) };
+    });
+
+    private static JsonObject StayJson(Stay stay) => new()
+    {
+        ["first_night"] = stay.FirstNight is { } first ? Date(first) : null,
+        ["nights"] = stay.Nights,
+        ["check_in"] = stay.CheckIn?.ToJson(),
+        ["check_out"] = stay.CheckOut?.ToJson(),
+        ["issues"] = new JsonArray(Enum.GetValues<StayIssues>().Where(i => i != StayIssues.None && stay.Issues.HasFlag(i)).Select(i => (JsonNode)i.ToString()).ToArray())
+    };
 
     [McpServerTool(Name = "get_schema", Title = "Read an entity schema", ReadOnly = true, Idempotent = true, OpenWorld = false)]
     [Description("The JSON Schema that entities of one type must satisfy. Useful when a change is rejected as invalid.")]
@@ -224,6 +263,9 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         {
             var entity = Find(state.Trip, id).Copy(); target = entity.Id;
             Merge(entity.Data, patch);
+            // Changing check-in or check-out moves the stay; its general time follows so other tools see the same nights.
+            if (patch["components"]?["accommodation"] is JsonObject changed && (changed.ContainsKey("check_in") || changed.ContainsKey("check_out")) && !patch.ContainsKey("time"))
+                entity = Stays.Align(state.Trip, entity);
             return ([new(entity.Id, entity)], null);
         }, ct);
         return new JsonObject { ["id"] = target.ToString(), ["entity"] = saved.Trip.Find(target)!.Data.DeepClone() };

@@ -37,14 +37,16 @@ Each server serves exactly one trip folder. Add one entry per trip you want the 
 | `list_entities` | no | Entities with id, title and, for schedule items, time and place; filter by type or text. |
 | `get_entity` | no | All fields of one entity, its note texts, its parent and what refers to it. |
 | `get_schedule` | no | The schedule day by day in the trip timezone, then the unscheduled ideas. |
+| `list_stays` | no | Stays with the nights they cover, nights without a stay, and stays that should be merged. |
 | `get_schema` | no | The JSON Schema of an entity type. |
 | `validate` | no | Errors and warnings for the whole trip. |
 | `list_versions` | no | Saved versions (Git commits), newest first. |
 | `compare` | no | Entities that differ between a version or variant and the current files. |
 | `create_entity` | yes | New schedule item, place, person, booking, task, expense, budget, collection or note. |
-| `update_entity` | yes | JSON merge patch on any entity, including the trip manifest. |
+| `update_entity` | yes | JSON merge patch on any entity, including the trip manifest. Changing a stay's check-in or check-out also updates its time. |
 | `delete_entity` | yes | Deletes an entity and its notes and removes references to it from other entities. Comments on it are deleted too. Places, documents, notes and bookings that only it used are listed as `unused`, or deleted with `also_delete_unused`. |
 | `add_note` | yes | Adds a Markdown note to an entity. |
+| `merge_stays` | yes | Merges stays that `list_stays` suggests, for example one item per night at the same place, into one stay. |
 | `create_version` | yes | Saves the current changes as a version. Assistants are told to do this only when asked. |
 
 Results are compact JSON. Times are shown as readable local times, for example `2027-05-14 Fri 09:00 to 11:00 Asia/Tokyo`.

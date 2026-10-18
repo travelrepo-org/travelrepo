@@ -113,6 +113,9 @@ public static class SemanticValidation
                     var q = TripQueries.Resolve(trip, schedule[j].Id, "participants").Value as JsonArray;
                     if (a.Start < b.End && b.Start < a.End && p is not null && q is not null && p.Any(x => q.Any(y => JsonNode.DeepEquals(x, y)))) result.Add(new("plan.overlap", Severity.Warning, schedule[i].Id.ToString(), "A participant has overlapping activities."));
                 }
+            foreach (var e in schedule)
+                if (Stays.Resolve(trip, e) is { } stay && stay.Issues.HasFlag(StayIssues.TimeMismatch))
+                    result.Add(new("stay.time_mismatch", Severity.Warning, e.Id.ToString(), "The stay's time does not match its check-in and check-out; check-in and check-out apply."));
             // Provider estimates are optional, derived input. They never make repository data invalid.
             var estimates = (travelEstimates ?? []).Where(x => x.Duration >= NodaTime.Duration.Zero).ToArray();
             foreach (var person in trip.Entities.Values.Where(e => e.Type == "person"))
