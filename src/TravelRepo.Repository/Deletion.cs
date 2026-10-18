@@ -28,7 +28,8 @@ public static class TripDeletion
     /// <summary>
     /// Plans deleting <paramref name="ids"/>. References from other entities are removed. An entity that becomes invalid
     /// without the reference, such as a comment on a deleted item, is deleted too. <see cref="DeletionPlan.Unused"/>
-    /// lists places, documents, notes and bookings that only the deleted entities used; they are not deleted unless the
+    /// lists places, documents, notes and bookings that only the deleted entities used, and bookings left without
+    /// booked items; they are not deleted unless the
     /// caller plans again with their IDs included. Markdown notes and document blobs that nothing uses any more are removed.
     /// </summary>
     public static DeletionPlan Plan(TripSnapshot trip, IEnumerable<Guid> ids)
@@ -57,7 +58,9 @@ public static class TripDeletion
         var remaining = trip.All.Where(e => !deleted.Contains(e.Id)).Select(e => updated.GetValueOrDefault(e.Id) ?? e).ToArray();
         var stillUsed = remaining.SelectMany(e => TripReferences.From(e)).Select(r => r.Target).ToHashSet();
         var removedEntities = deleted.Select(id => trip.Find(id)!).ToArray();
-        var unused = removedEntities.SelectMany(e => From(e)).Select(r => r.Target).Distinct()
+        // A booking whose booked items are all deleted is offered too, although the link points from the booking to them.
+        var emptied = updated.Values.Where(e => e.Type == "booking" && e.Data["items"] is JsonArray { Count: 0 } && trip.Find(e.Id)?.Data["items"] is JsonArray { Count: > 0 }).Select(e => e.Id);
+        var unused = removedEntities.SelectMany(e => From(e)).Select(r => r.Target).Concat(emptied).Distinct()
             .Where(id => !deleted.Contains(id) && !stillUsed.Contains(id)).Select(trip.Find).OfType<Entity>()
             .Where(e => OwnedTypes.Contains(e.Type)).OrderBy(e => e.Type, StringComparer.Ordinal).ThenBy(e => e.Title, StringComparer.CurrentCulture).ToArray();
         var remainingText = remaining.Select(e => e.Data.ToJsonString()).ToArray();

@@ -44,6 +44,7 @@ public class DeletionTests
         var cleanStay = TripReferences.Detach(stay, new HashSet<Guid> { lodge.Id, booking.Id });
         Assert.Null(cleanStay.Data["default_place"]);
         Assert.Null(cleanStay.Data["components"]!["booking"]);
+        Assert.NotNull(TripReferences.Detach(stay, new HashSet<Guid> { lodge.Id }).Data["components"]!["accommodation"]);
         Assert.Null(cleanStay.Data["components"]!["accommodation"]!["place"]);
         Assert.Equal("Loft", cleanStay.Data["components"]!["accommodation"]!["rooms"]![0]!.ToString());
         Assert.Empty(SchemaValidation.Validate(cleanStay));

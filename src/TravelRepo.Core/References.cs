@@ -46,14 +46,16 @@ public static class TripReferences
     /// <summary>
     /// Returns a copy of <paramref name="source"/> without references to <paramref name="targets"/>. List members are
     /// removed; a tagged list entry such as a content entry, a related item or a constraint is removed as a whole;
-    /// any other field is removed, and an object left empty by that is removed too. Extensions are not changed.
+    /// any other field is removed, and an object left empty by that is removed too, except an accommodation or
+    /// transport component. Extensions are not changed.
     /// </summary>
     public static Entity Detach(Entity source, IReadOnlySet<Guid> targets)
     {
         var copy = source.Copy();
         bool IsTarget(JsonNode? n) => n is JsonValue v && v.TryGetValue<string>(out var s) && Guid.TryParse(s, out var id) && targets.Contains(id);
-        // Removes references below the node. Returns whether anything changed.
-        bool Clean(JsonNode? node, bool root)
+        // Removes references below the node. Returns whether anything changed. A component that says what kind of item
+        // this is stays even when it becomes empty: an accommodation without a place is still a stay.
+        bool Clean(JsonNode? node, bool root, bool components = false)
         {
             var changed = false;
             if (node is JsonObject o)
@@ -63,7 +65,7 @@ public static class TripReferences
                     if (root && key == "id" || key == "extensions") continue;
                     if (IsTarget(o[key])) { o.Remove(key); changed = true; continue; }
                     // An object that only held the removed reference, such as a booking component or a cover, goes too.
-                    if (Clean(o[key], false)) { changed = true; if (o[key] is JsonObject { Count: 0 } && !(root && key == "components")) o.Remove(key); }
+                    if (Clean(o[key], false, root && key == "components")) { changed = true; if (o[key] is JsonObject { Count: 0 } && !(root && key == "components") && !(components && key is "accommodation" or "transport")) o.Remove(key); }
                 }
             }
             else if (node is JsonArray a)
