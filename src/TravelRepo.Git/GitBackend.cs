@@ -115,7 +115,7 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
     public async Task<SyncStatus> SyncStatusAsync(string? remote, CancellationToken ct = default)
     {
         var branch = await CurrentBranchAsync(ct); var dirty = !string.IsNullOrEmpty(await StatusAsync(ct));
-        if (remote is null) return new(branch, null, dirty, false, 0, 0);
+        if (remote is null || await IsLocalOnlyAsync(branch, ct)) return new(branch, null, dirty, false, 0, 0);
         var target = "refs/remotes/" + remote + "/" + await RemoteBranchAsync(remote, branch, ct);
         var exists = await backend.ExecuteAsync(Repository.Root, ["rev-parse", "--verify", "--quiet", target], cancellationToken: ct);
         if (exists.ExitCode != 0) return new(branch, remote, dirty, false, 0, 0);
@@ -195,7 +195,22 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
         if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https" && !string.IsNullOrEmpty(uri.UserInfo)) throw new DomainException("remote.credentials", "Do not include credentials in remote URLs.");
     }
     private async Task AddRemoteCoreAsync(string name, string url, CancellationToken ct = default) { ValidateRemote(url); await Run(ct, "remote", "add", name, url); }
-    private async Task FetchCoreAsync(string remote, CancellationToken ct = default) => await Run(ct, "fetch", "--", remote);
+    /// <remarks>Prunes remote-tracking branches that were deleted on the remote, so clients can offer to clean up their copies.</remarks>
+    private async Task FetchCoreAsync(string remote, CancellationToken ct = default)
+    {
+        async Task<Dictionary<string, string>> Tracking() => (await Run(ct, "for-each-ref", "--format=%(refname)%00%(objectname)", "refs/remotes/" + remote + "/")).Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(r => r.Split('\0')).Where(p => p.Length == 2).ToDictionary(p => p[0], p => p[1]);
+        var before = await Tracking();
+        await Run(ct, "fetch", "--prune", "--", remote);
+        var after = await Tracking();
+        // Remember where deleted remote branches last were, so local copies can tell their own versions from shared ones.
+        foreach (var (reference, commit) in before.Where(p => !after.ContainsKey(p.Key)))
+            await Run(ct, "update-ref", GonePrefix + reference["refs/remotes/".Length..], commit);
+        // Only branches that still have a local copy need that memory.
+        var tracked = (await Run(ct, "for-each-ref", "--format=%(upstream)", "refs/heads")).Split('\n', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
+        foreach (var gone in (await Run(ct, "for-each-ref", "--format=%(refname)", GonePrefix + remote + "/")).Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            if (!tracked.Contains("refs/remotes/" + gone[GonePrefix.Length..])) await Run(ct, "update-ref", "-d", gone);
+    }
     /// <summary>
     /// The branch on <paramref name="remote"/> that <paramref name="branch"/> tracks. A branch without tracking
     /// information on that remote uses its own name there.
@@ -209,7 +224,9 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
     }
     private async Task PushCoreAsync(string remote, CancellationToken ct = default)
     {
-        var branch = await CurrentBranchAsync(ct); var target = await RemoteBranchAsync(remote, branch, ct);
+        var branch = await CurrentBranchAsync(ct);
+        if (await IsLocalOnlyAsync(branch, ct)) return;
+        var target = await RemoteBranchAsync(remote, branch, ct);
         await Run(ct, "push", "--set-upstream", "--", remote, "HEAD:refs/heads/" + target);
     }
     private async Task<SyncState> SyncCoreAsync(string remote, CancellationToken ct = default)
@@ -217,7 +234,10 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
         for (var attempt = 0; ; attempt++)
         {
             await FetchCoreAsync(remote, ct); if (!string.IsNullOrEmpty(await StatusAsync(ct))) return SyncState.LocalChanges;
-            var branch = await CurrentBranchAsync(ct); var target = "refs/remotes/" + remote + "/" + await RemoteBranchAsync(remote, branch, ct);
+            var branch = await CurrentBranchAsync(ct);
+            // A variant kept only on this computer is not uploaded again.
+            if (await IsLocalOnlyAsync(branch, ct)) return SyncState.LocalOnly;
+            var target = "refs/remotes/" + remote + "/" + await RemoteBranchAsync(remote, branch, ct);
             try
             {
                 var exists = await backend.ExecuteAsync(Repository.Root, ["rev-parse", "--verify", "--quiet", target], cancellationToken: ct);
