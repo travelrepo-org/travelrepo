@@ -146,3 +146,70 @@ public class StayTests
         Assert.Equal([new LocalDate(2026, 11, 10), new LocalDate(2026, 11, 12), new LocalDate(2026, 11, 13)], Stays.MissingNights(trip).ToArray());
     }
 }
+
+public class StayDetailTests
+{
+    private const string Zone = "Pacific/Auckland";
+    private static TripSnapshot Trip(params Entity[] entities)
+    {
+        var manifest = Entity.CreateTrip("New Zealand", "en", Zone);
+        manifest.Data["dates"] = new JsonObject { ["start"] = "2026-11-08", ["end"] = "2026-11-12" };
+        return new(manifest, entities.ToDictionary(e => e.Id));
+    }
+    private static Entity Stay(JsonObject? accommodation = null)
+    {
+        var e = Entity.Create("schedule_item", "Lakeview Lodge"); e.Data["status"] = "confirmed";
+        e.Data["components"]!["accommodation"] = accommodation ?? new JsonObject();
+        return e;
+    }
+    private static Instant At(string local) => new ZonedTime(local, Zone).ToInstant();
+
+    [Fact]
+    public void WindowsAccessAndUnfixedHoursAreRead()
+    {
+        var stay = Stay(new JsonObject { ["check_in_window"] = new JsonObject { ["from"] = "16:00" }, ["check_out_window"] = new JsonObject { ["until"] = "10:00" }, ["access"] = "self" });
+        var placed = Stays.WithNights(Trip(), stay, new LocalDate(2026, 11, 9), 2);
+        var resolved = Stays.Resolve(Trip(placed), placed)!;
+        Assert.Equal(new LocalTime(16, 0), resolved.CheckInWindow!.From); Assert.Null(resolved.CheckInWindow.Until);
+        Assert.Equal("self", resolved.Access);
+        // Without planned hours the accommodation's hours are used, and they are marked as not fixed.
+        Assert.Equal("2026-11-09T16:00:00", resolved.CheckIn!.Local); Assert.Equal("2026-11-11T10:00:00", resolved.CheckOut!.Local);
+        Assert.True(resolved.CheckInApproximate); Assert.True(resolved.CheckOutApproximate);
+        Assert.Equal("approximate", placed.Data["time"]!["precision"]!.ToString());
+        Assert.Equal(StayIssues.None, resolved.Issues);
+        Assert.Empty(TravelRepo.Serialization.SchemaValidation.Validate(placed));
+
+        var fixedHours = Stays.WithSpan(placed, new ZonedTime("2026-11-09T18:30:00", Zone), new ZonedTime("2026-11-11T09:00:00", Zone));
+        Assert.False(Stays.Resolve(Trip(fixedHours), fixedHours)!.CheckInApproximate);
+        Assert.Null(StayWindow.Read(new JsonObject { ["from"] = "late" }));
+        Assert.NotEmpty(TravelRepo.Serialization.SchemaValidation.Validate(Stay(new JsonObject { ["check_in_window"] = new JsonObject { ["from"] = "25:00" } })));
+    }
+
+    [Fact]
+    public void RemindersCoverDeadlinesTasksArrivalsNightsAndBookings()
+    {
+        var stay = Stay(new JsonObject { ["check_in_window"] = new JsonObject { ["from"] = "15:00", ["until"] = "20:00" }, ["cancellation"] = new JsonObject { ["free_until"] = new ZonedTime("2026-11-05T18:00:00", Zone).ToJson() } });
+        stay = Stays.WithNights(Trip(), stay, new LocalDate(2026, 11, 8), 2);
+        var ferry = Entity.Create("schedule_item", "Ferry"); ferry.Data["components"]!["transport"] = new JsonObject { ["type"] = "ferry" };
+        ferry.Data["time"] = new JsonObject { ["precision"] = "exact", ["start"] = new ZonedTime("2026-11-08T18:00:00", Zone).ToJson(), ["end"] = new ZonedTime("2026-11-08T21:15:00", Zone).ToJson() };
+        var task = Entity.Create("task", "Book rental car"); task.Data["due"] = new JsonObject { ["date"] = "2026-11-04" };
+        var done = Entity.Create("task", "Passports"); done.Data["due"] = new JsonObject { ["date"] = "2026-11-01" }; done.Data["status"] = "completed";
+        var booking = Entity.Create("booking", "Glow worm tour"); booking.Data["status"] = "pending";
+        var trip = Trip(stay, ferry, task, done, booking);
+
+        var reminders = TripReminders.For(trip, At("2026-11-04T09:00:00"));
+        Assert.Contains(reminders, r => r.Kind == ReminderKind.CancellationDeadline && r.Entity == stay.Id);
+        Assert.Contains(reminders, r => r.Kind == ReminderKind.TaskDue && r.Entity == task.Id && r.Urgent);
+        Assert.DoesNotContain(reminders, r => r.Entity == done.Id);
+        Assert.Contains(reminders, r => r.Kind == ReminderKind.LateArrival && r.Entity == stay.Id);
+        Assert.Contains(reminders, r => r.Kind == ReminderKind.NightsWithoutStay && r.Dates.SequenceEqual(new[] { new LocalDate(2026, 11, 10), new LocalDate(2026, 11, 11) }));
+        Assert.Contains(reminders, r => r.Kind == ReminderKind.UnconfirmedBooking && r.Entity == booking.Id);
+        Assert.True(reminders[0].Urgent);
+        Assert.Equal(reminders.Select(r => r.Key), TripReminders.For(trip, At("2026-11-04T10:00:00")).Select(r => r.Key));
+
+        // Weeks before, the deadline and the booking are not mentioned yet; after the deadline the reminder goes away.
+        Assert.DoesNotContain(TripReminders.For(trip, At("2026-10-01T09:00:00")), r => r.Kind is ReminderKind.CancellationDeadline or ReminderKind.UnconfirmedBooking);
+        Assert.DoesNotContain(TripReminders.For(trip, At("2026-11-07T09:00:00")), r => r.Kind == ReminderKind.CancellationDeadline);
+        Assert.Contains(TripReminders.For(trip, At("2026-11-05T09:00:00")), r => r.Kind == ReminderKind.CancellationDeadline && r.Urgent);
+    }
+}

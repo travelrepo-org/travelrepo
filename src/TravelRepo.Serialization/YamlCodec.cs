@@ -111,7 +111,10 @@ public static class SchemaValidation
     public static IReadOnlyList<Diagnostic> Validate(Entity entity)
     {
         var schema = Schemas.GetValueOrDefault(entity.Type) ?? Schemas["custom"];
-        var result = schema.Evaluate(entity.Data, new EvaluationOptions { OutputFormat = OutputFormat.List });
+        // JsonSchema.Net prepares a schema lazily on first use, and parallel first evaluations of one schema
+        // sometimes skipped rules. One evaluation per schema at a time keeps results exact; it is fast enough.
+        EvaluationResults result;
+        lock (schema) result = schema.Evaluate(entity.Data, new EvaluationOptions { OutputFormat = OutputFormat.List });
         if (result.IsValid) return [];
         return [new("schema.invalid", Severity.Error, entity.Data["id"]?.ToString() ?? "travel.yaml", System.Text.Json.JsonSerializer.Serialize(result))];
     }

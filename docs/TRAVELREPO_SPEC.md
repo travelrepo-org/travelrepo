@@ -653,11 +653,34 @@ Night `D` is the night that begins on the evening of local date `D` at the stay.
 
 ### 24.2 Time
 
-Writers set `time` to the same span as check-in and check-out (`precision: exact`, `start` = `check_in`, `end` = `check_out`), so clients that only read `time` show the same stay. When `time` describes other nights or other moments, check-in and check-out apply and validation reports the warning `stay.time_mismatch`. It is a warning, not an error, so older or simpler clients are never blocked.
+Writers set `time` to the same span as check-in and check-out (`precision: exact`, or `approximate` when neither hour is fixed; `start` = `check_in`, `end` = `check_out`), so clients that only read `time` show the same stay. When `time` describes other nights or other moments, check-in and check-out apply and validation reports the warning `stay.time_mismatch`. It is a warning, not an error, so older or simpler clients are never blocked.
 
 Without known hours, clients may assume 15:00 for check-in and 10:00 for check-out. These are display defaults, not stored values, until a writer stores them.
 
-### 24.3 Planning help
+### 24.3 Details
+
+All of these are optional:
+
+```yaml
+accommodation:
+  check_in: { local: 2027-05-18T18:30:00, timezone: Asia/Tokyo }   # when you plan to arrive
+  check_out: { local: 2027-05-21T10:00:00, timezone: Asia/Tokyo, approximate: true }
+  check_in_window: { from: "15:00", until: "20:00" }   # the accommodation's hours, local time
+  check_out_window: { until: "10:00" }
+  access: self            # reception, self (key box, smart lock) or host
+  cancellation: { free_until: { local: 2027-05-04T23:59:00, timezone: Asia/Tokyo }, note: "Full refund" }
+  breakfast: included     # included, available or none
+  parking: { included: true, note: "Two spaces behind the house" }
+  arrival_notes: "Gate code is sent the day before."
+```
+
+`check_in` and `check_out` are the travellers' plan; the windows are the accommodation's rules. `approximate: true` marks an hour that is not fixed, for example a self check-in at any time: only the day counts. When no hour is known, clients may use the start of the check-in window and the end of the check-out window, marked as approximate. A booking may also have `cancellation`, and a place may have `contact` with `phone`, `email` and `website`.
+
+Door codes, key box codes and similar access secrets must not be stored in the repository (section 40).
+
+### 24.4 Planning help
+
+Clients may remind travellers of free cancellation deadlines, of arrivals after the check-in window (from the planned check-in or a journey ending that day), of tasks due and of bookings not confirmed shortly before they start. Reminders are derived from the data and never stored in the repository.
 
 Clients may report nights between the trip's first and last day that have no stay and no other item running through most of the night (22:00 to 06:00 in the trip's or the item's timezone), and may offer to merge stays at the same place whose nights follow each other or overlap. These are hints derived from the data; they never make a repository invalid.
 
