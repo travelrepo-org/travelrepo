@@ -31,6 +31,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TravelRepo.Mcp", "src\Trave
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TravelRepo.Documents", "src\TravelRepo.Documents\TravelRepo.Documents.csproj", "{172FE2F3-E636-492C-8B23-FAC8AFC05D84}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TravelRepo.Providers.Weather", "src\TravelRepo.Providers.Weather\TravelRepo.Providers.Weather.csproj", "{05767227-B06E-46A9-9F6E-12C212A66ACF}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -185,6 +187,18 @@ Global
 		{172FE2F3-E636-492C-8B23-FAC8AFC05D84}.Release|x64.Build.0 = Release|Any CPU
 		{172FE2F3-E636-492C-8B23-FAC8AFC05D84}.Release|x86.ActiveCfg = Release|Any CPU
 		{172FE2F3-E636-492C-8B23-FAC8AFC05D84}.Release|x86.Build.0 = Release|Any CPU
+		{05767227-B06E-46A9-9F6E-12C212A66ACF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{05767227-B06E-46A9-9F6E-12C212A66ACF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{05767227-B06E-46A9-9F6E-12C212A66ACF}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{05767227-B06E-46A9-9F6E-12C212A66ACF}.Debug|x64.Build.0 = Debug|Any CPU
+		{05767227-B06E-46A9-9F6E-12C212A66ACF}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{05767227-B06E-46A9-9F6E-12C212A66ACF}.Debug|x86.Build.0 = Debug|Any CPU
+		{05767227-B06E-46A9-9F6E-12C212A66ACF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{05767227-B06E-46A9-9F6E-12C212A66ACF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{05767227-B06E-46A9-9F6E-12C212A66ACF}.Release|x64.ActiveCfg = Release|Any CPU
+		{05767227-B06E-46A9-9F6E-12C212A66ACF}.Release|x64.Build.0 = Release|Any CPU
+		{05767227-B06E-46A9-9F6E-12C212A66ACF}.Release|x86.ActiveCfg = Release|Any CPU
+		{05767227-B06E-46A9-9F6E-12C212A66ACF}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -202,5 +216,6 @@ Global
 		{7984B99B-012D-426E-8A5A-B66109AE675E} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{7ED52D58-6197-4623-BB26-76620BA76035} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{172FE2F3-E636-492C-8B23-FAC8AFC05D84} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{05767227-B06E-46A9-9F6E-12C212A66ACF} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

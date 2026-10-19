@@ -29,7 +29,7 @@ Every entity has `id` (a UUID, version 7), `type` and usually `extensions: {}`. 
 | type | stored in | required fields | common optional fields |
 |---|---|---|---|
 | `trip` | `travel.yaml` | `title`, `language`, `variant` | `dates.start`, `dates.end` (`YYYY-MM-DD`), `default_timezone`, `participants` (person IDs) |
-| `schedule_item` | `schedule/` | `title`, `status` | `time`, `category`, `default_place`, `duration`, `participants`, `components`, `children`, `content`, `constraints`, `tags` |
+| `schedule_item` | `schedule/` | `title`, `status` | `time`, `category`, `outdoor`, `default_place`, `duration`, `participants`, `components`, `children`, `content`, `constraints`, `tags` |
 | `place` | `places/` | `name` | `location.latitude`, `location.longitude`, `address.formatted`, `timezone` |
 | `person` | `people/` | `display_name` | `roles` |
 | `booking` | `bookings/` | | `provider.name`, `reference`, `status`, `travelers`, `items` (schedule item IDs), `price` |
@@ -46,7 +46,7 @@ Money is `{ value: "149.90", currency: EUR }`: the value is a decimal string and
 
 `status` is one of `idea`, `planned`, `reserved`, `confirmed`, `completed`, `cancelled`. New suggestions that the travellers have not agreed on yet should be `idea`.
 
-`category` is one of `activity`, `sightseeing`, `food`, `culture`, `nature`, `shopping`, `nightlife`, `meeting`, `free_time`, `transport`, `accommodation`, `other`.
+`category` is one of `activity`, `sightseeing`, `food`, `culture`, `nature`, `shopping`, `nightlife`, `meeting`, `free_time`, `transport`, `accommodation`, `other`. Set `outdoor: true` or `false` only when the person says so or it is clear (a hike, a museum); clients otherwise estimate it, and the schedule shows that estimate.
 
 `default_place` is the ID of a place entity. `participants` is `{ inherit: true }` to take the parent's people, or `{ values: [person IDs] }`.
 
@@ -68,7 +68,7 @@ components:
 
 A stay is one item for all its nights, not one item per night. `check_in` and `check_out` decide which nights it covers: from the check-in day to the day before check-out. Set `time` to the same span (`precision: exact`, `start` = check-in, `end` = check-out) so that other tools see it too; `update_entity` does this for you when you change check-in or check-out. If `time` says something else, check-in and check-out apply and validation warns with `stay.time_mismatch`. Without exact hours use 15:00 and 10:00. `list_stays` shows each stay's nights, nights without a stay, and stays that should be merged.
 
-Optional stay details, all inside `accommodation`: `check_in_window` and `check_out_window` with `from` and `until` as `HH:MM` (the accommodation's own hours, not your plan), `access` (`reception`, `self` for a key box or smart lock, `host`), `approximate: true` inside `check_in` or `check_out` when the hour is not fixed, `cancellation: { free_until: <zoned time>, note }`, `breakfast` (`included`, `available`, `none`), `parking: { included, note }` and `arrival_notes`. A booking can have `cancellation` too, and a place `contact: { phone, email, website }`. Never store key box codes or door codes in the trip. `list_reminders` shows deadlines and other things that need attention.
+Optional stay details, all inside `accommodation`: `check_in_window` and `check_out_window` with `from` and `until` as `HH:MM` (the accommodation's own hours, not your plan), `access` (`reception`, `self` for a key box or smart lock, `host`), `approximate: true` inside `check_in` or `check_out` when the hour is not fixed, `cancellation: { free_until: <zoned time>, note }`, `breakfast` (`included`, `available`, `none`), `parking: { included, note }` and `arrival_notes`. A booking can have `cancellation` too, and a place `contact: { phone, email, website }`. Never store key box codes or door codes in the trip. `list_reminders` shows deadlines and other things that need attention. `get_weather` shows the weather the user's app has cached for the trip; it is not live, so say how old it is when it matters, and never present climate averages as a forecast.
 
 A stay overlapping other plans is normal and not a conflict. Overlapping activities are allowed too; they are shown side by side.
 

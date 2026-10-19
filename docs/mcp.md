@@ -1,6 +1,6 @@
 # AI assistants (MCP) and the agent guide
 
-TravelRepo can serve one trip to an AI assistant through the [Model Context Protocol](https://modelcontextprotocol.io/) (MCP). The assistant starts the server as a local process and talks to it over standard input and output. Nothing is sent over the network by the server, and it has no AI logic of its own: it only offers the trip's data and the TravelRepo commands to change it.
+TravelRepo can serve one trip to an AI assistant through the [Model Context Protocol](https://modelcontextprotocol.io/) (MCP). The assistant starts the server as a local process and talks to it over standard input and output. Nothing is sent over the network by the server, and it has no AI logic of its own. Weather comes only from the client's cache (`TripServerOptions.Weather`): the server uses a cache-only weather service that cannot download, so an assistant cannot use it to look up other places or refresh forecasts: it only offers the trip's data and the TravelRepo commands to change it.
 
 There is also an agent guide, [`skills/travelrepo/SKILL.md`](../skills/travelrepo/SKILL.md). It explains the file format and the editing rules to assistants. The MCP server hands it out through its `read_guide` tool, and assistants that work on files directly can use it as a skill or as project instructions.
 
@@ -37,6 +37,7 @@ Each server serves exactly one trip folder. Add one entry per trip you want the 
 | `list_entities` | no | Entities with id, title and, for schedule items, time and place; filter by type or text. |
 | `get_entity` | no | All fields of one entity, its note texts, its parent and what refers to it. |
 | `get_schedule` | no | The schedule day by day in the trip timezone, then the unscheduled ideas. |
+| `get_weather` | no | The weather the client last downloaded for the trip, from its local cache: per day, per item with the outdoor estimate and warnings, each with its age. Never fetches; says so when weather is off in the client. |
 | `list_reminders` | no | Cancellation deadlines, tasks due, late arrivals, nights without a stay and unconfirmed bookings that need attention now. |
 | `list_stays` | no | Stays with the nights they cover, nights without a stay, and stays that should be merged. |
 | `read_document` | no | The text of an attached PDF, or the headers, text and attachment names of an attached e-mail. |
