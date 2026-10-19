@@ -13,3 +13,5 @@ dotnet run --project src/TravelRepo.Cli -- --help
 Use .NET SDK 10.0.401 and Git. See [development](docs/development.md), [schemas](docs/schemas.md), [CLI](docs/cli.md), [providers](docs/providers.md), [plugins](docs/plugins.md), [AI assistants (MCP)](docs/mcp.md), and the [specification](docs/TRAVELREPO_SPEC.md). Samples are validated by the conformance suite.
 
 This implementation is under v1 acceptance validation. See [acceptance status](docs/acceptance.md) for verified behavior and remaining gaps.
+
+What changed in each release is in [CHANGELOG.md](CHANGELOG.md).

@@ -1,0 +1,5 @@
+version: 0.2.0
+date: 2026-10-04
+changes:
+  - en: Providers can report the signed-in account and forget the sign-in.
+  - en: Releases become full releases once their packages are attached.
