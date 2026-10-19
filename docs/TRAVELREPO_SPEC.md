@@ -637,6 +637,30 @@ Structured fields may include:
 - confirmation data
 - documents
 
+A schedule item with an `accommodation` component is a stay. One stay covers all its nights; it is not repeated per night.
+
+### 24.1 Nights
+
+Night `D` is the night that begins on the evening of local date `D` at the stay. `check_in` and `check_out` are authoritative:
+
+| Set | Nights |
+|---|---|
+| `check_in` and `check_out` | From the check-in date to the day before the check-out date. Both on the same date is a day room without a night. |
+| only `check_in` | One night, unless `time` ends on a later date; then until the day before that date. |
+| only `check_out` | From the start date of `time` if it is earlier, otherwise the night before check-out. |
+| neither | From `time`: the start date to the day before the end date (at least one night), or the night of `date` for `day_part` and `all_day`. |
+| nothing | The stay is not scheduled. |
+
+### 24.2 Time
+
+Writers set `time` to the same span as check-in and check-out (`precision: exact`, `start` = `check_in`, `end` = `check_out`), so clients that only read `time` show the same stay. When `time` describes other nights or other moments, check-in and check-out apply and validation reports the warning `stay.time_mismatch`. It is a warning, not an error, so older or simpler clients are never blocked.
+
+Without known hours, clients may assume 15:00 for check-in and 10:00 for check-out. These are display defaults, not stored values, until a writer stores them.
+
+### 24.3 Planning help
+
+Clients may report nights between the trip's first and last day that have no stay and no other item running through most of the night (22:00 to 06:00 in the trip's or the item's timezone), and may offer to merge stays at the same place whose nights follow each other or overlap. These are hints derived from the data; they never make a repository invalid.
+
 ## 25. Activities and restaurants
 
 General activities should use schedule items plus semantic components.

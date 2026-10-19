@@ -74,6 +74,7 @@ Do not use ReactiveUI unless a concrete requirement appears that CommunityToolki
 │   ├── TravelRepo.Repository/
 │   ├── TravelRepo.Git/
 │   ├── TravelRepo.Merge/
+│   ├── TravelRepo.Documents/
 │   ├── TravelRepo.Providers.Abstractions/
 │   ├── TravelRepo.Providers.GitHub/
 │   ├── TravelRepo.Plugins.Abstractions/
@@ -199,6 +200,20 @@ Depends on:
 - TravelRepo.Repository.
 
 It may consume Git-provided base/ours/theirs snapshots through abstractions, but merge semantics must not depend on Git CLI output.
+
+### TravelRepo.Documents
+
+Owns:
+- reading e-mail messages saved as `.eml`: headers, readable text, attachments,
+- converting HTML mail to text without loading remote content,
+- the text of PDF documents for search and assistants,
+- media types from file names.
+
+Depends on:
+- TravelRepo.Core,
+- MimeKit and PdfPig.
+
+It never renders documents and never contacts the network. Clients render PDFs and mail themselves.
 
 ### TravelRepo.Providers.Abstractions
 

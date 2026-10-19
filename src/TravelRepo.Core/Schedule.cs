@@ -108,6 +108,18 @@ public static class ScheduleQueries
     /// <summary>Resolve the span of a schedule item, falling back to nested children for unscheduled parents.</summary>
     public static ScheduleSpan Span(TripSnapshot trip, Entity item)
     {
+        // A stay with check-in or check-out spans from check-in to check-out, whatever its general time says.
+        if (Stays.IsStay(item) && item.Data["components"]!["accommodation"] is JsonObject accommodation && (accommodation["check_in"] is not null || accommodation["check_out"] is not null)
+            && Stays.Resolve(trip, item) is { FirstNight: { } first } stay && DateTimeZoneProviders.Tzdb.GetZoneOrNull(stay.Zone) is { } stayZone)
+        {
+            try
+            {
+                var arrive = stay.CheckIn?.ToInstant() ?? stayZone.AtLeniently(first.At(Stays.DefaultCheckIn)).ToInstant();
+                var leave = stay.CheckOut?.ToInstant() ?? stayZone.AtLeniently(first.PlusDays(Math.Max(1, stay.Nights)).At(Stays.DefaultCheckOut)).ToInstant();
+                if (leave > arrive) return new(TimePrecision.Exact, arrive, leave, null, null, stay.CheckIn?.Timezone ?? stay.Zone, stay.CheckOut?.Timezone ?? stay.Zone, false);
+            }
+            catch (DomainException) { }
+        }
         var precision = PrecisionOf(item); var time = item.Data["time"] as JsonObject;
         ZonedTime? Read(string key) { try { return time?[key] is JsonObject t ? ZonedTime.From(t) : null; } catch (Exception ex) when (ex is DomainException or InvalidOperationException) { return null; } }
         Instant? At(ZonedTime? value) { try { return value?.ToInstant(); } catch (DomainException) { return null; } }

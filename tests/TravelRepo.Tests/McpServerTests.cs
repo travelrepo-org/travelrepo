@@ -103,6 +103,51 @@ public sealed class McpServerTests : IDisposable
     }
 
     [Fact]
+    public async Task StaysAreListedMovedAndMergedAsOneStay()
+    {
+        var (repo, _) = await Trip(); var client = await Connect(repo.Root);
+        var ryokan = (await Call(client, "create_entity", """{"type":"place","data":{"name":"Ryokan"}}"""))["id"]!.ToString();
+        string Night(string date) => "{\"type\":\"schedule_item\",\"data\":{\"title\":\"Ryokan\",\"status\":\"reserved\",\"time\":{\"precision\":\"day_part\",\"date\":\"" + date + "\",\"day_part\":\"night\",\"timezone\":\"Asia/Tokyo\"},\"components\":{\"accommodation\":{\"place\":\"" + ryokan + "\"}}}}";
+        var first = (await Call(client, "create_entity", Night("2027-05-14")))["id"]!.ToString();
+        var second = (await Call(client, "create_entity", Night("2027-05-15")))["id"]!.ToString();
+
+        var stays = await Call(client, "list_stays");
+        var suggestion = Assert.Single(stays["merge_suggestions"]!.AsArray())!;
+        Assert.Equal(2, suggestion["nights"]!.GetValue<int>());
+        var merged = await Call(client, "merge_stays", "{\"ids\":[\"" + first + "\",\"" + second + "\"]}");
+        Assert.Equal(first, merged["kept"]!.ToString()); Assert.Equal(2, merged["stay"]!["nights"]!.GetValue<int>());
+        Assert.Null((await repo.ReadAsync()).Trip.Find(Guid.Parse(second)));
+
+        // Moving the check-out moves the stay's general time with it.
+        await Call(client, "update_entity", "{\"id\":\"" + first + "\",\"changes\":{\"components\":{\"accommodation\":{\"check_out\":{\"local\":\"2027-05-17T10:00:00\",\"timezone\":\"Asia/Tokyo\"}}}}}");
+        var details = await Call(client, "get_entity", "{\"id\":\"" + first + "\"}");
+        Assert.Equal(3, details["stay"]!["nights"]!.GetValue<int>()); Assert.Empty(details["stay"]!["issues"]!.AsArray());
+        Assert.Equal("2027-05-17T10:00:00", details["entity"]!["time"]!["end"]!["local"]!.ToString());
+        Assert.True((await Call(client, "validate"))["valid"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task AConfirmationMailIsAttachedAndRead()
+    {
+        var (repo, _) = await Trip(); var client = await Connect(repo.Root);
+        var booking = (await Call(client, "create_entity", """{"type":"booking","data":{"title":"Lakeview Lodge"}}"""))["id"]!.ToString();
+        var file = Path.Combine(root, "confirmation.eml"); await File.WriteAllBytesAsync(file, DocumentTests.Confirmation());
+        var imported = await Call(client, "import_document", JsonSerializer.Serialize(new { path = file, attach_to = booking, split_attachments = true }));
+        var documents = imported["documents"]!.AsArray();
+        Assert.Equal(["confirmation.eml", "ticket.pdf", "Earlier offer.eml"], documents.Select(d => d!["name"]!.ToString()).ToArray());
+        var trip = (await repo.ReadAsync()).Trip;
+        Assert.Equal(3, TripCommands.AttachedDocuments(trip, trip.Find(Guid.Parse(booking))!).Count);
+
+        var mail = await Call(client, "read_document", JsonSerializer.Serialize(new { id = documents[0]!["id"]!.ToString() }));
+        Assert.Equal("Your booking 4711 is confirmed", mail["mail"]!["subject"]!.ToString());
+        Assert.Contains("Check-in from 15:00", mail["text"]!.ToString());
+        var ticket = await Call(client, "read_document", JsonSerializer.Serialize(new { id = documents[1]!["id"]!.ToString() }));
+        Assert.Contains("Booking 4711", ticket["text"]!.ToString());
+        Assert.Contains("absolute path", await Call(client, "import_document", JsonSerializer.Serialize(new { path = "relative.eml" }), expectError: true));
+        Assert.True((await Call(client, "validate"))["valid"]!.GetValue<bool>());
+    }
+
+    [Fact]
     public async Task EditsFromOtherProgramsAreSeenAndNotOverwritten()
     {
         var (repo, _) = await Trip(); var client = await Connect(repo.Root);

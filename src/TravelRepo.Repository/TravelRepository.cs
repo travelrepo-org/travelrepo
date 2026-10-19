@@ -193,8 +193,13 @@ public sealed partial class TravelRepository
     public static async Task<(Entity Document, ResourceEdit Resource)> PrepareDocumentAsync(string path, string mediaType, bool allowLarge = false, CancellationToken ct = default)
     {
         if (new FileInfo(path).Length > 25 * 1024 * 1024 && !allowLarge) throw new DomainException("asset.large", "This file exceeds 25 MB. Confirm before adding it to trip history.");
-        var bytes = await File.ReadAllBytesAsync(path, ct); var hash = Hash(bytes);
-        var document = Entity.Create("document", Path.GetFileName(path)); document.Data["media_type"] = mediaType; document.Data["blob"] = new JsonObject { ["algorithm"] = "sha256", ["hash"] = hash };
+        return PrepareDocument(await File.ReadAllBytesAsync(path, ct), Path.GetFileName(path), mediaType);
+    }
+    /// <summary>Prepare a document from bytes, for example an attachment taken out of an e-mail.</summary>
+    public static (Entity Document, ResourceEdit Resource) PrepareDocument(byte[] bytes, string name, string mediaType)
+    {
+        var hash = Hash(bytes);
+        var document = Entity.Create("document", name); document.Data["media_type"] = mediaType; document.Data["blob"] = new JsonObject { ["algorithm"] = "sha256", ["hash"] = hash };
         return (document, new("assets/sha256/" + hash[..2] + "/" + hash, bytes));
     }
     public string DocumentPath(Entity doc)

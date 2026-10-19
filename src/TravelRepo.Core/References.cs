@@ -84,4 +84,35 @@ public static class TripReferences
         Clean(copy.Data, true);
         return copy;
     }
+
+    /// <summary>
+    /// Returns a copy of <paramref name="source"/> in which references to any of <paramref name="from"/> point to
+    /// <paramref name="to"/> instead. A list that would then name <paramref name="to"/> twice keeps it once.
+    /// </summary>
+    public static Entity Redirect(Entity source, IReadOnlySet<Guid> from, Guid to)
+    {
+        var copy = source.Copy(); var target = to.ToString();
+        void Visit(JsonNode? node, bool root)
+        {
+            switch (node)
+            {
+                case JsonObject o:
+                    foreach (var key in o.Select(p => p.Key).ToArray())
+                    {
+                        if (root && key == "id") continue;
+                        if (Matches(o[key])) o[key] = target; else Visit(o[key], false);
+                    }
+                    break;
+                case JsonArray a:
+                    for (var i = 0; i < a.Count; i++) if (Matches(a[i])) a[i] = target; else Visit(a[i], false);
+                    var seen = false;
+                    for (var i = 0; i < a.Count; i++)
+                        if (a[i] is JsonValue v && v.TryGetValue<string>(out var s) && s == target) { if (seen) a.RemoveAt(i--); seen = true; }
+                    break;
+            }
+        }
+        bool Matches(JsonNode? n) => n is JsonValue v && v.TryGetValue<string>(out var s) && Guid.TryParse(s, out var id) && from.Contains(id);
+        Visit(copy.Data, true);
+        return copy;
+    }
 }
