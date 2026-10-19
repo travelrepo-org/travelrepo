@@ -30,6 +30,14 @@ public sealed class GitSyncTests : IDisposable
     }
 
     [Fact]
+    public async Task AMissingTripFolderIsAnExplainedErrorNotACrash()
+    {
+        var missing = Path.Combine(Path.GetTempPath(), "travelrepo-missing-" + Guid.NewGuid());
+        var error = await Assert.ThrowsAsync<DomainException>(() => new GitCliBackend().ExecuteAsync(missing, ["status"]));
+        Assert.Equal("git.folder_missing", error.Code);
+    }
+
+    [Fact]
     public async Task FilesOutsideTheTripDoNotCountAsChanges()
     {
         var (repo, git, _, _) = await TwoClones();

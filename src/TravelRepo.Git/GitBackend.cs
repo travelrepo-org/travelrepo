@@ -43,6 +43,8 @@ public sealed class GitCliBackend(string? executable = null, ICredentialBroker? 
     }
     public async Task<GitResult> ExecuteAsync(string directory, IReadOnlyList<string> arguments, string? input = null, CancellationToken cancellationToken = default)
     {
+        // A trip folder that was moved or deleted while open would make starting Git fail with a platform error.
+        if (!Directory.Exists(directory)) throw new DomainException("git.folder_missing", "The trip folder no longer exists: " + directory);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); timeout.CancelAfter(TimeSpan.FromMinutes(2));
         var start = new ProcessStartInfo(Executable) { WorkingDirectory = directory, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true, UseShellExecute = false, CreateNoWindow = true };
         start.Environment["GIT_TERMINAL_PROMPT"] = "0"; start.Environment["LC_ALL"] = "C"; start.Environment["GCM_INTERACTIVE"] = "never";
