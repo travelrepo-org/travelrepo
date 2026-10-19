@@ -119,7 +119,7 @@ public sealed class GitSyncTests : IDisposable
         var (_, git, _, _) = await TwoClones();
         await git.AddRemoteAsync("broken", Path.Combine(root, "missing.git"));
         var error = await Assert.ThrowsAsync<GitCommandException>(() => git.FetchAsync("broken"));
-        Assert.Equal("git fetch -- broken", error.Command); Assert.NotEqual(0, error.ExitCode); Assert.NotEmpty(error.Output);
+        Assert.Equal("git fetch --prune -- broken", error.Command); Assert.NotEqual(0, error.ExitCode); Assert.NotEmpty(error.Output);
     }
 
     [Theory]
@@ -143,5 +143,95 @@ public sealed class GitSyncTests : IDisposable
         Assert.DoesNotContain("secret", text); Assert.DoesNotContain("YWxleDpzZWNyZXQ", text); Assert.DoesNotContain("ghp_", text);
         Assert.Contains("https://***@github.com", text); Assert.Contains("~", text);
         if (home.Length > 1) Assert.DoesNotContain(home, text);
+    }
+
+    [Fact]
+    public async Task TheOverviewCombinesLocalAndRemoteCopiesWithTheirState()
+    {
+        var (repo, git, other, otherGit) = await TwoClones();
+        await git.CreateVariantAsync("variants/road-trip", "Road trip"); await git.PushAsync("origin");
+        await otherGit.FetchAsync("origin");
+        var before = await otherGit.VariantOverviewAsync("origin");
+        var remoteOnly = Assert.Single(before, v => v.Title == "Road trip");
+        Assert.True(remoteOnly.RemoteOnly); Assert.True(Assert.Single(before, v => v.Primary).Current);
+
+        await otherGit.SwitchAsync("origin/variants/road-trip");
+        await Add(repo, git, "Hot pools"); await git.PushAsync("origin"); await otherGit.FetchAsync("origin");
+        var behind = Assert.Single(await otherGit.VariantOverviewAsync("origin"), v => v.Title == "Road trip");
+        Assert.Equal(("variants/road-trip", "origin/variants/road-trip"), (behind.LocalBranch, behind.RemoteBranch));
+        Assert.Equal((0, 1), (behind.Ahead, behind.Behind));
+        await Add(other, otherGit, "Glow worms");
+        var diverged = Assert.Single(await otherGit.VariantOverviewAsync("origin"), v => v.Title == "Road trip");
+        Assert.True(diverged.Diverged); Assert.Equal(1, diverged.OnlyHere); Assert.True(diverged.Current);
+    }
+
+    [Fact]
+    public async Task DeletingAVariantKeepsItRestorableAndCanDeleteTheRemoteCopy()
+    {
+        var (repo, git, _, _) = await TwoClones();
+        await git.CreateVariantAsync("variants/road-trip", "Road trip"); await git.PushAsync("origin");
+        await Assert.ThrowsAsync<DomainException>(() => git.DeleteVariantAsync("variants/road-trip", false, "origin"));
+        await git.SwitchAsync("main");
+        await Assert.ThrowsAsync<DomainException>(() => git.DeleteVariantAsync("main", false, "origin"));
+        var deleted = await git.DeleteVariantAsync("variants/road-trip", true, "origin");
+        Assert.Equal("Road trip", deleted.Title);
+        Assert.DoesNotContain("road-trip", (await backend.ExecuteAsync(Remote, ["for-each-ref", "refs/heads"])).Output);
+        var bin = Assert.Single(await git.DeletedVariantsAsync()); Assert.Equal("variants/road-trip", bin.Branch);
+
+        var restored = await git.RestoreVariantAsync(bin);
+        Assert.Equal("variants/road-trip", restored); Assert.Empty(await git.DeletedVariantsAsync());
+        Assert.True(await git.IsLocalOnlyAsync(restored));
+        Assert.Contains(await git.VariantOverviewAsync("origin"), v => v.LocalBranch == restored && v.LocalOnly && !v.OnRemote);
+
+        await git.DeleteVariantAsync(restored, false, "origin");
+        Assert.Equal(0, await git.PurgeDeletedVariantsAsync(TimeSpan.FromDays(30)));
+        Assert.Equal(1, await git.PurgeDeletedVariantsAsync(TimeSpan.Zero));
+    }
+
+    [Fact]
+    public async Task AVariantDeletedOnTheRemoteIsReportedAndCanBeKeptWithoutComingBack()
+    {
+        var (repo, git, other, otherGit) = await TwoClones();
+        await git.CreateVariantAsync("variants/road-trip", "Road trip"); await git.CreateVariantAsync("variants/cheap", "Cheap"); await git.PushAsync("origin");
+        await git.SwitchAsync("variants/road-trip"); await git.PushAsync("origin"); await git.SwitchAsync("main");
+        await otherGit.FetchAsync("origin");
+        await otherGit.SwitchAsync("origin/variants/road-trip"); await Add(other, otherGit, "Only mine");
+        await otherGit.SwitchAsync("origin/variants/cheap"); await otherGit.SwitchAsync("main");
+
+        await git.DeleteVariantAsync("variants/road-trip", true, "origin"); await git.DeleteVariantAsync("variants/cheap", true, "origin");
+        await otherGit.SyncAsync("origin");
+        var gone = (await otherGit.VariantOverviewAsync("origin")).Where(v => v.UpstreamGone).OrderBy(v => v.Title).ToArray();
+        Assert.Equal(["Cheap", "Road trip"], gone.Select(v => v.Title).ToArray());
+        Assert.Equal(0, gone[0].OnlyHere); Assert.Equal(1, gone[1].OnlyHere);
+
+        await otherGit.KeepLocalOnlyAsync("variants/road-trip"); await otherGit.DeleteVariantAsync("variants/cheap", false, "origin");
+        await otherGit.SwitchAsync("variants/road-trip");
+        Assert.Equal(SyncState.LocalOnly, await otherGit.SyncAsync("origin"));
+        Assert.Equal(SyncState.LocalOnly, (await otherGit.SyncStatusAsync("origin")).State);
+        Assert.DoesNotContain("road-trip", (await backend.ExecuteAsync(Remote, ["for-each-ref", "refs/heads"])).Output);
+
+        await otherGit.ShareVariantAsync("variants/road-trip", "origin");
+        Assert.Contains("road-trip", (await backend.ExecuteAsync(Remote, ["for-each-ref", "refs/heads"])).Output);
+        Assert.False(await otherGit.IsLocalOnlyAsync("variants/road-trip"));
+    }
+
+    [Fact]
+    public async Task VariantsThatAreNotOpenSyncWithoutSwitching()
+    {
+        var (repo, git, other, otherGit) = await TwoClones();
+        await git.CreateVariantAsync("variants/road-trip", "Road trip"); await git.PushAsync("origin"); await git.SwitchAsync("main");
+        await otherGit.FetchAsync("origin"); await otherGit.SwitchAsync("origin/variants/road-trip"); await otherGit.SwitchAsync("main");
+        await git.SwitchAsync("variants/road-trip"); await Add(repo, git, "Hot pools"); await git.PushAsync("origin"); await git.SwitchAsync("main");
+        await otherGit.FetchAsync("origin");
+        Assert.Equal(SyncState.Synced, await otherGit.SyncVariantAsync("variants/road-trip", "origin"));
+        var synced = Assert.Single(await otherGit.VariantOverviewAsync("origin"), v => v.Title == "Road trip");
+        Assert.Equal((0, 0), (synced.Ahead, synced.Behind));
+        Assert.Equal("main", await otherGit.CurrentBranchAsync());
+
+        // Taken over: the variant records which plan merged it.
+        await git.SwitchAsync("variants/road-trip"); await git.MarkMergedAsync(Guid.CreateVersion7().ToString(), "abc"); await git.SwitchAsync("main");
+        var merged = Assert.Single(await git.VariantOverviewAsync("origin"), v => v.LocalBranch == "variants/road-trip");
+        Assert.True(merged.Merged); Assert.True(merged.Archived);
+        Assert.Empty(TravelRepo.Serialization.SchemaValidation.Validate(new Entity(merged.Manifest)));
     }
 }

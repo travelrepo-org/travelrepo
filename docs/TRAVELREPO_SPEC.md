@@ -199,6 +199,19 @@ Variant identity must not depend on the branch name. Branches may be renamed.
 
 Archiving a variant updates its own metadata. A client may create a small administrative commit for this change and hide such commits from the default human-friendly history.
 
+A variant that was merged into another stays `archived` and may record which variant took it over:
+
+```yaml
+variant:
+  state: archived
+  merged_into:
+    variant_id: 0195f370-51ab-76c8-a919-cfd5940fb001
+    commit: 6c4bb7a...
+    at: "2027-04-02T10:15:00Z"
+```
+
+Deleting a variant deletes its branch. Clients should keep deleted variants restorable for a while through local references that are never pushed; the reference implementation uses `refs/travelrepo/deleted/<UTC timestamp>/<branch>` and keeps them for 30 days. When a variant branch was deleted on a remote, clients fetch with pruning and ask before deleting their local copy. A copy kept "only on this computer" loses its upstream and must not be pushed again automatically, so it does not return for the people who deleted it; the reference implementation marks it with the local Git setting `branch.<name>.travelrepoLocalOnly`. To tell versions that exist only locally from shared ones after pruning, it remembers the last known remote position under `refs/travelrepo/gone/<remote>/<branch>`.
+
 Dedicated Git refs may be introduced in later versions for metadata that cannot be represented safely inside the branch itself, but they are not required by v1.
 
 ## 7. Git behavior
