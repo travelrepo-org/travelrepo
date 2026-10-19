@@ -15,7 +15,12 @@ public enum ReminderKind
     /// <summary>Nights between the trip's first and last day have no place to stay.</summary>
     NightsWithoutStay,
     /// <summary>A booking is not confirmed although the trip or the booked item is close.</summary>
-    UnconfirmedBooking
+    UnconfirmedBooking,
+    /// <summary>
+    /// Variants were deleted on the remote while copies remain here. Clients create this reminder from the Git state;
+    /// <see cref="TripReminders.For"/> never returns it, because it is not trip data.
+    /// </summary>
+    VariantsDeletedOnline
 }
 
 /// <summary>
