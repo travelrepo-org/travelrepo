@@ -1,0 +1,4 @@
+version: 0.3.0
+date: 2026-10-04
+changes:
+  - en: A local MCP server and an agent guide let AI assistants read and edit a trip through validated TravelRepo commands.

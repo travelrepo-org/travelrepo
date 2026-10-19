@@ -1,0 +1,17 @@
+# Release notes for TravelRepo 0.4.0. They go into CHANGELOG.md and the GitHub release.
+version: 0.4.0
+date: 2026-10-19
+changes:
+  - en: TripReferences and TripDeletion plan deletions that remove references instead of failing, delete dependent comments, list unused places, documents, notes and bookings, and free unused blobs and notes.
+  - en: Stays resolve to the nights they cover, with check-in and check-out taking precedence and documented fallbacks (specification section 24). Writers mirror them into time; a disagreeing time is the warning stay.time_mismatch.
+  - en: Optional stay details (check-in and check-out windows, access, approximate hours, cancellation, breakfast, parking, arrival notes), booking cancellation and place contact. All additive in format 1.0.
+  - en: TripReminders derives reminders for cancellation deadlines, tasks due, late arrivals, nights without a stay and unconfirmed bookings.
+  - en: The new TravelRepo.Documents package reads e-mails (.eml) and the text of PDFs, and TripCommands attaches documents to entities.
+  - en: Git failures throw GitCommandException with a recognised cause and redacted details; DiagnoseAsync and safe repairs support clients.
+  - en: Variant management - an overview of local and remote variants, deletion with a recycle bin, cleanup of variants deleted on the remote, local-only copies, syncing variants that are not open, and merged_into.
+  - en: "MCP: delete_entity removes references, and list_stays, merge_stays, read_document, import_document and list_reminders are new."
+fixes:
+  - en: Sync follows the tracked upstream branch instead of pushing a copy under the local branch name.
+  - en: Git status and staging only consider trip content, so unrelated files no longer block versions.
+  - en: Schema validation of one schema runs on one thread at a time; parallel validation could skip rules.
+  - en: System.Security.Cryptography.Pkcs 10.0.13 replaces a vulnerable version pulled in by MimeKit.

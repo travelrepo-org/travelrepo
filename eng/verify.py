@@ -15,4 +15,6 @@ for project in report.get('projects',[]):
   for package in framework.get('topLevelPackages',[])+framework.get('transitivePackages',[]):
    if package.get('vulnerabilities'):issues.append(package['id'])
 if issues:raise SystemExit('Vulnerable packages: '+', '.join(issues))
-print('License files, font hashes and dependency audit passed.')
+# Release notes: present for this version, and CHANGELOG.md generated from them.
+if subprocess.run([sys.executable,str(root/'eng'/'changelog.py'),'--check']).returncode!=0:raise SystemExit('Release notes or CHANGELOG.md need attention, see above.')
+print('License files, release notes and dependency audit passed.')
