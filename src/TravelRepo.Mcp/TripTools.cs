@@ -233,7 +233,9 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
             .Select(x => (x.Weather, x.Entity, Start: ScheduleQueries.Span(trip, x.Entity!).Start)).Where(x => x.Start is { } s && InRange(s.InZone(zone).Date)).OrderBy(x => x.Start)
             .Select(x => (JsonNode)new JsonObject
             {
-                ["id"] = x.Entity!.Id.ToString(), ["title"] = x.Entity.Title, ["when"] = When(trip, x.Entity),
+                ["id"] = x.Entity!.Id.ToString(),
+                ["title"] = x.Entity.Title,
+                ["when"] = When(trip, x.Entity),
                 ["outdoor"] = x.Weather.Exposure.Exposure.ToString().ToLowerInvariant() + (x.Weather.Exposure.Source is ExposureSource.Explicit or ExposureSource.Inherited ? "" : " (estimated)"),
                 ["outlooks"] = new JsonArray(x.Weather.Outlooks.Select(o => (JsonNode)Outlook(o)).ToArray()),
                 ["warnings"] = new JsonArray(x.Weather.Concerns.Select(c => (JsonNode)new JsonObject { ["kind"] = c.Kind.ToString().ToLowerInvariant(), ["severe"] = c.Severe, ["value"] = c.Value }).ToArray())

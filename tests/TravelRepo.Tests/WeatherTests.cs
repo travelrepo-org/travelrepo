@@ -106,14 +106,26 @@ public sealed class WeatherTests : IDisposable
     // Conditions and sun --------------------------------------------------------------------------------------------
 
     [Theory]
-    [InlineData(0, WeatherCondition.Clear)] [InlineData(2, WeatherCondition.PartlyCloudy)] [InlineData(45, WeatherCondition.Fog)] [InlineData(53, WeatherCondition.Drizzle)]
-    [InlineData(63, WeatherCondition.Rain)] [InlineData(65, WeatherCondition.HeavyRain)] [InlineData(73, WeatherCondition.Snow)] [InlineData(95, WeatherCondition.Thunderstorm)]
+    [InlineData(0, WeatherCondition.Clear)]
+    [InlineData(2, WeatherCondition.PartlyCloudy)]
+    [InlineData(45, WeatherCondition.Fog)]
+    [InlineData(53, WeatherCondition.Drizzle)]
+    [InlineData(63, WeatherCondition.Rain)]
+    [InlineData(65, WeatherCondition.HeavyRain)]
+    [InlineData(73, WeatherCondition.Snow)]
+    [InlineData(95, WeatherCondition.Thunderstorm)]
     public void WmoCodesMapToConditions(int code, WeatherCondition expected) => Assert.Equal(expected, WeatherMath.FromWmo(code));
 
     [Theory]
-    [InlineData("partlycloudy_night", WeatherCondition.PartlyCloudy)] [InlineData("heavyrainshowers_day", WeatherCondition.HeavyRain)] [InlineData("lightrain", WeatherCondition.Drizzle)]
-    [InlineData("rainandthunder", WeatherCondition.Thunderstorm)] [InlineData("Chance Rain Showers", WeatherCondition.Rain)] [InlineData("Mostly Sunny", WeatherCondition.PartlyCloudy)]
-    [InlineData("clear-day", WeatherCondition.Clear)] [InlineData("snow-showers-day", WeatherCondition.Snow)] [InlineData("fair_day", WeatherCondition.PartlyCloudy)]
+    [InlineData("partlycloudy_night", WeatherCondition.PartlyCloudy)]
+    [InlineData("heavyrainshowers_day", WeatherCondition.HeavyRain)]
+    [InlineData("lightrain", WeatherCondition.Drizzle)]
+    [InlineData("rainandthunder", WeatherCondition.Thunderstorm)]
+    [InlineData("Chance Rain Showers", WeatherCondition.Rain)]
+    [InlineData("Mostly Sunny", WeatherCondition.PartlyCloudy)]
+    [InlineData("clear-day", WeatherCondition.Clear)]
+    [InlineData("snow-showers-day", WeatherCondition.Snow)]
+    [InlineData("fair_day", WeatherCondition.PartlyCloudy)]
     public void ServiceTextsMapToConditions(string text, WeatherCondition expected) => Assert.Equal(expected, WeatherMath.FromText(text));
 
     [Fact]
