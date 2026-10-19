@@ -41,7 +41,8 @@ public sealed record TripSnapshot(Entity Manifest, IReadOnlyDictionary<Guid, Ent
     public IEnumerable<Entity> All => new[] { Manifest }.Concat(Entities.Values);
     public Entity? Find(Guid id) => id == Manifest.Id ? Manifest : Entities.GetValueOrDefault(id);
 }
-public sealed class DomainException(string code, string message) : Exception(message) { public string Code { get; } = code; }
+/// <summary>An expected failure with a stable code that clients can translate. Subclasses add details, for example about Git.</summary>
+public class DomainException(string code, string message) : Exception(message) { public string Code { get; } = code; }
 
 /// <summary>Exact wall time with explicit offset required at an ambiguous DST transition.</summary>
 public sealed record ZonedTime(string Local, string Timezone, string? Offset = null)

@@ -86,15 +86,17 @@ public sealed class McpServerTests : IDisposable
         var alex = await Call(client, "create_entity", """{"type":"person","data":{"display_name":"Alex"}}""");
         Assert.Contains(alex["id"]!.ToString(), (await repo.ReadAsync()).Trip.Manifest.Data["participants"]!.AsArray().Select(n => n!.ToString()));
 
-        // A place still used by an item is not deleted; the item and its note go away cleanly.
-        Assert.Contains("Fushimi Inari", await Call(client, "delete_entity", """{"id":"@placeId"}""".Replace("@placeId", placeId), expectError: true));
         var changes = await Call(client, "compare", """{"revision":"HEAD"}""");
         Assert.Contains(changes["changes"]!.AsArray(), c => c!["title"]!.ToString() == "Fushimi Inari" && c["change"]!.ToString() == "added");
         await Call(client, "create_version", """{"message":"Plan Fushimi Inari"}""");
         Assert.Equal("Plan Fushimi Inari", (await Call(client, "list_versions"))["versions"]![0]!["message"]!.ToString());
         Assert.False((await Call(client, "get_trip"))["unsaved_changes"]!.GetValue<bool>());
 
-        await Call(client, "delete_entity", """{"id":"@itemId"}""".Replace("@itemId", itemId)); await Call(client, "delete_entity", """{"id":"@placeId"}""".Replace("@placeId", placeId));
+        // Deleting the item keeps its place and reports it as unused; the item's note goes away with it.
+        var deleted = await Call(client, "delete_entity", """{"id":"@itemId"}""".Replace("@itemId", itemId));
+        Assert.Contains(deleted["unused"]!.AsArray(), e => e!["id"]!.ToString() == placeId);
+        Assert.NotNull((await repo.ReadAsync()).Trip.Find(Guid.Parse(placeId)));
+        await Call(client, "delete_entity", """{"id":"@placeId"}""".Replace("@placeId", placeId));
         var after = await repo.ReadAsync();
         Assert.Null(after.Trip.Find(Guid.Parse(itemId))); Assert.Null(after.Trip.Find(Guid.Parse(placeId))); Assert.DoesNotContain(after.Trip.Resources.Keys, k => k.EndsWith(".md", StringComparison.Ordinal));
         Assert.True((await Call(client, "validate"))["valid"]!.GetValue<bool>());

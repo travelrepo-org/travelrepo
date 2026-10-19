@@ -6,7 +6,8 @@ using TravelRepo.Serialization;
 
 namespace TravelRepo.Git;
 
-public sealed record GitResult(int ExitCode, string Output, byte[]? Bytes = null);
+/// <summary>The result of one Git command. <see cref="Error"/> is Git's error output, which may contain private details.</summary>
+public sealed record GitResult(int ExitCode, string Output, byte[]? Bytes = null, string Error = "");
 public interface IGitBackend
 {
     Task<GitResult> ExecuteAsync(string directory, IReadOnlyList<string> arguments, string? input = null, CancellationToken cancellationToken = default);
@@ -57,9 +58,9 @@ public sealed class GitCliBackend(string? executable = null, ICredentialBroker? 
         using var buffer = new MemoryStream(); var output = process.StandardOutput.BaseStream.CopyToAsync(buffer, timeout.Token); var error = process.StandardError.ReadToEndAsync(timeout.Token);
         if (input is not null) await process.StandardInput.WriteAsync(input.AsMemory(), timeout.Token);
         process.StandardInput.Close(); await process.WaitForExitAsync(timeout.Token);
-        // stderr can contain sensitive remote details. Expected failures use stable public errors.
-        await error;
-        await output; var bytes = buffer.ToArray(); return new(process.ExitCode, System.Text.Encoding.UTF8.GetString(bytes), bytes);
+        // stderr can contain private details. It is only shown redacted, through GitCommandException.Details.
+        var stderr = await error;
+        await output; var bytes = buffer.ToArray(); return new(process.ExitCode, System.Text.Encoding.UTF8.GetString(bytes), bytes, stderr);
     }
 }
 public sealed record Variant(string Branch, string Commit, Entity Manifest, bool IsRemote = false);
@@ -94,9 +95,11 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
     private async Task<string> Run(CancellationToken ct, params string[] args)
     {
         var r = await backend.ExecuteAsync(Repository.Root, args, cancellationToken: ct);
-        if (r.ExitCode != 0) throw new DomainException("git.failed", "Git " + args[0] + " failed (exit " + r.ExitCode + "). Check repository state, network access, and credentials.");
+        if (r.ExitCode != 0) throw GitCommandException.From(args, r);
         return r.Output.TrimEnd('\r', '\n');
     }
+    /// <summary>The paths a trip version contains. Other files in the folder are neither staged nor reported as changes.</summary>
+    public static IReadOnlyList<string> TripPaths { get; } = new[] { "travel.yaml", "README.md" }.Concat(TravelRepository.Folders.Values.Distinct()).Concat(["assets", ".travelrepo"]).ToArray();
     private async Task InitializeCoreAsync(string name, string email, CancellationToken ct = default)
     {
         await Run(ct, "init", "-b", "main"); await SetIdentityCoreAsync(name, email, ct);
@@ -104,7 +107,8 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
     }
     private async Task SetIdentityCoreAsync(string name, string email, CancellationToken ct = default)
     { await Run(ct, "config", "--local", "user.name", name); await Run(ct, "config", "--local", "user.email", email); }
-    public Task<string> StatusAsync(CancellationToken ct = default) => Run(ct, "status", "--porcelain=v1", "-z");
+    /// <summary>Uncommitted changes to trip content in porcelain format. Unrelated files in the folder are ignored.</summary>
+    public Task<string> StatusAsync(CancellationToken ct = default) => Run(ct, ["status", "--porcelain=v1", "-z", "--", .. TripPaths]);
     public Task<string> CurrentBranchAsync(CancellationToken ct = default) => Run(ct, "symbolic-ref", "--short", "HEAD");
     public Task<string> HeadAsync(CancellationToken ct = default) => Run(ct, "rev-parse", "HEAD");
     /// <summary>Compare the current branch with its remote-tracking ref from the last fetch. Never contacts the remote.</summary>
@@ -112,7 +116,7 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
     {
         var branch = await CurrentBranchAsync(ct); var dirty = !string.IsNullOrEmpty(await StatusAsync(ct));
         if (remote is null) return new(branch, null, dirty, false, 0, 0);
-        var target = "refs/remotes/" + remote + "/" + branch;
+        var target = "refs/remotes/" + remote + "/" + await RemoteBranchAsync(remote, branch, ct);
         var exists = await backend.ExecuteAsync(Repository.Root, ["rev-parse", "--verify", "--quiet", target], cancellationToken: ct);
         if (exists.ExitCode != 0) return new(branch, remote, dirty, false, 0, 0);
         var counts = (await Run(ct, "rev-list", "--left-right", "--count", "HEAD..." + target)).Split('\t', ' ');
@@ -126,7 +130,7 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
             await StageAsync(ct);
             await CheckIndexAsync(ct);
             var result = await backend.ExecuteAsync(Repository.Root, ["commit", "-F", "-"], message.Trim() + "\n\nTravelRepo-Version: 1\nTravelRepo-Action: " + action.Replace("\n", "") + "\nTravelRepo-Client: TravelRepo/" + TravelRepoInfo.Version + "\n", ct);
-            if (result.ExitCode != 0) throw new DomainException("version.failed", "No version was created. Check that changes exist and a local identity is configured.");
+            if (result.ExitCode != 0) throw GitCommandException.From(["commit", "-F", "-"], result, "version.failed", "No version was created. Check that changes exist and a local identity is configured.");
             return await HeadAsync(ct);
         }
     }
@@ -139,7 +143,7 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
     private async Task StageAsync(CancellationToken ct)
     {
         var tracked = (await Run(ct, "ls-files", "-z")).Split('\0', StringSplitOptions.RemoveEmptyEntries);
-        foreach (var path in new[] { "travel.yaml", "README.md" }.Concat(TravelRepository.Folders.Values.Distinct()).Concat(new[] { "assets", ".travelrepo" }))
+        foreach (var path in TripPaths)
             if (File.Exists(Repository.SafePath(path)) || Directory.Exists(Repository.SafePath(path)) || tracked.Any(p => p == path || p.StartsWith(path + "/", StringComparison.Ordinal))) await Run(ct, "add", "-A", "--", path);
     }
     public async Task<IReadOnlyList<Variant>> VariantsAsync(CancellationToken ct = default)
@@ -164,7 +168,14 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
     private async Task SwitchCoreAsync(string branch, CancellationToken ct = default)
     {
         await RequireClean(ct); var variant = (await VariantsAsync(ct)).FirstOrDefault(v => v.Branch == branch);
-        if (variant?.IsRemote == true) await Run(ct, "switch", "--track", "-c", "variants/import-" + Guid.CreateVersion7(), branch);
+        if (variant?.IsRemote == true)
+        {
+            // Use the same name as on the host, so sync and push keep working on that branch instead of creating a copy.
+            var name = branch[(branch.IndexOf('/') + 1)..];
+            var local = await backend.ExecuteAsync(Repository.Root, ["rev-parse", "--verify", "--quiet", "refs/heads/" + name], cancellationToken: ct);
+            if (local.ExitCode == 0) await Run(ct, "switch", "--", name);
+            else await Run(ct, "switch", "--track", "-c", name, branch);
+        }
         else await Run(ct, "switch", "--", branch);
     }
     private async Task UpdateVariantCoreAsync(string? title = null, bool archive = false, CancellationToken ct = default)
@@ -185,25 +196,48 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
     }
     private async Task AddRemoteCoreAsync(string name, string url, CancellationToken ct = default) { ValidateRemote(url); await Run(ct, "remote", "add", name, url); }
     private async Task FetchCoreAsync(string remote, CancellationToken ct = default) => await Run(ct, "fetch", "--", remote);
-    private async Task PushCoreAsync(string remote, CancellationToken ct = default) => await Run(ct, "push", "--", remote, "HEAD");
+    /// <summary>
+    /// The branch on <paramref name="remote"/> that <paramref name="branch"/> tracks. A branch without tracking
+    /// information on that remote uses its own name there.
+    /// </summary>
+    public async Task<string> RemoteBranchAsync(string remote, string branch, CancellationToken ct = default)
+    {
+        var tracked = await backend.ExecuteAsync(Repository.Root, ["config", "--get", "branch." + branch + ".remote"], cancellationToken: ct);
+        var merge = await backend.ExecuteAsync(Repository.Root, ["config", "--get", "branch." + branch + ".merge"], cancellationToken: ct);
+        var target = merge.Output.Trim();
+        return tracked.ExitCode == 0 && tracked.Output.Trim() == remote && merge.ExitCode == 0 && target.StartsWith("refs/heads/", StringComparison.Ordinal) ? target["refs/heads/".Length..] : branch;
+    }
+    private async Task PushCoreAsync(string remote, CancellationToken ct = default)
+    {
+        var branch = await CurrentBranchAsync(ct); var target = await RemoteBranchAsync(remote, branch, ct);
+        await Run(ct, "push", "--set-upstream", "--", remote, "HEAD:refs/heads/" + target);
+    }
     private async Task<SyncState> SyncCoreAsync(string remote, CancellationToken ct = default)
     {
-        await FetchCoreAsync(remote, ct); if (!string.IsNullOrEmpty(await StatusAsync(ct))) return SyncState.LocalChanges;
-        var branch = await CurrentBranchAsync(ct); var target = "refs/remotes/" + remote + "/" + branch;
-        var exists = await backend.ExecuteAsync(Repository.Root, ["rev-parse", "--verify", target], cancellationToken: ct);
-        if (exists.ExitCode != 0) { await PushCoreAsync(remote, ct); return SyncState.Synced; }
-        var ancestor = await backend.ExecuteAsync(Repository.Root, ["merge-base", "--is-ancestor", "HEAD", target], cancellationToken: ct);
-        if (ancestor.ExitCode == 0) { await Run(ct, "merge", "--ff-only", target); return SyncState.Synced; }
-        ancestor = await backend.ExecuteAsync(Repository.Root, ["merge-base", "--is-ancestor", target, "HEAD"], cancellationToken: ct);
-        if (ancestor.ExitCode == 0) { await PushCoreAsync(remote, ct); return SyncState.Synced; }
-        return SyncState.Diverged;
+        for (var attempt = 0; ; attempt++)
+        {
+            await FetchCoreAsync(remote, ct); if (!string.IsNullOrEmpty(await StatusAsync(ct))) return SyncState.LocalChanges;
+            var branch = await CurrentBranchAsync(ct); var target = "refs/remotes/" + remote + "/" + await RemoteBranchAsync(remote, branch, ct);
+            try
+            {
+                var exists = await backend.ExecuteAsync(Repository.Root, ["rev-parse", "--verify", "--quiet", target], cancellationToken: ct);
+                if (exists.ExitCode != 0) { await PushCoreAsync(remote, ct); return SyncState.Synced; }
+                var ancestor = await backend.ExecuteAsync(Repository.Root, ["merge-base", "--is-ancestor", "HEAD", target], cancellationToken: ct);
+                if (ancestor.ExitCode == 0) { await Run(ct, "merge", "--ff-only", target); return SyncState.Synced; }
+                ancestor = await backend.ExecuteAsync(Repository.Root, ["merge-base", "--is-ancestor", target, "HEAD"], cancellationToken: ct);
+                if (ancestor.ExitCode == 0) { await PushCoreAsync(remote, ct); return SyncState.Synced; }
+                return SyncState.Diverged;
+            }
+            // Someone pushed between our fetch and our push. Fetch again and decide anew, once.
+            catch (GitCommandException ex) when (ex.Failure == GitFailure.Rejected && attempt == 0) { }
+        }
     }
     /// <summary>Read a committed version. All blobs are read through one <c>git cat-file --batch</c> process.</summary>
     public async Task<TripSnapshot> SnapshotAsync(string revision, CancellationToken ct = default)
     {
         var commit = await Run(ct, "rev-parse", "--verify", revision + "^{commit}");
         var listing = await backend.ExecuteAsync(Repository.Root, ["ls-tree", "-r", "-z", commit], cancellationToken: ct);
-        if (listing.ExitCode != 0) throw new DomainException("git.failed", "Git ls-tree failed. Check repository state.");
+        if (listing.ExitCode != 0) throw GitCommandException.From(["ls-tree", "-r", "-z", commit], listing);
         var entries = new List<(string Blob, string Path)>();
         foreach (var row in listing.Output.Split('\0', StringSplitOptions.RemoveEmptyEntries))
         {
@@ -233,7 +267,7 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
         var result = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         if (ids.Count == 0) return result;
         var output = await backend.ExecuteAsync(Repository.Root, ["cat-file", "--batch"], string.Join('\n', ids) + "\n", ct);
-        if (output.ExitCode != 0 || output.Bytes is not { } data) throw new DomainException("snapshot.resource", "Cannot read versioned content.");
+        if (output.ExitCode != 0 || output.Bytes is not { } data) throw GitCommandException.From(["cat-file", "--batch"], output, "snapshot.resource", "Cannot read versioned content.");
         var position = 0;
         foreach (var id in ids)
         {
@@ -256,7 +290,7 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
     {
         var old = await HeadAsync(ct); await StageAsync(ct); await CheckIndexAsync(ct); var tree = await Run(ct, "write-tree");
         var commit = await backend.ExecuteAsync(Repository.Root, ["commit-tree", tree, "-p", old, "-p", otherCommit, "-F", "-"], message + "\n\nTravelRepo-Version: 1\nTravelRepo-Action: semantic-merge\nTravelRepo-Client: TravelRepo/" + TravelRepoInfo.Version + "\n", ct);
-        if (commit.ExitCode != 0) throw new DomainException("merge.commit", "Unable to create merge version.");
+        if (commit.ExitCode != 0) throw GitCommandException.From(["commit-tree", tree], commit, "merge.commit", "Unable to create merge version.");
         await Run(ct, "update-ref", "HEAD", commit.Output.Trim(), old); return commit.Output.Trim();
     }
     private async Task RollbackCoreAsync(string revision, CancellationToken ct = default)
@@ -269,6 +303,6 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
     {
         ValidateRemote(url); var parent = Path.GetDirectoryName(Path.GetFullPath(destination))!; Directory.CreateDirectory(parent);
         var result = await backend.ExecuteAsync(parent, ["clone", "--", url, Path.GetFullPath(destination)], cancellationToken: ct);
-        if (result.ExitCode != 0) throw new DomainException("clone.failed", "Clone failed. Check the address, network, and credentials.");
+        if (result.ExitCode != 0) throw GitCommandException.From(["clone", "--", url], result, "clone.failed", "Clone failed. Check the address, network, and credentials.");
     }
 }

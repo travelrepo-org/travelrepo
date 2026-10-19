@@ -230,30 +230,26 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
     });
 
     [McpServerTool(Name = "delete_entity", Title = "Delete an entity", Destructive = true, OpenWorld = false)]
-    [Description("Deletes an entity and its notes. It is also removed from the trip's participants and from its parent's children. If other entities still refer to it, nothing is deleted and they are listed, so you can change them first.")]
-    public Task<string> DeleteEntity([Description("The entity id.")] string id, CancellationToken ct = default) => Run(async () =>
+    [Description("Deletes an entity and its notes. References to it are removed from other entities (for example from a booking's items, a parent's children or an activity's place); comments on it are deleted with it. Places, documents, notes and bookings that only this entity used are kept and listed as `unused`, unless `also_delete_unused` is true.")]
+    public Task<string> DeleteEntity([Description("The entity id.")] string id, [Description("Also delete places, documents, notes and bookings that nothing else uses afterwards.")] bool also_delete_unused = false, CancellationToken ct = default) => Run(async () =>
     {
-        string title = "";
+        DeletionPlan? done = null;
         await Write(state =>
         {
-            var trip = state.Trip; var entity = Find(trip, id); title = entity.Title;
+            var trip = state.Trip; var entity = Find(trip, id);
             if (entity.Type == "trip") throw new McpException("The trip itself cannot be deleted.");
-            var key = entity.Id.ToString(); var edits = new List<EntityEdit> { new(entity.Id, null) }; var blocking = new List<Entity>();
-            foreach (var other in TripSummaries.ReferencesTo(trip, entity.Id))
-            {
-                var copy = other.Copy();
-                var list = other.Type == "trip" ? copy.Data["participants"] as JsonArray : copy.Data["children"] as JsonArray;
-                foreach (var node in list?.Where(n => n?.ToString() == key).ToArray() ?? []) list!.Remove(node);
-                // Membership lists are cleaned up here; any other reference has to be changed deliberately first.
-                if (copy.Data.ToJsonString().Contains(key, StringComparison.Ordinal)) blocking.Add(other); else edits.Add(new(copy.Id, copy));
-            }
-            if (blocking.Count > 0) throw new McpException("Not deleted: still referenced by " + string.Join(", ", blocking.Select(b => b.Type + " \"" + b.Title + "\" (" + b.Id + ")")) + ". Remove those references with update_entity first.");
-            var notes = (entity.Data["content"] as JsonArray ?? []).OfType<JsonObject>().Where(c => c["type"]?.ToString() == "markdown").Select(c => c["file"]?.ToString()).OfType<string>()
-                .Where(file => trip.Resources.ContainsKey(file) && !trip.All.Any(e => e.Id != entity.Id && e.Data.ToJsonString().Contains(file, StringComparison.Ordinal)))
-                .Select(file => new ResourceEdit(file, null)).ToArray();
-            return (edits, notes);
+            var plan = TripDeletion.Plan(trip, [entity.Id]);
+            if (also_delete_unused && plan.Unused.Count > 0) plan = TripDeletion.Plan(trip, plan.Requested.Concat(plan.Unused.Select(e => e.Id)));
+            done = plan;
+            return (plan.Edits, plan.ResourceEdits);
         }, ct);
-        return new JsonObject { ["deleted"] = id, ["title"] = title };
+        JsonArray List(IEnumerable<Entity> entities) => new(entities.Select(e => (JsonNode)new JsonObject { ["id"] = e.Id.ToString(), ["type"] = e.Type, ["title"] = e.Title }).ToArray());
+        return new JsonObject
+        {
+            ["deleted"] = List(done!.Deleted),
+            ["references_removed_from"] = List(done.Updated),
+            ["unused"] = List(also_delete_unused ? [] : done.Unused)
+        };
     });
 
     [McpServerTool(Name = "add_note", Title = "Add a note", Destructive = false, OpenWorld = false)]
