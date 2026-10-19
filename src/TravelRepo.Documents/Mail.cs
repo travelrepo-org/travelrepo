@@ -15,7 +15,9 @@ public sealed record MailAttachment(string FileName, string MediaType, byte[] Co
 /// <summary>
 /// An e-mail read for display: headers, the readable text and the attachments. <see cref="Text"/> comes from the
 /// plain-text part, or from the HTML part with markup removed. Nothing is fetched from the network; HTML images that
-/// would be loaded from elsewhere are only counted in <see cref="RemoteImages"/>.
+/// would be loaded from elsewhere are only counted in <see cref="RemoteImages"/>. <see cref="Html"/> is the HTML part
+/// as sent; show it only after <see cref="MailHtml.Sanitize"/>. <see cref="InlineImages"/> are the images it
+/// references with <c>cid:</c>.
 /// </summary>
 public sealed record MailMessage(
     string? Subject,
@@ -26,7 +28,9 @@ public sealed record MailMessage(
     string Text,
     bool TextFromHtml,
     int RemoteImages,
-    IReadOnlyList<MailAttachment> Attachments);
+    IReadOnlyList<MailAttachment> Attachments,
+    string? Html = null,
+    IReadOnlyList<MailInlineImage>? InlineImages = null);
 
 /// <summary>Reads e-mail messages saved as <c>.eml</c> files (RFC 5322 / MIME).</summary>
 public static class Mail
@@ -50,10 +54,23 @@ public static class Mail
         var html = message.HtmlBody; var plain = message.TextBody;
         var (text, images) = plain is { Length: > 0 } && !LooksEmpty(plain) ? (Normalize(plain), html is null ? 0 : HtmlText.Convert(html).RemoteImages) : html is not null ? HtmlText.Convert(html) : ("", 0);
         return new(message.Subject, Addresses(message.From), Addresses(message.To), Addresses(message.Cc), message.Date == DateTimeOffset.MinValue ? null : message.Date,
-            text, plain is not { Length: > 0 } || LooksEmpty(plain), images, Attachments(message));
+            text, plain is not { Length: > 0 } || LooksEmpty(plain), images, Attachments(message), html, InlineImages(message));
     }
 
     private static bool LooksEmpty(string text) => string.IsNullOrWhiteSpace(text);
+
+    /// <summary>Images that the HTML part references by Content-ID, for showing the original layout.</summary>
+    private static IReadOnlyList<MailInlineImage> InlineImages(MimeMessage message)
+    {
+        var result = new List<MailInlineImage>();
+        foreach (var part in message.BodyParts.OfType<MimePart>())
+        {
+            if (part.Content is null || string.IsNullOrEmpty(part.ContentId) || !part.ContentType.MediaType.Equals("image", StringComparison.OrdinalIgnoreCase)) continue;
+            using var buffer = new MemoryStream(); part.Content.DecodeTo(buffer);
+            result.Add(new(part.ContentId.Trim('<', '>'), part.ContentType.MimeType.ToLowerInvariant(), buffer.ToArray()));
+        }
+        return result;
+    }
 
     private static IReadOnlyList<MailAttachment> Attachments(MimeMessage message)
     {

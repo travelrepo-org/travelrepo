@@ -53,6 +53,47 @@ public class DocumentTests
     }
 
     [Fact]
+    public void MailHtmlKeepsTheLayoutButNothingThatRunsOrTracks()
+    {
+        const string html = "<html><head><title>x</title><link rel=\"stylesheet\" href=\"https://cdn.example/a.css\"><style>@import url(https://cdn.example/b.css); td{background:url(https://tracker.example/bg.gif);color:#333} .x{width:expression(alert(1))}</style>"
+            + "<script>alert(1)</script></head><body onload=\"steal()\"><table width=\"600\" style=\"background-image:url('https://tracker.example/t.png');border:1px solid #ccc\"><tr><td align=\"right\">Total &amp; fees</td></tr></table>"
+            + "<img src=\"cid:logo@lodge\" alt=\"Logo\"><img src=\"https://tracker.example/pixel.gif\"><img src=\"data:image/png;base64,iVBORw0KGgo=\"><img src=\"data:image/svg+xml;base64,PHN2Zz4=\">"
+            + "<a href=\"https://lodge.example/manage\" target=\"_blank\">Manage</a> <a href=\"javascript:steal()\">Bad</a> <a href=\"mailto:desk@lodge.example\">Mail</a>"
+            + "<form action=\"https://evil.example\"><input name=\"card\"><button>Pay</button>Fill in</form><iframe src=\"https://evil.example\"></iframe><!-- secret --></body></html>";
+        var safe = MailHtml.Sanitize(html);
+        Assert.Equal(3, safe.RemoteImages); Assert.False(safe.RemoteImagesAllowed);
+        Assert.Equal(2, System.Text.RegularExpressions.Regex.Count(safe.Html, "<img")); // the cid and PNG images; blocked ones leave no empty frame
+        Assert.Contains("background-color:#7a2e2e", MailHtml.Sanitize("<td style=\"background:#7a2e2e;color:#fff\">x</td>").Html);
+        Assert.Contains("background-color:red}", MailHtml.Sanitize("<style>td{background: red}</style>").Html);
+        foreach (var gone in new[] { "<script", "alert", "steal", "onload", "<link", "@import", "tracker.example", "expression", "javascript:", "<iframe", "evil.example", "<input", "<button", "Pay", "secret", "<title", "image/svg", "target" })
+            Assert.DoesNotContain(gone, safe.Html, StringComparison.OrdinalIgnoreCase);
+        foreach (var kept in new[] { "<table width=\"600\"", "border:1px solid #ccc", "align=\"right\"", "Total &amp; fees", "src=\"cid:logo@lodge\"", "data:image/png", "href=\"https://lodge.example/manage\"", "href=\"mailto:desk@lodge.example\"", "Fill in", "color:#333" })
+            Assert.Contains(kept, safe.Html);
+
+        var allowed = MailHtml.Sanitize(html, allowRemoteImages: true);
+        Assert.Contains("https://tracker.example/pixel.gif", allowed.Html); Assert.True(allowed.RemoteImagesAllowed);
+        Assert.DoesNotContain("@import", allowed.Html); Assert.DoesNotContain("evil.example", allowed.Html);
+
+        Assert.True(MailHtml.IsOpenableLink("https://lodge.example")); Assert.True(MailHtml.IsOpenableLink("tel:+4930123"));
+        Assert.False(MailHtml.IsOpenableLink("javascript:alert(1)")); Assert.False(MailHtml.IsOpenableLink("file:///etc/passwd")); Assert.False(MailHtml.IsOpenableLink("/relative"));
+    }
+
+    [Fact]
+    public void AnEmailKeepsItsHtmlAndInlineImages()
+    {
+        var message = new MimeMessage { Subject = "With logo" }; message.From.Add(new MailboxAddress("Lodge", "desk@lodge.example"));
+        var body = new BodyBuilder { HtmlBody = "<p><img src=\"cid:logo@lodge\"> Welcome</p>" };
+        var logo = body.LinkedResources.Add("logo.png", new byte[] { 137, 80, 78, 71 }, new ContentType("image", "png")); logo.ContentId = "logo@lodge";
+        message.Body = body.ToMessageBody();
+        using var stream = new MemoryStream(); message.WriteTo(stream);
+        var mail = Mail.Read(stream.ToArray());
+        Assert.Contains("cid:logo@lodge", mail.Html);
+        var image = Assert.Single(mail.InlineImages!);
+        Assert.Equal(("logo@lodge", "image/png", 4), (image.ContentId, image.MediaType, image.Content.Length));
+        Assert.Empty(mail.Attachments);
+    }
+
+    [Fact]
     public void TextOfPdfsMailsAndTextFiles()
     {
         Assert.Contains("Lakeview Lodge", DocumentText.Extract(Pdf("Booking 4711", "Lakeview Lodge"), "application/pdf"));
