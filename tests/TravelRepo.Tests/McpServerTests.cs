@@ -4,9 +4,11 @@ using System.Text.Json.Nodes;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
+using NodaTime;
 using TravelRepo.Core;
 using TravelRepo.Git;
 using TravelRepo.Mcp;
+using TravelRepo.Providers.Weather;
 using TravelRepo.Repository;
 using Xunit;
 namespace TravelRepo.Tests;
@@ -26,10 +28,10 @@ public sealed class McpServerTests : IDisposable
     }
 
     /// <summary>A real MCP client talking to the server through in-memory pipes, as an assistant would over stdio.</summary>
-    private async Task<McpClient> Connect(string path, bool readOnly = false)
+    private async Task<McpClient> Connect(string path, bool readOnly = false, Func<CachedWeatherSource?>? weather = null)
     {
         var toServer = new Pipe(); var toClient = new Pipe();
-        var server = TripServer.Create(new StreamServerTransport(toServer.Reader.AsStream(), toClient.Writer.AsStream()), path, new(ReadOnly: readOnly, RecoveryRoot: Path.Combine(root, "recovery")));
+        var server = TripServer.Create(new StreamServerTransport(toServer.Reader.AsStream(), toClient.Writer.AsStream()), path, new(ReadOnly: readOnly, ClientName: "Jourfold", RecoveryRoot: Path.Combine(root, "recovery"), Weather: weather));
         _ = server.RunAsync(stop.Token);
         return await McpClient.CreateAsync(new StreamClientTransport(toServer.Writer.AsStream(), toClient.Reader.AsStream()), cancellationToken: stop.Token);
     }
@@ -186,5 +188,43 @@ public sealed class McpServerTests : IDisposable
         Assert.DoesNotContain("create_entity", tools); Assert.DoesNotContain("create_version", tools); Assert.DoesNotContain("delete_entity", tools);
         Assert.Contains("read-only", client.ServerInstructions);
         Assert.Throws<DomainException>(() => TripServer.Options(root, new()));
+    }
+
+    [Fact]
+    public async Task AssistantsGetOnlyCachedWeatherAndAreToldSo()
+    {
+        var (repo, _) = await Trip();
+        var now = SystemClock.Instance.GetCurrentInstant(); var zone = DateTimeZoneProviders.Tzdb["Asia/Tokyo"]; var tomorrow = now.InZone(zone).Date.PlusDays(1);
+        var inari = Entity.Create("place", "Fushimi Inari Taisha"); inari.Data["location"] = new JsonObject { ["latitude"] = 34.9671, ["longitude"] = 135.7727 };
+        var walk = Entity.Create("schedule_item", "Fushimi Inari hike"); walk.Data["status"] = "planned"; walk.Data["category"] = "nature"; walk.Data["default_place"] = inari.Id.ToString();
+        string At(int hour) => tomorrow.At(new LocalTime(hour, 0)).ToString("yyyy-MM-dd'T'HH:mm:ss", null);
+        walk.Data["time"] = new JsonObject { ["precision"] = "exact", ["start"] = new ZonedTime(At(9), "Asia/Tokyo").ToJson(), ["end"] = new ZonedTime(At(12), "Asia/Tokyo").ToJson() };
+        await repo.ApplyAsync(await repo.ReadAsync(), [new(inari.Id, inari), new(walk.Id, walk)]);
+
+        // Weather off: the assistant learns that, and how it could change.
+        var client = await Connect(repo.Root, weather: () => null);
+        var off = await Call(client, "get_weather");
+        Assert.False(off["available"]!.GetValue<bool>()); Assert.Contains("turned off in Jourfold", off["note"]!.ToString());
+        Assert.Contains("never fetches live weather", client.ServerInstructions);
+
+        // Weather on: what Jourfold cached three hours ago, with its age, and rain on the hike.
+        var cacheDirectory = Path.Combine(root, "weather"); var cache = new WeatherCache(cacheDirectory); var fetched = now - Duration.FromHours(3);
+        var start = zone.AtStartOfDay(tomorrow.PlusDays(-1)).ToInstant();
+        cache.Store(new WeatherForecast("open-meteo", new GeoPoint(34.9671, 135.7727).Rounded(2), fetched, now + Duration.FromHours(1),
+            Enumerable.Range(0, 72).Select(i => new WeatherHour(start + Duration.FromHours(i), 1, 21, 85, 2, 10, 25, WeatherCondition.Rain)).ToArray()));
+        client = await Connect(repo.Root, weather: () => new CachedWeatherSource(cacheDirectory, "open-meteo"));
+        var on = await Call(client, "get_weather");
+        Assert.True(on["available"]!.GetValue<bool>()); Assert.Contains("not live data", on["note"]!.ToString());
+        var item = on["items"]!.AsArray().Single()!;
+        Assert.Equal("outdoor (estimated)", item["outdoor"]!.ToString());
+        var outlook = item["outlooks"]![0]!;
+        Assert.Equal("forecast", outlook["kind"]!.ToString()); Assert.Equal(3.0, outlook["age_hours"]!.GetValue<double>(), 1); Assert.Equal("Rain", outlook["condition"]!.ToString());
+        Assert.Equal("rain", item["warnings"]![0]!["kind"]!.ToString());
+        Assert.Equal(At(0)[..10], on["days"]!.AsArray().First()!["date"]!.ToString());
+        Assert.Contains("Open-Meteo", on["attribution"]!.ToJsonString());
+
+        // The cache-only service cannot download, whatever is asked of it.
+        var snapshot = (await repo.ReadAsync()).Trip;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => WeatherService.CacheOnly(cache).UpdateAsync(snapshot));
     }
 }

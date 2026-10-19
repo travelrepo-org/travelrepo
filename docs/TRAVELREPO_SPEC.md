@@ -543,6 +543,7 @@ Initial v1 inheritable fields:
 - default place
 - selected display metadata
 - selected category defaults
+- outdoor (section 25.2)
 
 Initial v1 non-inheritable fields:
 - ID
@@ -726,6 +727,18 @@ The inheritable `category` field holds one string. Recommended values:
 - other
 
 Clients may use the category for icons, colors and grouping. A `transport` or `accommodation` component takes precedence over the category when classifying an item. Custom categories use reverse-domain names, for example `com.example.wine_tasting`, and are treated as `other` by clients that do not know them.
+
+### 25.2 Outdoor
+
+The optional, inheritable boolean `outdoor` states whether an item happens outdoors (`true`) or indoors (`false`). Clients use it to decide when weather matters, for example to warn about rain before a hike but not before a museum visit.
+
+```yaml
+title: Summit hike
+category: nature
+outdoor: true
+```
+
+Without the field, clients may estimate it from the transport type, the category and the title. Such an estimate is presentation only and must not be written into the item. A child inherits its parent's value unless it sets its own.
 
 ## 26. Status
 
@@ -1049,6 +1062,8 @@ Plugin-provided data must use stable namespaced types and must survive round tri
 External provider data may be cached locally for offline use.
 
 Provider caches are not part of the canonical TravelRepo repository unless explicitly materialized into normal TravelRepo entities.
+
+Weather forecasts and climate averages are such provider data. They are fetched only after the person turns weather on, with coordinates rounded to about one kilometre, and kept in the local cache. They are never written into the trip.
 
 ## 44. GitHub and other Git hosts
 

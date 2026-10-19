@@ -193,61 +193,69 @@
           "MimeKit": "[4.18.1, )",
           "PdfPig": "[0.1.16, )",
           "System.Security.Cryptography.Pkcs": "[10.0.13, )",
-          "TravelRepo.Core": "[0.3.0, )"
+          "TravelRepo.Core": "[0.4.0, )"
         }
       },
       "travelrepo.git": {
         "type": "Project",
         "dependencies": {
-          "TravelRepo.Repository": "[0.3.0, )"
+          "TravelRepo.Repository": "[0.4.0, )"
         }
       },
       "travelrepo.mcp": {
         "type": "Project",
         "dependencies": {
           "ModelContextProtocol.Core": "[2.2.0, )",
-          "TravelRepo.Documents": "[0.3.0, )",
-          "TravelRepo.Git": "[0.3.0, )",
-          "TravelRepo.Merge": "[0.3.0, )"
+          "TravelRepo.Documents": "[0.4.0, )",
+          "TravelRepo.Git": "[0.4.0, )",
+          "TravelRepo.Merge": "[0.4.0, )",
+          "TravelRepo.Providers.Weather": "[0.4.0, )"
         }
       },
       "travelrepo.merge": {
         "type": "Project",
         "dependencies": {
-          "TravelRepo.Repository": "[0.3.0, )"
+          "TravelRepo.Repository": "[0.4.0, )"
         }
       },
       "travelrepo.plugins.abstractions": {
         "type": "Project",
         "dependencies": {
-          "TravelRepo.Core": "[0.3.0, )"
+          "TravelRepo.Core": "[0.4.0, )"
         }
       },
       "travelrepo.providers.abstractions": {
         "type": "Project",
         "dependencies": {
-          "TravelRepo.Core": "[0.3.0, )"
+          "TravelRepo.Core": "[0.4.0, )"
         }
       },
       "travelrepo.providers.github": {
         "type": "Project",
         "dependencies": {
-          "TravelRepo.Providers.Abstractions": "[0.3.0, )",
-          "TravelRepo.Serialization": "[0.3.0, )"
+          "TravelRepo.Providers.Abstractions": "[0.4.0, )",
+          "TravelRepo.Serialization": "[0.4.0, )"
+        }
+      },
+      "travelrepo.providers.weather": {
+        "type": "Project",
+        "dependencies": {
+          "TravelRepo.Core": "[0.4.0, )",
+          "TravelRepo.Providers.Abstractions": "[0.4.0, )"
         }
       },
       "travelrepo.repository": {
         "type": "Project",
         "dependencies": {
-          "TravelRepo.Core": "[0.3.0, )",
-          "TravelRepo.Serialization": "[0.3.0, )"
+          "TravelRepo.Core": "[0.4.0, )",
+          "TravelRepo.Serialization": "[0.4.0, )"
         }
       },
       "travelrepo.serialization": {
         "type": "Project",
         "dependencies": {
           "JsonSchema.Net": "[7.3.4, )",
-          "TravelRepo.Core": "[0.3.0, )",
+          "TravelRepo.Core": "[0.4.0, )",
           "YamlDotNet": "[16.3.0, )"
         }
       }

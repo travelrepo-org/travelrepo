@@ -11,6 +11,7 @@ using NodaTime.Text;
 using TravelRepo.Core;
 using TravelRepo.Git;
 using TravelRepo.Merge;
+using TravelRepo.Providers.Weather;
 using TravelRepo.Repository;
 using TravelRepo.Serialization;
 
@@ -20,7 +21,7 @@ namespace TravelRepo.Mcp;
 /// The tools of the trip server. Each call reads the current files, so edits made in Jourfold or elsewhere are
 /// always seen. Results are compact JSON; errors are returned to the assistant as readable messages.
 /// </summary>
-internal sealed class TripTools(TravelRepository repository, IGitBackend git, bool readOnly)
+internal sealed class TripTools(TravelRepository repository, IGitBackend git, bool readOnly, Func<CachedWeatherSource?>? weather = null, string? clientName = null)
 {
     private static readonly JsonSerializerOptions Output = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
     private static readonly string[] Creatable = ["schedule_item", "place", "person", "booking", "task", "expense", "budget", "collection", "note"];
@@ -98,7 +99,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
     });
 
     [McpServerTool(Name = "get_schedule", Title = "Read the schedule", ReadOnly = true, Idempotent = true, OpenWorld = false)]
-    [Description("The schedule day by day in the trip's timezone, with each item's time, status, category, place and people, followed by the items that are not scheduled yet (ideas). Without dates it covers the whole trip, at most 62 days.")]
+    [Description("The schedule day by day in the trip's timezone, with each item's time, status, category, outdoor estimate, place and people, followed by the items that are not scheduled yet (ideas). Without dates it covers the whole trip, at most 62 days.")]
     public Task<string> GetSchedule(
         [Description("Optional first day, YYYY-MM-DD.")] string? from = null,
         [Description("Optional last day, YYYY-MM-DD.")] string? to = null,
@@ -186,6 +187,67 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
                 ["when"] = r.Moment is { } moment ? LocalDateTimePattern.ExtendedIso.Format(moment.InZone(zone).LocalDateTime) : null,
                 ["dates"] = new JsonArray(r.Dates.Select(d => (JsonNode)Date(d)!).ToArray())
             }).ToArray())
+        };
+    });
+
+    [McpServerTool(Name = "get_weather", Title = "Read cached weather", ReadOnly = true, Idempotent = true, OpenWorld = false)]
+    [Description("The weather the user's trip app last downloaded for this trip, read from its local cache. This tool never fetches live weather and cannot look up other places or dates; every entry says when it was fetched, so mention its age when it matters. Per day: the weather where most of the day happens. Per item: whether weather matters (outdoor estimate), the outlook at its place (or at departure and arrival), and warnings. Kinds: forecast (within a week), trend (up to about two weeks, can still change a lot), climate (averages of the last years, not a forecast). When weather is off in the app, the answer says so; only the user can turn it on.")]
+    public Task<string> GetWeather(
+        [Description("Optional first day, YYYY-MM-DD.")] string? from = null,
+        [Description("Optional last day, YYYY-MM-DD.")] string? to = null,
+        CancellationToken ct = default) => Run(async () =>
+    {
+        var app = clientName is { Length: > 0 } name ? name : "the trip app";
+        if (weather?.Invoke() is not { } source)
+            return new JsonObject { ["available"] = false, ["note"] = "Weather is turned off in " + app + ". The user can turn it on there (Settings, Weather). This server never downloads weather itself." };
+        var trip = (await repository.ReadAsync(ct)).Trip; var zone = ScheduleQueries.TripZone(trip);
+        var now = SystemClock.Instance.GetCurrentInstant();
+        var service = WeatherService.CacheOnly(new WeatherCache(source.CacheDirectory), source.Provider);
+        var result = service.Cached(trip);
+        var first = ParseDate(from, "from"); var last = ParseDate(to, "to");
+        bool InRange(LocalDate date) => (first is null || date >= first) && (last is null || date <= last);
+        JsonObject Outlook(WeatherOutlook o)
+        {
+            var json = new JsonObject { ["kind"] = o.Kind.ToString().ToLowerInvariant(), ["place"] = trip.Find(o.Place)?.Title };
+            if (o.Fetched is { } fetched) { json["fetched"] = InstantPattern.General.Format(fetched); json["age_hours"] = Math.Round((now - fetched).TotalHours, 1); }
+            json["source"] = o.Kind == OutlookKind.Climate ? "climate averages" : service.Providers.FirstOrDefault(p => p.Id == o.Provider)?.Name ?? o.Provider;
+            if (o.Climate is { } c) { json["avg_max_c"] = c.MaxC; json["avg_min_c"] = c.MinC; json["rain_day_share"] = c.RainDayShare; json["avg_precipitation_mm"] = c.PrecipitationMm; json["years"] = c.Years; }
+            else if (o.Hours.Count > 0)
+            {
+                // The item's own hours, summarised.
+                json["condition"] = o.Hours.Where(h => h.Condition >= WeatherCondition.Drizzle).Select(h => (WeatherCondition?)h.Condition).Max()?.ToString() ?? o.Hours.GroupBy(h => h.Condition).OrderByDescending(g => g.Count()).First().Key.ToString();
+                json["min_c"] = o.Hours.Min(h => h.TemperatureC); json["max_c"] = o.Hours.Max(h => h.TemperatureC);
+                json["precipitation_chance"] = o.Hours.Max(h => h.PrecipitationChance); json["precipitation_mm"] = Math.Round(o.Hours.Sum(h => h.PrecipitationMm ?? 0), 1); json["gust_kmh"] = o.Hours.Max(h => h.GustKmh);
+            }
+            else if (o.Day is { } d)
+            {
+                json["condition"] = d.Condition.ToString(); json["max_c"] = d.MaxC; json["min_c"] = d.MinC; json["precipitation_chance"] = d.PrecipitationChance; json["precipitation_mm"] = d.PrecipitationMm; json["gust_kmh"] = d.GustKmh;
+            }
+            var (sunrise, sunset) = (o.Day?.Sunrise ?? o.Climate?.Sunrise, o.Day?.Sunset ?? o.Climate?.Sunset);
+            if (sunrise is { } rise) json["sunrise"] = LocalDateTimePattern.ExtendedIso.Format(rise.InZone(zone).LocalDateTime);
+            if (sunset is { } set) json["sunset"] = LocalDateTimePattern.ExtendedIso.Format(set.InZone(zone).LocalDateTime);
+            return json;
+        }
+        var days = result.Days.Values.Where(d => InRange(d.Date)).OrderBy(d => d.Date).Select(d => (JsonNode)new JsonObject { ["date"] = Date(d.Date) }.Also(j => { foreach (var p in Outlook(d.Outlook)) j[p.Key] = p.Value?.DeepClone(); })).ToArray();
+        var items = result.Items.Values.Select(i => (Weather: i, Entity: trip.Find(i.Item))).Where(x => x.Entity is not null)
+            .Select(x => (x.Weather, x.Entity, Start: ScheduleQueries.Span(trip, x.Entity!).Start)).Where(x => x.Start is { } s && InRange(s.InZone(zone).Date)).OrderBy(x => x.Start)
+            .Select(x => (JsonNode)new JsonObject
+            {
+                ["id"] = x.Entity!.Id.ToString(),
+                ["title"] = x.Entity.Title,
+                ["when"] = When(trip, x.Entity),
+                ["outdoor"] = x.Weather.Exposure.Exposure.ToString().ToLowerInvariant() + (x.Weather.Exposure.Source is ExposureSource.Explicit or ExposureSource.Inherited ? "" : " (estimated)"),
+                ["outlooks"] = new JsonArray(x.Weather.Outlooks.Select(o => (JsonNode)Outlook(o)).ToArray()),
+                ["warnings"] = new JsonArray(x.Weather.Concerns.Select(c => (JsonNode)new JsonObject { ["kind"] = c.Kind.ToString().ToLowerInvariant(), ["severe"] = c.Severe, ["value"] = c.Value }).ToArray())
+            }).ToArray();
+        return new JsonObject
+        {
+            ["available"] = true,
+            ["note"] = "Cached weather from " + app + "'s last update, not live data. This server never contacts weather services; " + app + " refreshes the cache while the trip is open there with weather turned on. Forecasts older than 24 hours are left out. Temperatures in °C, precipitation in mm, wind in km/h, times in the trip's timezone.",
+            ["timezone"] = zone.Id,
+            ["days"] = new JsonArray(days),
+            ["items"] = new JsonArray(items),
+            ["attribution"] = new JsonArray(result.Sources.Select(a => (JsonNode)(a.Text + (a.License is null ? "" : " (" + a.License + ")") + ", " + a.Url)).ToArray())
         };
     });
 
@@ -468,6 +530,9 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         if (e.Data["status"] is { } status) result["status"] = status.DeepClone();
         if (e.Type != "schedule_item") return result;
         result["category"] = Category(trip, e);
+        // How much weather matters: outdoor, possibly, travel or indoor, stated by the outdoor field or estimated.
+        var exposure = OutdoorEstimates.For(trip, e);
+        result["outdoor"] = exposure.Exposure.ToString().ToLowerInvariant() + (exposure.Source is ExposureSource.Explicit or ExposureSource.Inherited ? "" : " (estimated)");
         result["when"] = When(trip, e);
         if (ScheduleQueries.PrimaryPlace(trip, e) is { } place) result["place"] = place.Title;
         if (ScheduleQueries.Participants(trip, e) is { Count: > 0 } people) result["people"] = new JsonArray(people.Select(p => (JsonNode)p.Title).ToArray());

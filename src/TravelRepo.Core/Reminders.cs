@@ -20,7 +20,13 @@ public enum ReminderKind
     /// Variants were deleted on the remote while copies remain here. Clients create this reminder from the Git state;
     /// <see cref="TripReminders.For"/> never returns it, because it is not trip data.
     /// </summary>
-    VariantsDeletedOnline
+    VariantsDeletedOnline,
+    /// <summary>
+    /// The forecast for an item in the next days brings weather that matters for it, such as rain on a hike or a storm
+    /// on a ferry crossing. Weather services create this reminder (see TravelRepo.Providers.Weather);
+    /// <see cref="TripReminders.For"/> never returns it, because forecasts are not trip data.
+    /// </summary>
+    WeatherWarning
 }
 
 /// <summary>

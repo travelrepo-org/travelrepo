@@ -81,7 +81,7 @@ public sealed record InheritedValue(JsonNode? Value, Guid Source, bool Inherited
 
 public static class TripQueries
 {
-    private static readonly HashSet<string> Inheritable = ["participants", "tags", "default_place", "display", "category"];
+    private static readonly HashSet<string> Inheritable = ["participants", "tags", "default_place", "display", "category", "outdoor"];
     public static Entity? Parent(TripSnapshot trip, Guid child) => trip.Entities.Values.FirstOrDefault(e => e.Data["children"] is JsonArray a && a.Any(x => x?.ToString() == child.ToString()));
     public static InheritedValue Resolve(TripSnapshot trip, Guid id, string field)
     {

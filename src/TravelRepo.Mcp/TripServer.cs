@@ -12,13 +12,20 @@ namespace TravelRepo.Mcp;
 /// <param name="Git">Git backend for versions and comparisons. Defaults to the Git found on this computer.</param>
 /// <param name="ClientName">Name of the application that starts the server, reported to the assistant (for example "Jourfold").</param>
 /// <param name="RecoveryRoot">Recovery journal folder; defaults to the one every TravelRepo client uses for this trip.</param>
-public sealed record TripServerOptions(bool ReadOnly = false, IGitBackend? Git = null, string? ClientName = null, string? RecoveryRoot = null);
+/// <param name="Weather">
+/// Where the client keeps its weather cache, asked on every call so a change in the client's settings applies at once.
+/// Null, or a function that returns null, means weather is off. The server only reads this cache and never downloads.
+/// </param>
+public sealed record TripServerOptions(bool ReadOnly = false, IGitBackend? Git = null, string? ClientName = null, string? RecoveryRoot = null, Func<CachedWeatherSource?>? Weather = null);
+
+/// <summary>A client's weather cache folder and the weather service chosen there.</summary>
+public sealed record CachedWeatherSource(string CacheDirectory, string? Provider);
 
 /// <summary>
 /// A Model Context Protocol server for one TravelRepo trip. AI assistants (MCP clients) start it as a local process
 /// and talk to it over standard input and output. Every change goes through <see cref="TravelRepository.ApplyAsync"/>,
 /// so it is validated, written as one transaction and refused when the files changed in the meantime.
-/// The server has no AI logic of its own and never contacts the network.
+/// The server has no AI logic of its own and never contacts the network; weather comes only from the client's cache.
 /// </summary>
 public static class TripServer
 {
@@ -41,7 +48,7 @@ public static class TripServer
     {
         var root = Path.GetFullPath(tripPath);
         if (!File.Exists(Path.Combine(root, "travel.yaml"))) throw new DomainException("mcp.not_trip", "This folder is not a TravelRepo trip: travel.yaml is missing.");
-        var tools = new TripTools(new TravelRepository(root, options.RecoveryRoot), options.Git ?? new GitCliBackend(), options.ReadOnly);
+        var tools = new TripTools(new TravelRepository(root, options.RecoveryRoot), options.Git ?? new GitCliBackend(), options.ReadOnly, options.Weather, options.ClientName);
         var collection = new McpServerPrimitiveCollection<McpServerTool>();
         foreach (var method in typeof(TripTools).GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly))
         {
@@ -61,6 +68,7 @@ public static class TripServer
         "These tools work on one travel plan (a TravelRepo trip)" + (options.ClientName is { Length: > 0 } client ? " that the user plans in " + client : "") + ". "
         + "Call read_guide once before your first change; it explains entities, times and the rules for editing. "
         + "Start with get_trip and get_schedule to see what exists. "
+        + "get_weather returns only the weather the app has already downloaded for this trip; this server never fetches live weather. "
         + (options.ReadOnly
             ? "This server is read-only: you can look at the trip but not change it."
             : "Changes are validated and saved immediately and show up for the user as unsaved changes. Create a version only when the user asks for it.");

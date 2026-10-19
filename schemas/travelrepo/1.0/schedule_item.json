@@ -622,6 +622,9 @@
         ],
         "additionalProperties": true
       }
+    },
+    "outdoor": {
+      "type": "boolean"
     }
   },
   "required": [

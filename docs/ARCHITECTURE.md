@@ -77,6 +77,7 @@ Do not use ReactiveUI unless a concrete requirement appears that CommunityToolki
 │   ├── TravelRepo.Documents/
 │   ├── TravelRepo.Providers.Abstractions/
 │   ├── TravelRepo.Providers.GitHub/
+│   ├── TravelRepo.Providers.Weather/
 │   ├── TravelRepo.Plugins.Abstractions/
 │   ├── TravelRepo.Cli/
 │   │
@@ -229,6 +230,12 @@ Owns capability-based provider interfaces such as:
 ### TravelRepo.Providers.GitHub
 
 Implements GitHub-specific capabilities.
+
+Must not depend on Avalonia.
+
+### TravelRepo.Providers.Weather
+
+Weather forecasts and climate averages for trips: the built-in services (Open-Meteo, MET Norway, the US National Weather Service and Visual Crossing with a personal key), the local cache, and the rules that decide when weather matters for an item. The outdoor estimate itself lives in `TravelRepo.Core` because it reads only trip data.
 
 Must not depend on Avalonia.
 
