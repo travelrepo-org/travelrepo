@@ -2,6 +2,21 @@
 
 All notable changes to TravelRepo. Generated from `docs/releases` by `python eng/changelog.py`; do not edit by hand.
 
+## 0.5.0 – 2026-10-20
+
+### Changes
+
+- The new TravelRepo.Providers.Weather package gives clients weather for a trip without writing anything into it. Built-in services are Open-Meteo (default and fallback), MET Norway, the US National Weather Service and Visual Crossing with a personal key. Requests contain only coordinates rounded to two decimals.
+- WeatherService works out the places and dates a trip needs, asks the chosen service first and falls back to Open-Meteo. Beyond the forecasts it uses climate averages from the last ten years. WeatherCache keeps everything on the device.
+- WeatherAdvice decides when weather matters for an item and turns concerns within three days into WeatherWarning reminders.
+- The optional, inheritable `outdoor` field states whether an item happens outdoors (specification section 25.2). Without it, OutdoorEstimates estimates it from the transport type, the category and English and German title words, and says why.
+- MCP: get_weather returns the weather a client has already cached, never live data, through WeatherService.CacheOnly, which cannot download. get_schedule shows the outdoor estimate.
+- MailHtml makes e-mail HTML safe to show in its original layout, and MailMessage carries the HTML part and its inline images.
+
+### Fixes
+
+- Running Git in a trip folder that was moved or deleted reports git.folder_missing instead of failing with a platform error.
+
 ## 0.4.0 – 2026-10-19
 
 ### Changes
