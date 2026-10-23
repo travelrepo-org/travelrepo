@@ -998,6 +998,42 @@ Examples:
 
 Collections may contain references to schedule items, places, documents, or other supported entities.
 
+### 37.1 Packing lists
+
+A packing list is a collection with `purpose: packing`. Its `items` are tasks with a `packing` component, in list order. A trip can have any number of packing lists.
+
+```yaml
+type: collection
+title: Barbecue
+purpose: packing
+items:
+  - 0195f3c0-....   # Grill
+  - 0195f3c1-....   # Drinks
+```
+
+```yaml
+type: task
+title: Grill
+status: open
+assigned_to:
+  - 0195f36b-....
+components:
+  packing:
+    group: Cooking
+    quantity: "1"
+    packed_by:
+      - 0195f36b-....
+```
+
+- `assigned_to` lists the people who bring the item together; one of them packing it is enough.
+- `everyone: true` means every traveller brings their own, including people added to the trip later. Travellers are the manifest's participants, or every person when it lists none. `assigned_to` is then omitted.
+- An item that is neither assigned nor for everyone is unassigned.
+- `packed_by` is the set of people who have packed the item. Clients merge it as a set, so people packing at the same time do not conflict.
+- `group` and `quantity` are free text for display.
+- Writers set `status` to `completed` when the item is done (everyone has packed their own, or one of the assigned people has packed it) and to `open` otherwise, so clients without packing lists still show progress.
+
+Clients that do not know packing lists see a collection of tasks; no data is lost.
+
 ## 38. Inbox
 
 Inbox is primarily a client concept.
@@ -1171,6 +1207,8 @@ TravelRepo core libraries must not depend on Jourfold, Avalonia, or any UI frame
 Jourfold may maintain local default user identity settings.
 
 When used in a trip, those defaults create or map to a normal TravelRepo `Person`.
+
+Which person is the local user ("me") is client state, remembered per trip on the device and never written into the trip. Clients may suggest it from the identities stored on people: first a person whose `identities.github` username equals the connected GitHub login, then one whose `identities.git` e-mail equals the local Git e-mail, both compared without regard to case, and only when exactly one person matches. With the user's consent a client may add their identity to the chosen person. "Me" is a convenience for personal views and not an authentication mechanism.
 
 There is no central Jourfold account requirement.
 

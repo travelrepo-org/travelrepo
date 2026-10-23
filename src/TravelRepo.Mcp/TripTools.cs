@@ -170,6 +170,103 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         ["issues"] = new JsonArray(Enum.GetValues<StayIssues>().Where(i => i != StayIssues.None && stay.Issues.HasFlag(i)).Select(i => (JsonNode)i.ToString()).ToArray())
     };
 
+    [McpServerTool(Name = "get_packing_lists", Title = "Read packing lists", ReadOnly = true, Idempotent = true, OpenWorld = false)]
+    [Description("The trip's packing lists with their items in order: group, quantity, who brings each item (\"everyone\" means every traveller brings their own, including people added later; several people share an item), who has packed it, whether it is done, and which items nobody brings yet. Optionally only the items of one person.")]
+    public Task<string> GetPackingLists([Description("Optional person id or name: only the items this person brings.")] string? person = null, CancellationToken ct = default) => Run(async () =>
+    {
+        var trip = (await repository.ReadAsync(ct)).Trip; var only = person is null ? null : Person(trip, person);
+        return new JsonObject
+        {
+            ["lists"] = new JsonArray(PackingLists.All(trip).Select(list => (JsonNode)new JsonObject
+            {
+                ["id"] = list.Collection.Id.ToString(),
+                ["title"] = list.Collection.Title,
+                ["done"] = list.DoneCount,
+                ["total"] = list.Items.Count,
+                ["items"] = new JsonArray((only is null ? list.Items : PackingLists.For(list, only.Id)).Select(i => (JsonNode)PackingItemJson(i)).ToArray()),
+                ["unassigned"] = new JsonArray(PackingLists.Unassigned(list).Select(i => (JsonNode)i.Task.Title).ToArray())
+            }).ToArray())
+        };
+    });
+
+    [McpServerTool(Name = "create_packing_list", Title = "Create a packing list", Destructive = false, OpenWorld = false)]
+    [Description("Creates an empty packing list, for example \"Barbecue\" or \"Camping gear\". Add items with add_packing_item.")]
+    public Task<string> CreatePackingList([Description("The list's title.")] string title, CancellationToken ct = default) => Run(async () =>
+    {
+        if (string.IsNullOrWhiteSpace(title)) throw new McpException("A packing list needs a title.");
+        var list = PackingLists.CreateList(title.Trim());
+        await Write(_ => ([new EntityEdit(list.Id, list)], null), ct);
+        return new JsonObject { ["id"] = list.Id.ToString(), ["title"] = list.Title };
+    });
+
+    [McpServerTool(Name = "add_packing_item", Title = "Add a packing item", Destructive = false, OpenWorld = false)]
+    [Description("Adds an item to the end of a packing list. People are ids or names; leave them out for an item nobody brings yet, or set everyone for an item every traveller brings their own of.")]
+    public Task<string> AddPackingItem(
+        [Description("The packing list's id.")] string list,
+        [Description("What to bring, for example \"Grill\".")] string title,
+        [Description("Optional group, for example \"Cooking\".")] string? group = null,
+        [Description("Optional quantity, for example \"2 packs\".")] string? quantity = null,
+        [Description("Optional people who bring it together (ids or names).")] string[]? people = null,
+        [Description("True when every traveller brings their own.")] bool everyone = false,
+        CancellationToken ct = default) => Run(async () =>
+    {
+        if (string.IsNullOrWhiteSpace(title)) throw new McpException("An item needs a title.");
+        Entity? added = null;
+        await Write(state =>
+        {
+            var collection = Find(state.Trip, list); if (!PackingLists.IsList(collection)) throw new McpException("This is not a packing list. Use get_packing_lists to find their ids.");
+            var (item, updated) = PackingLists.AddItem(collection, title.Trim(), group, quantity, (people ?? []).Select(p => Person(state.Trip, p).Id).ToArray(), everyone);
+            added = item; return ([new EntityEdit(item.Id, item), new EntityEdit(updated.Id, updated)], null);
+        }, ct);
+        return PackingItemJson(PackingLists.Item((await repository.ReadAsync(ct)).Trip, added!));
+    });
+
+    [McpServerTool(Name = "assign_packing_item", Title = "Choose who brings an item", Destructive = false, OpenWorld = false)]
+    [Description("Sets who brings a packing item: people (ids or names) who share it, everyone (each traveller brings their own), or nobody. Marks of who has packed it are kept.")]
+    public Task<string> AssignPackingItem(
+        [Description("The item's id.")] string item,
+        [Description("People who bring it together (ids or names); empty for nobody.")] string[]? people = null,
+        [Description("True when every traveller brings their own.")] bool everyone = false,
+        CancellationToken ct = default) => Run(async () =>
+    {
+        await Write(state =>
+        {
+            var task = PackingTask(state.Trip, item);
+            var updated = PackingLists.Assign(task, (people ?? []).Select(p => Person(state.Trip, p).Id).ToArray(), everyone);
+            return ([new EntityEdit(updated.Id, updated)], null);
+        }, ct);
+        var trip = (await repository.ReadAsync(ct)).Trip; return PackingItemJson(PackingLists.Item(trip, PackingTask(trip, item)));
+    });
+
+    [McpServerTool(Name = "set_packed", Title = "Mark an item as packed", Destructive = false, OpenWorld = false)]
+    [Description("Marks a packing item as packed, or not packed, for one person. Only do this when the person says so.")]
+    public Task<string> SetPacked([Description("The item's id.")] string item, [Description("The person's id or name.")] string person, [Description("False to undo.")] bool packed = true, CancellationToken ct = default) => Run(async () =>
+    {
+        await Write(state => { var task = PackingTask(state.Trip, item); var updated = PackingLists.SetPacked(state.Trip, task, Person(state.Trip, person).Id, packed); return ([new EntityEdit(updated.Id, updated)], null); }, ct);
+        var trip = (await repository.ReadAsync(ct)).Trip; return PackingItemJson(PackingLists.Item(trip, PackingTask(trip, item)));
+    });
+
+    private static JsonObject PackingItemJson(PackingItem i) => new()
+    {
+        ["id"] = i.Task.Id.ToString(),
+        ["title"] = i.Task.Title,
+        ["group"] = i.Group,
+        ["quantity"] = i.Quantity,
+        ["brought_by"] = i.Everyone ? "everyone" : i.Unassigned ? "nobody yet" : string.Join(", ", i.Assignees.Select(a => a.Title)),
+        ["packed_by"] = new JsonArray(i.Assignees.Where(a => i.IsPackedBy(a.Id)).Select(a => (JsonNode)a.Title).ToArray()),
+        ["done"] = i.Done
+    };
+
+    private static Entity PackingTask(TripSnapshot trip, string id) => Find(trip, id) is var e && PackingLists.IsItem(e) ? e : throw new McpException("This is not a packing item. Use get_packing_lists to find their ids.");
+
+    /// <summary>A person by id or by name; a name must match exactly one person, ignoring case.</summary>
+    private static Entity Person(TripSnapshot trip, string idOrName)
+    {
+        if (Guid.TryParse(idOrName.Trim(), out var id)) return trip.Find(id) is { Type: "person" } byId ? byId : throw new McpException("No person has the id " + idOrName + ".");
+        var matches = trip.Entities.Values.Where(e => e.Type == "person" && string.Equals(e.Title, idOrName.Trim(), StringComparison.CurrentCultureIgnoreCase)).ToArray();
+        return matches.Length == 1 ? matches[0] : throw new McpException(matches.Length == 0 ? "Nobody in the trip is called \"" + idOrName + "\". Use list_entities with type person." : "Several people are called \"" + idOrName + "\". Use the person's id.");
+    }
+
     [McpServerTool(Name = "list_reminders", Title = "List reminders", ReadOnly = true, Idempotent = true, OpenWorld = false)]
     [Description("Things the travellers should look at now: free cancellation deadlines within two weeks, tasks due, arrivals after a check-in window, nights without a place to stay, and bookings not confirmed shortly before they start. Urgent ones come first.")]
     public Task<string> ListReminders(CancellationToken ct = default) => Run(async () =>

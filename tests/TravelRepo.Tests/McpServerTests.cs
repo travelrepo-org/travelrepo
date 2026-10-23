@@ -227,4 +227,26 @@ public sealed class McpServerTests : IDisposable
         var snapshot = (await repo.ReadAsync()).Trip;
         await Assert.ThrowsAsync<InvalidOperationException>(() => WeatherService.CacheOnly(cache).UpdateAsync(snapshot));
     }
+
+    [Fact]
+    public async Task AssistantsKeepPackingListsWithPeople()
+    {
+        var (repo, _) = await Trip(); var client = await Connect(repo.Root);
+        var ana = Entity.Create("person", "Ana"); var ben = Entity.Create("person", "Ben");
+        await repo.ApplyAsync(await repo.ReadAsync(), [new(ana.Id, ana), new(ben.Id, ben)]);
+        var list = (await Call(client, "create_packing_list", """{"title":"Barbecue"}"""))["id"]!.ToString();
+        var grill = (await Call(client, "add_packing_item", "{\"list\":\"" + list + "\",\"title\":\"Grill\",\"group\":\"Cooking\",\"people\":[\"ana\"]}"))["id"]!.ToString();
+        var drinks = await Call(client, "add_packing_item", "{\"list\":\"" + list + "\",\"title\":\"Drinks\",\"everyone\":true}");
+        Assert.Equal("everyone", drinks["brought_by"]!.ToString());
+        var plates = (await Call(client, "add_packing_item", "{\"list\":\"" + list + "\",\"title\":\"Plates\"}"))["id"]!.ToString();
+        var lists = await Call(client, "get_packing_lists");
+        Assert.Equal(["Plates"], lists["lists"]![0]!["unassigned"]!.AsArray().Select(n => n!.ToString()));
+
+        Assert.Equal("Ben", (await Call(client, "assign_packing_item", "{\"item\":\"" + plates + "\",\"people\":[\"Ben\"]}"))["brought_by"]!.ToString());
+        var packed = await Call(client, "set_packed", "{\"item\":\"" + grill + "\",\"person\":\"Ana\"}");
+        Assert.True(packed["done"]!.GetValue<bool>());
+        var mine = await Call(client, "get_packing_lists", """{"person":"Ben"}""");
+        Assert.Equal(["Drinks", "Plates"], mine["lists"]![0]!["items"]!.AsArray().Select(n => n!["title"]!.ToString()));
+        Assert.Contains("Nobody in the trip", await Call(client, "set_packed", "{\"item\":\"" + grill + "\",\"person\":\"Zoe\"}", expectError: true));
+    }
 }
