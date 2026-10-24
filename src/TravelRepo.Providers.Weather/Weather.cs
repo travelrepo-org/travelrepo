@@ -18,12 +18,7 @@ public readonly record struct GeoPoint(double Latitude, double Longitude)
     public override string ToString() => Latitude.ToString("0.####", CultureInfo.InvariantCulture) + "," + Longitude.ToString("0.####", CultureInfo.InvariantCulture);
 
     /// <summary>The location of a place entity, or null when it has none.</summary>
-    public static GeoPoint? Of(Entity? place)
-    {
-        if (place?.Data["location"] is not { } location) return null;
-        return double.TryParse(location["latitude"]?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var lat) && double.TryParse(location["longitude"]?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var lon)
-            && lat is >= -90 and <= 90 && lon is >= -180 and <= 180 ? new GeoPoint(lat, lon) : null;
-    }
+    public static GeoPoint? Of(Entity? place) => Places.Location(place) is { } p ? new GeoPoint(p.Latitude, p.Longitude) : null;
 }
 
 /// <summary>The weather of an hour or a day in a few classes, ordered from mild to severe.</summary>

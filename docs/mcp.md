@@ -38,6 +38,7 @@ Each server serves exactly one trip folder. Add one entry per trip you want the 
 | `get_entity` | no | All fields of one entity, its note texts, its parent and what refers to it. |
 | `get_schedule` | no | The schedule day by day in the trip timezone, then the unscheduled ideas. |
 | `get_packing_lists` | no | Packing lists with their items: group, quantity, who brings each, who has packed it, done, and what nobody brings yet. Optionally one person's items. |
+| `export_text` | no | The plan or the packing lists as plain text with the app's export rules: parts, date range, one person, compact. |
 | `create_packing_list`, `add_packing_item`, `assign_packing_item`, `set_packed` | yes | Create lists, add items, choose who brings them (people, everyone, nobody) and mark them packed for a person. |
 | `get_weather` | no | The weather the client last downloaded for the trip, from its local cache: per day, per item with the outdoor estimate and warnings, each with its age. Never fetches; says so when weather is off in the client. |
 | `list_reminders` | no | Cancellation deadlines, tasks due, late arrivals, nights without a stay and unconfirmed bookings that need attention now. |

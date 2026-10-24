@@ -189,6 +189,31 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         };
     });
 
+    [McpServerTool(Name = "export_text", Title = "Export as text", ReadOnly = true, Idempotent = true, OpenWorld = false)]
+    [Description("The trip plan or the packing lists as plain text, using the same rules as the app's exports: for example one person's plan for a few days, or one person's packing list to paste into a message. Packing items start with a ballot box, ticked when done.")]
+    public Task<string> ExportText(
+        [Description("\"plan\" for the itinerary or \"packing\" for the packing lists.")] string kind = "plan",
+        [Description("Optional person id or name: only what concerns this person.")] string? person = null,
+        [Description("Optional first day, yyyy-mm-dd (plan only).")] string? from = null,
+        [Description("Optional last day, yyyy-mm-dd (plan only).")] string? to = null,
+        [Description("Optional parts for the plan, comma-separated: schedule, stays, bookings, contacts, costs, tasks, notes, packing. Default: schedule, stays, bookings, contacts, costs.")] string? parts = null,
+        [Description("True for times, titles, places and booking references only.")] bool compact = false,
+        CancellationToken ct = default) => Run(async () =>
+    {
+        var trip = (await repository.ReadAsync(ct)).Trip; var who = person is null ? (Guid?)null : Person(trip, person).Id;
+        try
+        {
+            var text = kind switch
+            {
+                "packing" => PackingExport.Text(trip, new PackingExportOptions { Person = who }),
+                "plan" => TripExport.Text(TripExport.Document(trip, new ExportOptions { Person = who, From = ExportOptions.ParseDate(from), To = ExportOptions.ParseDate(to), Parts = parts is null ? ExportParts.Standard : ExportOptions.ParseParts(parts) & ~(ExportParts.Map | ExportParts.Attachments), Detail = compact ? ExportDetail.Compact : ExportDetail.Detailed })),
+                _ => throw new McpException("Use kind \"plan\" or \"packing\".")
+            };
+            return new JsonObject { ["text"] = text };
+        }
+        catch (DomainException e) { throw new McpException(e.Message); }
+    });
+
     [McpServerTool(Name = "create_packing_list", Title = "Create a packing list", Destructive = false, OpenWorld = false)]
     [Description("Creates an empty packing list, for example \"Barbecue\" or \"Camping gear\". Add items with add_packing_item.")]
     public Task<string> CreatePackingList([Description("The list's title.")] string title, CancellationToken ct = default) => Run(async () =>

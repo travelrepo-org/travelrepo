@@ -66,6 +66,27 @@ public sealed record StayWindow(LocalTime? From, LocalTime? Until)
     public bool Contains(LocalTime time) => (From is not { } from || time >= from) && (Until is not { } until || time <= until);
 }
 
+/// <summary>
+/// Consecutive nights at the same place, from one stay or from several, for example one item per night. Exports and
+/// overviews show a run as one stay. <see cref="Main"/> is the stay that starts first and covers the most nights.
+/// </summary>
+public sealed record StayRun(IReadOnlyList<Stay> Stays, LocalDate FirstNight, int Nights)
+{
+    public Stay Main => Stays[0];
+    public LocalDate LastNight => FirstNight.PlusDays(Nights - 1);
+    /// <summary>The local date of the check-out morning.</summary>
+    public LocalDate DepartureDay => FirstNight.PlusDays(Nights);
+    public bool Covers(LocalDate night) => night >= FirstNight && night < DepartureDay;
+    /// <summary>1 for the first night of the run, 2 for the second and so on.</summary>
+    public int NightNumber(LocalDate night) => Period.DaysBetween(FirstNight, night) + 1;
+    /// <summary>The check-in of the run: one on its first day, preferring a fixed hour.</summary>
+    public Stay? CheckInStay => Stays.Where(s => s.CheckIn is { } c && Day(c) == FirstNight).OrderBy(s => s.CheckInApproximate).FirstOrDefault();
+    /// <summary>The check-out of the run: one on its departure day, preferring a fixed hour.</summary>
+    public Stay? CheckOutStay => Stays.Where(s => s.CheckOut is { } c && Day(c) == DepartureDay).OrderBy(s => s.CheckOutApproximate).FirstOrDefault();
+
+    private static LocalDate? Day(ZonedTime value) => LocalDateTimePattern.ExtendedIso.Parse(value.Local).TryGetValue(default, out var local) ? local.Date : null;
+}
+
 /// <summary>Stays that should be one stay over several nights, for example one item per night at the same place.</summary>
 public sealed record StayMergeCandidate(IReadOnlyList<Stay> Stays, LocalDate FirstNight, int Nights)
 {
@@ -249,14 +270,21 @@ public static class Stays
     /// Stays at the same place whose nights follow each other or overlap, for example one item per night. Places are
     /// compared by ID; stays without a place are compared by title.
     /// </summary>
-    public static IReadOnlyList<StayMergeCandidate> MergeCandidates(TripSnapshot trip)
+    public static IReadOnlyList<StayMergeCandidate> MergeCandidates(TripSnapshot trip) =>
+        Runs(trip).Where(r => r.Stays.Count > 1).Select(r => new StayMergeCandidate(r.Stays, r.FirstNight, r.Nights)).ToArray();
+
+    /// <summary>
+    /// The trip's stays as runs of consecutive or overlapping nights at the same place (by place, or by title when a
+    /// stay has no place), in date order. Cancelled and unscheduled stays are left out.
+    /// </summary>
+    public static IReadOnlyList<StayRun> Runs(TripSnapshot trip)
     {
-        var result = new List<StayMergeCandidate>();
+        var result = new List<StayRun>();
         var scheduled = All(trip).Where(s => s.FirstNight is not null && s.Nights > 0 && s.Item.Data["status"]?.ToString() != "cancelled").ToArray();
         foreach (var group in scheduled.GroupBy(s => s.Place?.ToString() ?? "title:" + s.Item.Title.Trim().ToLowerInvariant()))
         {
             var run = new List<Stay>(); LocalDate runEnd = default;
-            void Flush() { if (run.Count > 1) result.Add(new(run.ToArray(), run[0].FirstNight!.Value, Period.DaysBetween(run[0].FirstNight!.Value, runEnd))); run.Clear(); }
+            void Flush() { if (run.Count > 0) result.Add(new(run.ToArray(), run[0].FirstNight!.Value, Period.DaysBetween(run[0].FirstNight!.Value, runEnd))); run.Clear(); }
             foreach (var stay in group.OrderBy(s => s.FirstNight).ThenByDescending(s => s.Nights))
             {
                 var first = stay.FirstNight!.Value; var end = first.PlusDays(stay.Nights);
@@ -266,7 +294,7 @@ public static class Stays
             }
             Flush();
         }
-        return result.OrderBy(c => c.FirstNight).ToArray();
+        return result.OrderBy(c => c.FirstNight).ThenBy(c => c.Main.Item.Title, StringComparer.Ordinal).ToArray();
     }
 
     private static readonly string[] StatusOrder = ["idea", "planned", "reserved", "confirmed", "completed"];

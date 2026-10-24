@@ -247,6 +247,9 @@ public sealed class McpServerTests : IDisposable
         Assert.True(packed["done"]!.GetValue<bool>());
         var mine = await Call(client, "get_packing_lists", """{"person":"Ben"}""");
         Assert.Equal(["Drinks", "Plates"], mine["lists"]![0]!["items"]!.AsArray().Select(n => n!["title"]!.ToString()));
+        var text = (await Call(client, "export_text", """{"kind":"packing","person":"Ben"}"""))["text"]!.ToString();
+        Assert.Contains("\u2610 Plates", text); Assert.DoesNotContain("Grill", text);
+        Assert.Contains("Use dates like", await Call(client, "export_text", """{"from":"next week"}""", expectError: true));
         Assert.Contains("Nobody in the trip", await Call(client, "set_packed", "{\"item\":\"" + grill + "\",\"person\":\"Zoe\"}", expectError: true));
     }
 }
