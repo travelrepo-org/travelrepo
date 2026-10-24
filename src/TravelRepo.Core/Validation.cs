@@ -14,8 +14,8 @@ public static class SemanticValidation
         void Error(string code, string path, string message) => result.Add(new(code, Severity.Error, path, message));
         var ids = trip.All.Select(e => e.Id.ToString()).ToHashSet();
         var scalarRefs = new HashSet<string> { "place", "default_place", "document", "entity", "author", "ref", "item", "booking" };
-        var listRefs = new HashSet<string> { "children", "travelers", "items", "documents", "assigned_to", "paid_by", "mentions", "guests" };
-        var targetTypes = new Dictionary<string, string> { ["place"] = "place", ["default_place"] = "place", ["document"] = "document", ["author"] = "person", ["item"] = "schedule_item", ["booking"] = "booking", ["ref"] = "booking", ["children"] = "schedule_item", ["travelers"] = "person", ["documents"] = "document", ["assigned_to"] = "person", ["paid_by"] = "person", ["mentions"] = "person", ["guests"] = "person", ["participants"] = "person", ["values"] = "person" };
+        var listRefs = new HashSet<string> { "children", "travelers", "items", "documents", "assigned_to", "paid_by", "mentions", "guests", "packed_by" };
+        var targetTypes = new Dictionary<string, string> { ["place"] = "place", ["default_place"] = "place", ["document"] = "document", ["author"] = "person", ["item"] = "schedule_item", ["booking"] = "booking", ["ref"] = "booking", ["children"] = "schedule_item", ["travelers"] = "person", ["documents"] = "document", ["assigned_to"] = "person", ["paid_by"] = "person", ["mentions"] = "person", ["guests"] = "person", ["participants"] = "person", ["values"] = "person", ["packed_by"] = "person" };
         void TargetType(JsonNode? value, string key, string path)
         {
             if (Guid.TryParse(value?.ToString(), out var id) && targetTypes.TryGetValue(key, out var type) && trip.Find(id) is { } target && target.Type != type) Error("reference.type", path, "The linked item has the wrong entity type.");
@@ -28,7 +28,7 @@ public static class SemanticValidation
                 {
                     if (k is "extensions" or "variant" or "external_ids" or "identities" || k.Contains('.')) continue;
                     if (key == "" && k is not ("cover" or "avatar" or "participants" or "children" or "components" or "content" or "default_place" or "travelers" or "items" or "documents" or "assigned_to" or "paid_by" or "mentions" or "target" or "related" or "author" or "constraints")) continue;
-                    if (key == "components" && k is not ("transport" or "accommodation" or "booking")) continue;
+                    if (key == "components" && k is not ("transport" or "accommodation" or "booking" or "packing")) continue;
                     if (k == "id" && key is "target" or "related" && v is not null && !ids.Contains(v.ToString())) Error("reference.missing", path + "/id", "The referenced entity does not exist.");
                     if (v is JsonValue) TargetType(v, k, path + "/" + k);
                     References(v, path + "/" + k, k);

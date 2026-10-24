@@ -26,7 +26,12 @@ public enum ReminderKind
     /// on a ferry crossing. Weather services create this reminder (see TravelRepo.Providers.Weather);
     /// <see cref="TripReminders.For"/> never returns it, because forecasts are not trip data.
     /// </summary>
-    WeatherWarning
+    WeatherWarning,
+    /// <summary>
+    /// The trip has people, but the client does not know which of them is the local user. Clients create this from
+    /// their local state; <see cref="TripReminders.For"/> never returns it.
+    /// </summary>
+    WhoAmI
 }
 
 /// <summary>
