@@ -194,6 +194,71 @@ public class ExportTests
     }
 
     [Fact]
+    public void StaysShowCheckInCheckOutAndEachNightInsteadOfASpanningItem()
+    {
+        // One item per night at the same hotel, the first carrying check-in and check-out for the whole stay.
+        var hotel = Entity.Create("place", "Hotel Kamo");
+        Entity Night(string date, bool first)
+        {
+            var e = Entity.Create("schedule_item", "Hotel Kamo"); e.Data["status"] = "confirmed";
+            e.Data["time"] = new JsonObject { ["precision"] = "day_part", ["date"] = date, ["day_part"] = "night", ["timezone"] = Zone };
+            var accommodation = new JsonObject { ["place"] = hotel.Id.ToString() };
+            if (first) { accommodation["check_in"] = new ZonedTime("2027-04-01T15:00:00", Zone).ToJson(); accommodation["check_out"] = new ZonedTime("2027-04-04T10:00:00", Zone).ToJson(); }
+            e.Data["components"]!["accommodation"] = accommodation;
+            return e;
+        }
+        var dinner = Item("Dinner", "2027-04-01T19:00:00", "2027-04-01T21:00:00");
+        var trip = Trip(hotel, Night("2027-04-01", true), Night("2027-04-02", false), Night("2027-04-03", false), dinner);
+
+        var run = Assert.Single(Stays.Runs(trip)); Assert.Equal(3, run.Nights); Assert.Equal(3, run.Stays.Count);
+        var document = TripExport.Document(trip, new ExportOptions { Parts = ExportParts.Schedule | ExportParts.Stays }, culture: Invariant);
+        var days = document.Sections.Where(s => s.Part == ExportParts.Schedule).ToArray();
+        Assert.Equal(["Thursday, 1 April", "Friday, 2 April", "Saturday, 3 April", "Sunday, 4 April"], days.Select(d => d.Title));
+        Assert.Equal(["Check-in · Hotel Kamo", "Dinner", "Night: Hotel Kamo"], days[0].Rows.Select(r => r.Title));
+        Assert.Equal("15:00", days[0].Rows[0].Lead); Assert.Equal("accommodation", days[0].Rows[0].Tone);
+        Assert.Equal("night 1 of 3", days[0].Rows[2].Summary); Assert.Equal(ExportRowKind.Night, days[0].Rows[2].Kind);
+        Assert.Equal("night 3 of 3", days[2].Rows.Single().Summary);
+        Assert.Equal(["Check-out · Hotel Kamo"], days[3].Rows.Select(r => r.Title)); Assert.Equal("10:00", days[3].Rows[0].Lead);
+        // The stays section shows the run once.
+        var stay = Assert.Single(document.Sections.Single(s => s.Part == ExportParts.Stays).Rows);
+        Assert.Equal("1 Apr – 4 Apr", stay.Lead); Assert.Contains("3 nights", stay.Summary);
+        // Nights appear on the time line too, without the stay as a block.
+        Assert.Equal(["Hotel Kamo"], days[0].Timeline!.Nights); Assert.Equal(["Dinner"], days[0].Timeline!.Blocks.Select(b => b.Title));
+    }
+
+    [Fact]
+    public void TimesInAnotherZoneCarryTheirShortNameAtBothEnds()
+    {
+        var flight = Entity.Create("schedule_item", "Flight to Osaka");
+        flight.Data["time"] = new JsonObject { ["precision"] = "exact", ["start"] = new ZonedTime("2027-03-31T13:20:00", "Europe/Berlin").ToJson(), ["end"] = new ZonedTime("2027-04-01T08:35:00", Zone).ToJson() };
+        var walk = Item("Walk", "2027-04-01T10:00:00", "2027-04-01T11:00:00");
+        var document = TripExport.Document(Trip(flight, walk), new ExportOptions { Parts = ExportParts.Schedule }, culture: Invariant);
+        var rows = document.Sections.SelectMany(s => s.Rows).ToArray();
+        Assert.Equal("13:20 CEST – 1 Apr 08:35 JST", rows.Single(r => r.Title == "Flight to Osaka").Lead);
+        Assert.Equal("10:00–11:00", rows.Single(r => r.Title == "Walk").Lead);
+        Assert.Equal("Time zone: Tokyo (JST, UTC+9)", document.ZoneNote); Assert.Contains(document.ZoneNote, document.Meta);
+    }
+
+    [Fact]
+    public void ZoneNamesFallBackToOffsetsAndShowSummerTime()
+    {
+        Assert.Equal("Berlin (CET/CEST, UTC+1/+2)", ExportTimes.Describe(DateTimeZoneProviders.Tzdb["Europe/Berlin"], new LocalDate(2027, 3, 26), new LocalDate(2027, 3, 30)));
+        Assert.Equal("Sao Paulo (UTC-3)", ExportTimes.Describe(DateTimeZoneProviders.Tzdb["America/Sao_Paulo"], new LocalDate(2027, 3, 26), null));
+        Assert.Equal("UTC+5:30", ExportTimes.Abbreviation(DateTimeZoneProviders.Tzdb["Asia/Colombo"], Instant.FromUtc(2027, 1, 1, 0, 0)));
+    }
+
+    [Fact]
+    public void OverlappingPlansShareTheTimeLine()
+    {
+        var blocks = ExportTimeline.Arrange([(600, 720, "Museum", "sightseeing"), (660, 780, "Call", "activity"), (690, 700, "Coffee", "food"), (900, 960, "Train", "transport"), (100, 100, "Empty", "activity")]);
+        Assert.Equal([(0, 3), (1, 3), (2, 3), (0, 1)], blocks.Select(b => (b.Lane, b.Lanes)));
+        var night = Item("Night bus", "2027-04-01T22:00:00", "2027-04-02T06:00:00");
+        var days = TripExport.Document(Trip(night), new ExportOptions { Parts = ExportParts.Schedule }, culture: Invariant).Sections;
+        var block = Assert.Single(days[0].Timeline!.Blocks); Assert.Equal((1320, 1440), (block.Start, block.End));
+        Assert.Null(TripExport.Document(Trip(night), new ExportOptions { Parts = ExportParts.Schedule, Timeline = false }, culture: Invariant).Sections[0].Timeline);
+    }
+
+    [Fact]
     public void MarkdownBecomesPlainLines()
     {
         Assert.Equal(["Title", "• one", "  • nested", "bold and italic", "snake_case_name stays"], ExportText.Plain("## Title\n\n- one\n  * nested\n**bold** and _italic_\n---\nsnake_case_name stays\n"));

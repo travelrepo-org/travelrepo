@@ -46,6 +46,8 @@ public sealed record ExportOptions
     public ExportDetail Detail { get; init; } = ExportDetail.Detailed;
     /// <summary>Paper size for renderers that produce pages.</summary>
     public PaperSize Paper { get; init; } = PaperSize.A4;
+    /// <summary>Whether renderers with pages draw each day's plans on a time line beside the list.</summary>
+    public bool Timeline { get; init; } = true;
 
     public bool Includes(ExportParts part) => (Parts & part) == part;
     public bool Compact => Detail == ExportDetail.Compact;

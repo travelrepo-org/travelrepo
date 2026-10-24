@@ -24,7 +24,7 @@ public static partial class TripExport
             .Append(".meta{color:#4d6170;margin:0 0 8px}.day{color:#0f7b7a;font-weight:600;font-size:13px;letter-spacing:.04em;text-transform:uppercase;margin-right:8px}")
             .Append("table{border-collapse:collapse;width:100%}td{padding:8px 6px;vertical-align:top;border-bottom:1px solid #e1e7e8}td.time{width:150px;color:#4d6170;white-space:nowrap}td.box{width:22px;font-size:17px;line-height:1.2}")
             .Append(".title{font-weight:600}.sub{color:#4d6170;font-size:13px}.detail{color:#4d6170;font-size:13px;margin-top:2px}.tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:10px;background:#eef2f2;color:#4d6170;margin-left:6px}")
-            .Append(".done .title{color:#76889a;text-decoration:line-through}")
+            .Append(".done .title{color:#76889a;text-decoration:line-through}tr.night td{background:#f4f1f8;color:#5b4a73;font-size:13px;border-bottom:none}")
             .Append("footer{margin-top:40px;color:#76889a;font-size:12px}@media print{body{margin:0;max-width:none}h2{break-after:avoid}tr{break-inside:avoid}}")
             .Append("</style></head><body><h1>").Append(E(document.Title)).Append("</h1>");
         foreach (var line in document.Meta) s.Append("<p class=\"meta\">").Append(E(line)).Append("</p>");
@@ -36,6 +36,7 @@ public static partial class TripExport
             foreach (var row in section.Rows)
             {
                 if (row.Kind == ExportRowKind.Heading) { s.Append("</table><h3>").Append(E(row.Title)).Append("</h3><table>"); continue; }
+                if (row.Kind == ExportRowKind.Night) { s.Append("<tr class=\"night\"><td class=\"time\"></td><td>").Append(E(row.Summary is { Length: > 0 } n ? row.Title + " · " + n : row.Title)).Append("</td></tr>"); continue; }
                 s.Append(row.Kind == ExportRowKind.Check && row.Checked ? "<tr class=\"done\">" : "<tr>");
                 if (row.Kind == ExportRowKind.Check) s.Append("<td class=\"box\">").Append(row.Checked ? "&#9745;" : "&#9744;").Append("</td>");
                 s.Append("<td class=\"time\">").Append(E(row.Lead)).Append("</td><td><div class=\"title\">").Append(E(row.Title));
@@ -65,6 +66,7 @@ public static partial class TripExport
             foreach (var row in section.Rows)
             {
                 if (row.Kind == ExportRowKind.Heading) { s.Append('\n').Append(row.Title).Append(":\n"); continue; }
+                if (row.Kind == ExportRowKind.Night) { s.Append(row.Title).Append(row.Summary is { Length: > 0 } n ? " (" + n + ")" : "").Append('\n'); continue; }
                 var lead = row.Kind == ExportRowKind.Check ? (row.Checked ? "\u2611 " : "\u2610 ") : row.Lead.Length > 0 ? row.Lead + "  " : "";
                 s.Append(lead).Append(row.Title);
                 if (row.Kind == ExportRowKind.Check && row.Lead.Length > 0) s.Append(" (").Append(row.Lead).Append(')');
