@@ -18,8 +18,12 @@ Commands:
 - `repair PATH --apply`: recover interrupted transactions if their files still match recorded before/after images. Unknown corruption is reported without guessing or deleting data.
 - `format [PATH]`: rewrite canonical files in the reference YAML style. Data and IDs are unchanged.
 - `version PATH MESSAGE`: create a real Git version with machine-readable trailers.
-- `export PATH OUTPUT.ics`: timezone-correct calendar export.
-- `export PATH OUTPUT.html`: print-friendly HTML.
+- `export PATH OUTPUT.html|.txt|.ics [options]`: print-friendly HTML, plain text or a timezone-correct calendar. Options:
+  - `--from 2027-04-01` and `--to 2027-04-05`: limit to a date range (inclusive).
+  - `--person NAME|ID`: only what concerns one person (see specification section 45.1).
+  - `--parts schedule,stays,bookings,contacts,costs,tasks,notes,packing`: choose the parts. The default is schedule, stays, bookings, contacts and costs. Calendar files ignore this option.
+  - `--compact`: times, titles, places and booking references only.
+- `export-lists PATH OUTPUT.txt|.csv [--person NAME|ID] [--list NAME|ID]... [--unassigned]`: packing lists as text with check boxes or as CSV for spreadsheets. Without `--list`, all lists are exported. `--unassigned` keeps only what nobody brings yet.
 - `mcp [PATH] [--read-only]`: serve the trip to an AI assistant over the Model Context Protocol on standard input and output. See [AI assistants](mcp.md).
 
 The default path for inspect/validate is the current directory. The CLI never changes global Git configuration. Generic remotes use normal Git SSH configuration and credential helpers.
