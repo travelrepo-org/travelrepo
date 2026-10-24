@@ -1135,6 +1135,21 @@ Sharing a repository URL does not itself grant access.
 
 Credentials must never be embedded in share links.
 
+### 45.1 Exports
+
+Exports are read-only views of a trip: a printable document (HTML, PDF), plain text, a calendar file (ICS) and, for packing lists, CSV. They never change the trip. Clients should use the same rules, so that the same choices give the same content everywhere. The reference library implements them in `ExportOptions`, `ExportFilter`, `TripExport` and `PackingExport`.
+
+An export can be limited in these ways:
+
+- **Parts**: schedule, stays, bookings, contacts, costs, tasks, notes, packing lists, a map, and attached documents.
+- **Date range**: the first and last day, both inclusive, in the trip's default time zone. A schedule item belongs when any part of it falls in the range; an item that starts earlier is listed on the range's first day. Items without a time, and bookings that cover no schedule item, are left out of a limited range. Day numbers keep counting from the trip's first day.
+- **One person**: the export shows what concerns that person. Something with no people attached (no participants or guests, no travellers on a booking, nobody assigned to a task) concerns everyone and stays in. A booking with listed travellers belongs to them; one without belongs to the people of its schedule items. Costs show only the expenses that person paid, without trip budgets.
+- **Detail**: detailed exports add people, status, notes, stay house rules and contacts; compact exports keep times, titles, places and booking references.
+
+Attached documents are numbered A1, A2 and so on in order of first use, and every entry that uses one refers to its number. Renderers that cannot embed files list them by name.
+
+Packing list exports show, for everyone, who brings each item and whether it is done; for one person, the items that person brings and whether that person has packed them. An export can also show only the items nobody brings yet. A batch export writes one file per person who brings at least one item. CSV uses the separator that spreadsheets expect for the reader's language and prefixes cells that would start a formula with an apostrophe.
+
 ## 46. Validation
 
 Validation should distinguish:
