@@ -7,7 +7,7 @@ namespace TravelRepo.Tests;
 public sealed class GitSyncTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "travelrepo-sync-" + Guid.NewGuid());
-    private readonly GitCliBackend backend = new();
+    private readonly IGitBackend backend = TestGit.Backend();
     public void Dispose() => TestFiles.Delete(root);
 
     private string Remote => Path.Combine(root, "remote.git");
@@ -33,7 +33,7 @@ public sealed class GitSyncTests : IDisposable
     public async Task AMissingTripFolderIsAnExplainedErrorNotACrash()
     {
         var missing = Path.Combine(Path.GetTempPath(), "travelrepo-missing-" + Guid.NewGuid());
-        var error = await Assert.ThrowsAsync<DomainException>(() => new GitCliBackend().ExecuteAsync(missing, ["status"]));
+        var error = await Assert.ThrowsAsync<DomainException>(() => TestGit.Backend().ExecuteAsync(missing, ["status"]));
         Assert.Equal("git.folder_missing", error.Code);
     }
 

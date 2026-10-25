@@ -172,7 +172,7 @@ public sealed class SdkQueryTests : IDisposable
     public async Task SyncStatusCountsAheadAndBehindWithoutFetching()
     {
         var remotePath = Path.Combine(root, "remote.git"); Directory.CreateDirectory(remotePath);
-        var backend = new GitCliBackend(); await backend.ExecuteAsync(remotePath, ["init", "--bare", "-b", "main"]);
+        var backend = TestGit.Backend(); await backend.ExecuteAsync(remotePath, ["init", "--bare", "-b", "main"]);
         var repo = new TravelRepository(Path.Combine(root, "local"), Path.Combine(root, "recovery-local")); await repo.InitializeAsync(Entity.CreateTrip("Sync"));
         var git = new GitRepository(repo, backend); await git.InitializeAsync("Alex", "alex@example.invalid");
         Assert.Equal(SyncState.LocalOnly, (await git.SyncStatusAsync(null)).State);

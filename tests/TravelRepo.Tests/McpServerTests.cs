@@ -23,7 +23,7 @@ public sealed class McpServerTests : IDisposable
     {
         var repo = new TravelRepository(Path.Combine(root, "trip"), Path.Combine(root, "recovery"));
         await repo.InitializeAsync(Entity.CreateTrip("Kyoto", "en", "Asia/Tokyo"));
-        var git = new GitRepository(repo, new GitCliBackend()); await git.InitializeAsync("Test", "test@example.invalid");
+        var git = new GitRepository(repo, TestGit.Backend()); await git.InitializeAsync("Test", "test@example.invalid");
         return (repo, git);
     }
 

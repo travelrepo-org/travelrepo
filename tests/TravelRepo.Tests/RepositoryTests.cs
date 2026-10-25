@@ -10,7 +10,7 @@ public sealed class RepositoryTests : IDisposable
     public void Dispose() => TestFiles.Delete(root);
     private async Task<(TravelRepository, GitRepository)> Create(string folder = "trip")
     {
-        var repo = new TravelRepository(Path.Combine(root, folder), Path.Combine(root, "recovery-" + folder)); await repo.InitializeAsync(Entity.CreateTrip("Aachen")); var git = new GitRepository(repo, new GitCliBackend()); await git.InitializeAsync("Test", "test@example.invalid"); return (repo, git);
+        var repo = new TravelRepository(Path.Combine(root, folder), Path.Combine(root, "recovery-" + folder)); await repo.InitializeAsync(Entity.CreateTrip("Aachen")); var git = new GitRepository(repo, TestGit.Backend()); await git.InitializeAsync("Test", "test@example.invalid"); return (repo, git);
     }
     [Fact]
     public async Task CopyPreservesBranchesHistoryDirtyFilesAndRemotesWithoutChangingSource()
@@ -22,7 +22,7 @@ public sealed class RepositoryTests : IDisposable
         person.Data["display_name"] = "Local edit"; await repo.ApplyAsync(await repo.ReadAsync(), [new(person.Id, person)]);
         await File.WriteAllTextAsync(Path.Combine(repo.Root, "untracked.txt"), "keep me");
         var destination = Path.Combine(root, "copy"); await git.CopyWorkingTreeAsync(destination);
-        var copy = new TravelRepository(destination); var copiedGit = new GitRepository(copy, new GitCliBackend());
+        var copy = new TravelRepository(destination); var copiedGit = new GitRepository(copy, TestGit.Backend());
         Assert.Equal(await git.HeadAsync(), await copiedGit.HeadAsync()); Assert.Equal(await git.StatusAsync(), await copiedGit.StatusAsync());
         Assert.Equal(2, (await copiedGit.VariantsAsync()).Count); Assert.Equal("Local edit", (await copy.ReadAsync()).Trip.Find(person.Id)!.Title);
         Assert.Equal("keep me", await File.ReadAllTextAsync(Path.Combine(destination, "untracked.txt"))); Assert.Equal("https://example.invalid/trip.git", (await copiedGit.RemotesAsync())["origin"]);
@@ -46,7 +46,7 @@ public sealed class RepositoryTests : IDisposable
         await Assert.ThrowsAsync<DomainException>(() => git.CreateVariantAsync("idea", "Idea"));
         await git.CreateVersionAsync("Add Alex"); await git.CreateVariantAsync("idea", "Idea"); Assert.Equal(2, (await git.VariantsAsync()).Count);
         await git.SwitchAsync("main"); Assert.Equal(state.Trip.Manifest.Id, (await repo.ReadAsync()).Trip.Manifest.Id);
-        Directory.CreateDirectory(Path.Combine(root, "remote.git")); var backend = new GitCliBackend(); Assert.Equal(0, (await backend.ExecuteAsync(Path.Combine(root, "remote.git"), ["init", "--bare"])).ExitCode);
+        Directory.CreateDirectory(Path.Combine(root, "remote.git")); var backend = TestGit.Backend(); Assert.Equal(0, (await backend.ExecuteAsync(Path.Combine(root, "remote.git"), ["init", "--bare"])).ExitCode);
         await git.AddRemoteAsync("one", Path.Combine(root, "remote.git")); await git.AddRemoteAsync("two", Path.Combine(root, "remote.git")); await git.PushAsync("one"); await git.FetchAsync("two"); Assert.Equal(2, (await git.RemotesAsync()).Count);
         Assert.True((await git.HistoryAsync()).All(h => h.ApplicationGenerated)); Assert.Single((await new TravelRepository(repo.Root).ReadAsync()).Trip.Entities);
     }
