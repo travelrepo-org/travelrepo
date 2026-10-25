@@ -45,23 +45,61 @@ public sealed class GitHubProvider(HttpClient http, ISecretStore secrets, string
         var n = await Send(HttpMethod.Post, "https://github.com/login/device/code", new { client_id = clientId }, false, ct);
         return new(n["device_code"]!.ToString(), n["user_code"]!.ToString(), n["verification_uri"]!.ToString(), (int)n["expires_in"]!, (int)n["interval"]!);
     }
+    /// <summary>
+    /// Waits until the user has entered the code, polling at GitHub's interval. A request lost to a phone falling
+    /// asleep or changing networks does not end the sign-in; the code stays valid, so the next poll asks again.
+    /// </summary>
     public async Task CompleteAsync(DeviceAuthorization authorization, CancellationToken ct = default)
     {
         var end = DateTimeOffset.UtcNow.AddSeconds(authorization.ExpiresIn); var interval = Math.Max(5, authorization.Interval);
         while (DateTimeOffset.UtcNow < end)
         {
             await Task.Delay(TimeSpan.FromSeconds(interval), ct);
-            var n = await Send(HttpMethod.Post, "https://github.com/login/oauth/access_token", new { client_id = clientId, device_code = authorization.DeviceCode, grant_type = "urn:ietf:params:oauth:grant-type:device_code" }, false, ct);
-            if (n["access_token"] is { } token) { await secrets.WriteAsync(TokenKey, token.ToString(), ct); return; }
-            switch (n["error"]?.ToString())
+            try
             {
-                case "authorization_pending": continue;
-                case "slow_down": interval += 5; continue;
-                default: throw new DomainException("github.authorization", "Authorization was declined or expired. Connect again to retry.");
+                switch (await PollAsync(authorization, ct))
+                {
+                    case DeviceSignIn.Connected: return;
+                    case DeviceSignIn.SlowDown: interval += 5; break;
+                }
             }
+            catch (Exception ex) when (IsTransient(ex, ct)) { }
         }
         throw new DomainException("github.expired", "The authorization code expired.");
     }
+
+    /// <summary>
+    /// Asks GitHub once whether the user has entered the code, and stores the token when they have. For clients that
+    /// pace the polling themselves, such as a phone app that asks again as soon as it is back in the foreground.
+    /// Callers must wait at least the authorization's interval between calls, and longer after
+    /// <see cref="DeviceSignIn.SlowDown"/>.
+    /// </summary>
+    /// <exception cref="DomainException">The user declined, or the code expired.</exception>
+    public async Task<DeviceSignIn> PollAsync(DeviceAuthorization authorization, CancellationToken ct = default)
+    {
+        var n = await Send(HttpMethod.Post, "https://github.com/login/oauth/access_token", new { client_id = clientId, device_code = authorization.DeviceCode, grant_type = "urn:ietf:params:oauth:grant-type:device_code" }, false, ct);
+        if (n["access_token"] is { } token) { await secrets.WriteAsync(TokenKey, token.ToString(), ct); return DeviceSignIn.Connected; }
+        return n["error"]?.ToString() switch
+        {
+            "authorization_pending" => DeviceSignIn.Pending,
+            "slow_down" => DeviceSignIn.SlowDown,
+            "expired_token" => throw new DomainException("github.expired", "The authorization code expired."),
+            _ => throw new DomainException("github.authorization", "Authorization was declined or expired. Connect again to retry.")
+        };
+    }
+
+    /// <summary>
+    /// Whether a failed request is worth repeating: no network, a dropped connection, a timeout, or a GitHub server
+    /// error. Declined sign-ins and missing permissions are not.
+    /// </summary>
+    public static bool IsTransient(Exception ex, CancellationToken ct = default) => ex switch
+    {
+        HttpRequestException or IOException => true,
+        TaskCanceledException => !ct.IsCancellationRequested,
+        DomainException { Code: var code } => code.StartsWith("github.http.5", StringComparison.Ordinal),
+        _ => false
+    };
+
     private async Task<List<JsonNode>> Pages(string endpoint, string? key, CancellationToken ct)
     {
         var result = new List<JsonNode>();

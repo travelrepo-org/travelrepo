@@ -211,6 +211,12 @@ public static class TripSummaries
         .Select(c => { try { return new System.Globalization.RegionInfo(c.Name); } catch (ArgumentException) { return null; } }).OfType<System.Globalization.RegionInfo>()
         .SelectMany(r => new[] { r.EnglishName, r.NativeName, r.DisplayName }).ToHashSet(StringComparer.OrdinalIgnoreCase));
 
+    /// <summary>
+    /// The town of a place, read offline from its address: the last part that is not a country or a postal code, such
+    /// as "Kyoto" for "Higashiyama Ward, Kyoto, Japan". Null without an address.
+    /// </summary>
+    public static string? Town(Entity? place) => Town(place?.Data["address"]?["formatted"]?.ToString());
+
     private static string? Town(string? address)
     {
         var parts = (address ?? "").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList();

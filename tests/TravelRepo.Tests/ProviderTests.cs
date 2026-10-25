@@ -74,4 +74,23 @@ public class ProviderTests
             Assert.Equal("/login/device/code", r.RequestUri!.AbsolutePath); Assert.Null(r.Headers.Authorization); var body = await r.Content!.ReadAsStringAsync(); Assert.DoesNotContain("repo", body); return Json(new { device_code = "device", user_code = "USER", verification_uri = "https://github.com/login/device", expires_in = 600, interval = 5 });
         })), new Secrets(), "client"); Assert.Equal("USER", (await provider.BeginAsync()).UserCode);
     }
+    [Fact]
+    public async Task PollingADeviceSignInReportsEachAnswerAndKeepsTheToken()
+    {
+        var answers = new Queue<Func<HttpResponseMessage>>([
+            () => Json(new { error = "authorization_pending" }), () => Json(new { error = "slow_down" }),
+            () => throw new HttpRequestException("connection aborted"), () => new HttpResponseMessage(HttpStatusCode.BadGateway),
+            () => Json(new { access_token = "token" }), () => Json(new { error = "access_denied" })]);
+        var secrets = new MemorySecrets();
+        var provider = new GitHubProvider(new HttpClient(new Handler(r => { Assert.Equal("/login/oauth/access_token", r.RequestUri!.AbsolutePath); return Task.FromResult(answers.Dequeue()()); })), secrets, "client");
+        var code = new DeviceAuthorization("device", "USER", "https://github.com/login/device", 900, 5);
+
+        Assert.Equal(DeviceSignIn.Pending, await provider.PollAsync(code));
+        Assert.Equal(DeviceSignIn.SlowDown, await provider.PollAsync(code));
+        // A phone coming back from the browser may lose a request; that is worth asking again, a refusal is not.
+        var lost = await Assert.ThrowsAsync<HttpRequestException>(() => provider.PollAsync(code)); Assert.True(GitHubProvider.IsTransient(lost));
+        var busy = await Assert.ThrowsAsync<DomainException>(() => provider.PollAsync(code)); Assert.True(GitHubProvider.IsTransient(busy));
+        Assert.Equal(DeviceSignIn.Connected, await provider.PollAsync(code)); Assert.Equal("token", secrets.Values["github.user-token"]);
+        var declined = await Assert.ThrowsAsync<DomainException>(() => provider.PollAsync(code)); Assert.False(GitHubProvider.IsTransient(declined));
+    }
 }

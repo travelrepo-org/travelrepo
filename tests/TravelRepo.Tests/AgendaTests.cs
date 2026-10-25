@@ -87,7 +87,23 @@ public class AgendaTests
         var line = Assert.Single(agenda.Find(new LocalDate(2027, 3, 31))!.Entries);
         Assert.Equal("Europe/Berlin", line.Zone); Assert.Equal(Zone, line.EndZone);
         Assert.Equal(0, agenda.Find(new LocalDate(2027, 3, 31))!.Number);
-        Assert.Empty(agenda.Find(new LocalDate(2027, 4, 1))!.Entries);
+        // On the day it lands it appears again, as the rest of the journey.
+        var landing = Assert.Single(agenda.Find(new LocalDate(2027, 4, 1))!.Entries);
+        Assert.Equal(AgendaRole.Continued, landing.Role); Assert.Equal(line.End, landing.End);
+    }
+
+    [Fact]
+    public void AnItemPastMidnightAppearsOnEveryDayItTouches()
+    {
+        var hike = Item("Kumano Kodo", "2027-04-01T08:00:00", "2027-04-03T16:00:00");
+        var party = Item("Hanami party", "2027-04-02T20:00:00", "2027-04-03T00:00:00");
+
+        var agenda = TripAgenda.Build(Trip(hike, party));
+
+        Assert.Equal(AgendaRole.Item, Assert.Single(agenda.Find(new LocalDate(2027, 4, 1))!.Entries).Role);
+        Assert.Equal([AgendaRole.Continued, AgendaRole.Item], agenda.Find(new LocalDate(2027, 4, 2))!.Entries.Select(e => e.Role));
+        // Ending at midnight is still the evening before.
+        Assert.Equal(hike.Id, Assert.Single(agenda.Find(new LocalDate(2027, 4, 3))!.Entries).Item.Id);
     }
 
     [Fact]
@@ -118,5 +134,7 @@ public class AgendaTests
 
         Assert.Equal(["Tokyo", "Kyoto"], TripSummaries.Destinations(Trip([.. entities])));
         Assert.Empty(TripSummaries.Destinations(Trip()));
+        Assert.Equal("Kyoto", TripSummaries.Town(entities[0]));
+        Assert.Null(TripSummaries.Town(Entity.Create("place", "Somewhere")));
     }
 }

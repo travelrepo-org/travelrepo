@@ -2,6 +2,9 @@ namespace TravelRepo.Providers;
 
 public sealed record RemoteRepository(string FullName, string CloneUrl, string WebUrl, bool IsPrivate);
 public sealed record DeviceAuthorization(string DeviceCode, string UserCode, string VerificationUri, int ExpiresIn, int Interval);
+
+/// <summary>What one poll of a device sign-in found: still waiting, asked to poll less often, or signed in.</summary>
+public enum DeviceSignIn { Pending, SlowDown, Connected }
 public interface ISecretStore
 {
     Task<string?> ReadAsync(string key, CancellationToken ct = default);

@@ -3,13 +3,17 @@ using NodaTime;
 
 namespace TravelRepo.Core;
 
-/// <summary>What an agenda line stands for: a schedule item, or the arrival or departure of a stay run.</summary>
-public enum AgendaRole { Item, CheckIn, CheckOut }
+/// <summary>
+/// What an agenda line stands for: a schedule item, the arrival or departure of a stay run, or the rest of an item that
+/// began on an earlier day, such as a night flight on the day it lands.
+/// </summary>
+public enum AgendaRole { Item, CheckIn, CheckOut, Continued }
 
 /// <summary>
 /// One line of a day plan. For <see cref="AgendaRole.Item"/> it is a schedule item with its resolved span; a group
 /// (an item with children) lists its nested items as <see cref="Steps"/>, in time order. For check-in and check-out
-/// the item is the stay, <see cref="Start"/> is the arrival or departure and <see cref="End"/> is null.
+/// the item is the stay, <see cref="Start"/> is the arrival or departure and <see cref="End"/> is null. A
+/// <see cref="AgendaRole.Continued"/> line keeps the item's own start and end; it has no steps.
 /// </summary>
 /// <param name="Item">The schedule item, or the stay for a check-in or check-out.</param>
 /// <param name="Role">Whether the line is the item itself or a stay's arrival or departure.</param>
@@ -61,6 +65,7 @@ public static class TripAgenda
             .Where(e => e.Type == "schedule_item" && !children.Contains(e.Id) && !inRuns.Contains(e.Id))
             .Select(e => Line(trip, e, tripZone, []))
             .ToList();
+        lines.AddRange(lines.SelectMany(Continued).ToArray());
         foreach (var run in runs)
         {
             lines.Add(StayLine(run, AgendaRole.CheckIn, run.FirstNight, tripZone));
@@ -95,6 +100,21 @@ public static class TripAgenda
         var day = span.Date ?? (span.Start is { } at ? at.InZone(startZone).Date : null);
         return new(item, AgendaRole.Item, ScheduleCategories.Classify(trip, item), span.Precision, span.Start, span.End,
             span.StartZone ?? (span.Start is null ? null : tripZone.Id), span.EndZone, day, steps);
+    }
+
+    /// <summary>
+    /// An item that runs past midnight also appears on the days after the one it starts on, up to the day it ends in
+    /// the zone where it ends. An end at midnight belongs to the day before.
+    /// </summary>
+    private static IEnumerable<AgendaEntry> Continued(AgendaEntry line)
+    {
+        if (line.Role != AgendaRole.Item || line.Day is not { } first || line.Start is null || line.End is not { } end || end <= line.Start) yield break;
+        var zone = DateTimeZoneProviders.Tzdb.GetZoneOrNull(line.EndZone ?? line.Zone ?? "") ?? DateTimeZone.Utc;
+        var local = end.InZone(zone).LocalDateTime;
+        var last = local.TimeOfDay == LocalTime.Midnight ? local.Date.PlusDays(-1) : local.Date;
+        // A long line is shown on its first days only, so a mistyped year does not fill the plan.
+        for (var day = first.PlusDays(1); day <= last && Period.DaysBetween(first, day) <= 31; day = day.PlusDays(1))
+            yield return line with { Role = AgendaRole.Continued, Day = day, Steps = [] };
     }
 
     private static AgendaEntry StayLine(StayRun run, AgendaRole role, LocalDate day, DateTimeZone tripZone)
