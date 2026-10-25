@@ -17,6 +17,8 @@ namespace TravelRepo.Git.LibGit2;
 /// </remarks>
 public sealed class LibGit2Backend(ICredentialBroker? credentialBroker = null) : IGitBackend
 {
+    static LibGit2Backend() => ManagedHttpTransport.Register();
+
     public async Task<GitResult> ExecuteAsync(string directory, IReadOnlyList<string> arguments, string? input = null, CancellationToken cancellationToken = default)
     {
         if (!Directory.Exists(directory)) throw new DomainException("git.folder_missing", "The trip folder no longer exists: " + directory);
@@ -535,7 +537,7 @@ public sealed class LibGit2Backend(ICredentialBroker? credentialBroker = null) :
     /// <summary>A libgit2 transport error written the way Git reports it, so it is classified as network or sign-in trouble.</summary>
     private static string Transport(string url, LibGit2SharpException ex)
     {
-        var text = ex.Message;
+        var text = ManagedHttpTransport.TakeFailure() ?? ex.Message;
         if (text.Contains("401", StringComparison.Ordinal) || text.Contains("403", StringComparison.Ordinal) || text.Contains("authentication", StringComparison.OrdinalIgnoreCase) || text.Contains("credentials", StringComparison.OrdinalIgnoreCase))
             return "fatal: Authentication failed for '" + url + "'\n" + text;
         if (text.Contains("not found", StringComparison.OrdinalIgnoreCase) && text.Contains("repository", StringComparison.OrdinalIgnoreCase))
