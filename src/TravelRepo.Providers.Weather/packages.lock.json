@@ -16,7 +16,7 @@
       "travelrepo.providers.abstractions": {
         "type": "Project",
         "dependencies": {
-          "TravelRepo.Core": "[0.4.0, )"
+          "TravelRepo.Core": "[0.6.0, )"
         }
       }
     }
