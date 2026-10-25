@@ -101,4 +101,22 @@ public class AgendaTests
         Assert.True(Assert.Single(agenda.Unscheduled).IsIdea);
         Assert.True(Assert.Single(agenda.Find(new LocalDate(2027, 4, 2))!.Entries).IsIdea);
     }
+
+    [Fact]
+    public void DestinationsAreTheTownsOfTheStaysWithoutCountryOrPostalCode()
+    {
+        var entities = new List<Entity>();
+        void Stay(string address, string from, string to)
+        {
+            var place = Entity.Create("place", "Hotel"); place.Data["address"] = new JsonObject { ["formatted"] = address };
+            var stay = Entity.Create("schedule_item", "Hotel");
+            stay.Data["components"]!["accommodation"] = new JsonObject { ["place"] = place.Id.ToString(), ["check_in"] = new ZonedTime(from, Zone).ToJson(), ["check_out"] = new ZonedTime(to, Zone).ToJson() };
+            entities.Add(place); entities.Add(stay);
+        }
+        Stay("Gion, Higashiyama Ward, Kyoto, 605-0001", "2027-04-02T15:00:00", "2027-04-04T10:00:00");
+        Stay("Kabukicho, Shinjuku City, Tokyo, Japan", "2027-04-01T15:00:00", "2027-04-02T10:00:00");
+
+        Assert.Equal(["Tokyo", "Kyoto"], TripSummaries.Destinations(Trip([.. entities])));
+        Assert.Empty(TripSummaries.Destinations(Trip()));
+    }
 }

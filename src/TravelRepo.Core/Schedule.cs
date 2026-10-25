@@ -198,6 +198,28 @@ public sealed record CurrencyTotal(string Currency, decimal Paid, decimal Estima
 public static class TripSummaries
 {
     /// <summary>Distinct place names in schedule order, for library cards and overviews.</summary>
+    /// <summary>
+    /// The towns the travellers sleep in, in the order of the stays, read offline from the places' addresses: the last
+    /// part of the address that is not a country. Empty when no stay has an address.
+    /// </summary>
+    public static IReadOnlyList<string> Destinations(TripSnapshot trip, int max = 3) => Stays.All(trip)
+        .OrderBy(s => s.FirstNight ?? LocalDate.MaxIsoValue)
+        .Select(s => (s.Place is { } id ? trip.Find(id) : ScheduleQueries.PrimaryPlace(trip, s.Item))?.Data["address"]?["formatted"]?.ToString())
+        .Select(Town).OfType<string>().Distinct(StringComparer.CurrentCultureIgnoreCase).Take(max).ToArray();
+
+    private static readonly Lazy<HashSet<string>> Countries = new(() => System.Globalization.CultureInfo.GetCultures(System.Globalization.CultureTypes.SpecificCultures)
+        .Select(c => { try { return new System.Globalization.RegionInfo(c.Name); } catch (ArgumentException) { return null; } }).OfType<System.Globalization.RegionInfo>()
+        .SelectMany(r => new[] { r.EnglishName, r.NativeName, r.DisplayName }).ToHashSet(StringComparer.OrdinalIgnoreCase));
+
+    private static string? Town(string? address)
+    {
+        var parts = (address ?? "").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList();
+        if (parts.Count > 1 && Countries.Value.Contains(parts[^1])) parts.RemoveAt(parts.Count - 1);
+        // A trailing postal code such as "1000-0001" or "52062" is not the town.
+        while (parts.Count > 0 && parts[^1].Any(char.IsDigit) && !parts[^1].Any(char.IsLetter)) parts.RemoveAt(parts.Count - 1);
+        return parts.Count > 0 ? parts[^1] : null;
+    }
+
     public static IReadOnlyList<string> PlaceNames(TripSnapshot trip, int max = 3)
     {
         // Stays and activity places describe a trip better than airports and stations, which come last.
