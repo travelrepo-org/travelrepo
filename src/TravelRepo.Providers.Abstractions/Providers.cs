@@ -29,7 +29,21 @@ public interface IProviderAccount
     /// <summary>Forgets the sign-in on this device. Access granted on the provider's side stays until the user revokes it there.</summary>
     Task SignOutAsync(CancellationToken ct = default);
 }
-public interface IRepositoryDiscoveryProvider { Task<IReadOnlyList<RemoteRepository>> DiscoverAsync(CancellationToken ct = default); }
+/// <summary>How far a search for trips has come: repositories checked out of all the account can reach.</summary>
+public sealed record DiscoveryProgress(int Checked, int Total);
+public interface IRepositoryDiscoveryProvider
+{
+    /// <summary>The repositories the account can reach that hold a trip. <paramref name="progress"/> hears how many have been checked.</summary>
+    Task<IReadOnlyList<RemoteRepository>> DiscoverAsync(IProgress<DiscoveryProgress>? progress = null, CancellationToken ct = default);
+}
+/// <summary>For providers where the user chooses which repositories an app may use, apart from signing in.</summary>
+public interface IRepositoryAccessProvider
+{
+    /// <summary>Whether the app may use any repository yet. A new sign-in has none until the user has chosen some.</summary>
+    Task<bool> HasRepositoryAccessAsync(CancellationToken ct = default);
+    /// <summary>The page where the user chooses the repositories, or <c>null</c> when the provider does not know it.</summary>
+    Uri? RepositoryAccessUri { get; }
+}
 public interface IRepositoryCreationProvider { Task<RemoteRepository> CreateAsync(string name, CancellationToken ct = default); }
 public interface IRepositoryPrivacyProvider { Task<RemoteRepository> InspectAsync(string fullName, CancellationToken ct = default); }
 public interface ICollaboratorProvider { Task InviteAsync(string fullName, string username, CancellationToken ct = default); }
