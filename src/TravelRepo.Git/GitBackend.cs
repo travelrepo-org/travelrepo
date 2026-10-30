@@ -92,6 +92,14 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
     public Task FetchAsync(string remote, CancellationToken ct = default) => Mutate(() => FetchCoreAsync(remote, ct), ct);
     public Task PushAsync(string remote, CancellationToken ct = default) => Mutate(() => PushCoreAsync(remote, ct), ct);
     public Task<SyncState> SyncAsync(string remote, CancellationToken ct = default) => Mutate(() => SyncCoreAsync(remote, ct), ct);
+    /// <summary>
+    /// Takes the remote's versions only when that is a fast-forward, for updates nobody watches, such as from the
+    /// system's sync settings: fetches, then moves the branch forward when it has no changes or versions of its own.
+    /// Never sends and never combines. Otherwise the trip stays as it was, and the result says why:
+    /// <see cref="SyncState.LocalChanges"/> (changes not in a version, versions not sent, or nothing on the remote),
+    /// <see cref="SyncState.Diverged"/> (both sides changed) or <see cref="SyncState.LocalOnly"/>.
+    /// </summary>
+    public Task<SyncState> PullAsync(string remote, CancellationToken ct = default) => Mutate(() => PullCoreAsync(remote, ct), ct);
     public Task<string> RecordMergeAsync(string otherCommit, string message, CancellationToken ct = default) => Mutate(() => RecordMergeCoreAsync(otherCommit, message, ct), ct);
     public Task RollbackAsync(string revision, CancellationToken ct = default) => Mutate(() => RollbackCoreAsync(revision, ct), ct);
     private async Task<string> Run(CancellationToken ct, params string[] args)
@@ -253,6 +261,19 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
             // Someone pushed between our fetch and our push. Fetch again and decide anew, once.
             catch (GitCommandException ex) when (ex.Failure == GitFailure.Rejected && attempt == 0) { }
         }
+    }
+    private async Task<SyncState> PullCoreAsync(string remote, CancellationToken ct)
+    {
+        await FetchCoreAsync(remote, ct); if (!string.IsNullOrEmpty(await StatusAsync(ct))) return SyncState.LocalChanges;
+        var branch = await CurrentBranchAsync(ct);
+        if (await IsLocalOnlyAsync(branch, ct)) return SyncState.LocalOnly;
+        var target = "refs/remotes/" + remote + "/" + await RemoteBranchAsync(remote, branch, ct);
+        if ((await backend.ExecuteAsync(Repository.Root, ["rev-parse", "--verify", "--quiet", target], cancellationToken: ct)).ExitCode != 0) return SyncState.LocalChanges;
+        if ((await backend.ExecuteAsync(Repository.Root, ["merge-base", "--is-ancestor", "HEAD", target], cancellationToken: ct)).ExitCode == 0)
+        {
+            await Run(ct, "merge", "--ff-only", target); return SyncState.Synced;
+        }
+        return (await backend.ExecuteAsync(Repository.Root, ["merge-base", "--is-ancestor", target, "HEAD"], cancellationToken: ct)).ExitCode == 0 ? SyncState.LocalChanges : SyncState.Diverged;
     }
     /// <summary>Read a committed version. All blobs are read through one <c>git cat-file --batch</c> process.</summary>
     public async Task<TripSnapshot> SnapshotAsync(string revision, CancellationToken ct = default)

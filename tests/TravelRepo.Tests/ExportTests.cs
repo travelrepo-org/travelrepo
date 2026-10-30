@@ -27,6 +27,41 @@ public class ExportTests
         return new(manifest, entities.Concat([Mia, Noah]).DistinctBy(e => e.Id).ToDictionary(e => e.Id));
     }
 
+    [Fact]
+    public void ACalendarShowsStaysAsCheckInAndCheckOut()
+    {
+        Entity Stay(string title, string checkIn, string checkOut, bool approximateIn = false, bool approximateOut = false)
+        {
+            var item = Entity.Create("schedule_item", title); item.Data["components"] = new JsonObject { ["accommodation"] = new JsonObject() };
+            return Stays.WithSpan(item, new ZonedTime(checkIn, Zone), new ZonedTime(checkOut, Zone), approximateIn, approximateOut);
+        }
+        // A fixed check-in and a check-out window; check-in hours without a fixed arrival and no departure hour.
+        var ryokan = Stay("Ryokan", "2027-04-01T16:00:00", "2027-04-03T10:00:00", approximateOut: true);
+        ((JsonObject)ryokan.Data["components"]!["accommodation"]!)["check_out_window"] = new JsonObject { ["until"] = "11:00" };
+        var hotel = Stay("Hotel", "2027-04-03T15:00:00", "2027-04-05T10:00:00", approximateIn: true, approximateOut: true);
+        ((JsonObject)hotel.Data["components"]!["accommodation"]!)["check_in_window"] = new JsonObject { ["from"] = "15:00", ["until"] = "19:00" };
+        var hike = Item("Hike", "2027-04-02T09:00:00", "2027-04-02T15:00:00");
+        var trip = Trip(ryokan, hotel, hike);
+        Instant At(string local) => new ZonedTime(local, Zone).ToInstant();
+
+        var entries = TripCalendar.Entries(trip, staysAsCheckInOut: true).ToDictionary(e => e.Uid);
+        Assert.Equal(5, entries.Count);
+        Assert.Equal(CalendarEntryRole.Plan, entries[hike.Id.ToString()].Role);
+        var arrive = entries[ryokan.Id + "-check-in"];
+        Assert.Equal((CalendarEntryRole.CheckIn, At("2027-04-01T16:00:00"), At("2027-04-01T16:00:00")), (arrive.Role, arrive.Start!.Value, arrive.End!.Value));
+        var leave = entries[ryokan.Id + "-check-out"];
+        Assert.Equal((At("2027-04-03T11:00:00"), At("2027-04-03T11:00:00")), (leave.Start!.Value, leave.End!.Value));
+        var window = entries[hotel.Id + "-check-in"];
+        Assert.Equal((At("2027-04-03T15:00:00"), At("2027-04-03T19:00:00")), (window.Start!.Value, window.End!.Value));
+        var unknown = entries[hotel.Id + "-check-out"];
+        Assert.True(unknown.AllDay); Assert.Equal(new LocalDate(2027, 4, 5), unknown.Date);
+        Assert.All(entries.Values.Where(e => e.Role != CalendarEntryRole.Plan), e => Assert.Equal(ScheduleKind.Accommodation, e.Kind));
+
+        // The iCalendar file keeps one entry across the nights.
+        var ics = TripExport.Ics(trip);
+        Assert.Contains("UID:" + ryokan.Id + "@travelrepo", ics); Assert.DoesNotContain("-check-in@", ics);
+    }
+
     /// <summary>A shared breakfast, Mia's museum, Noah's hike on the next day, and an idea without a time.</summary>
     private static (TripSnapshot Trip, Entity Breakfast, Entity Museum, Entity Hike, Entity Idea) Plan()
     {

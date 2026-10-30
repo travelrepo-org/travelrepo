@@ -30,6 +30,31 @@ public sealed class GitSyncTests : IDisposable
     }
 
     [Fact]
+    public async Task APullOnlyMovesForwardAndNeverSends()
+    {
+        var (repo, git, other, otherGit) = await TwoClones();
+        async Task<string> RemoteHead() => (await backend.ExecuteAsync(Remote, ["rev-parse", "main"])).Output.Trim();
+        // The other side's version comes in.
+        await Add(repo, git, "Museum"); await git.PushAsync("origin");
+        Assert.Equal(SyncState.Synced, await otherGit.PullAsync("origin"));
+        Assert.Equal(await git.HeadAsync(), await otherGit.HeadAsync());
+        // A version of its own is not sent.
+        await Add(other, otherGit, "Hike"); var remote = await RemoteHead();
+        Assert.Equal(SyncState.LocalChanges, await otherGit.PullAsync("origin"));
+        Assert.Equal(remote, await RemoteHead());
+        // Both sides changed: nothing is combined, the trip stays as it was.
+        await Add(repo, git, "Onsen"); await git.PushAsync("origin");
+        var before = await otherGit.HeadAsync();
+        Assert.Equal(SyncState.Diverged, await otherGit.PullAsync("origin"));
+        Assert.Equal(before, await otherGit.HeadAsync()); Assert.Empty(await otherGit.StatusAsync());
+        // Changes not yet in a version are left alone too.
+        var draft = Entity.Create("schedule_item", "Draft"); await repo.ApplyAsync(await repo.ReadAsync(), [new(draft.Id, draft)]);
+        before = await git.HeadAsync();
+        Assert.Equal(SyncState.LocalChanges, await git.PullAsync("origin"));
+        Assert.Equal(before, await git.HeadAsync()); Assert.NotEmpty(await git.StatusAsync());
+    }
+
+    [Fact]
     public async Task AMissingTripFolderIsAnExplainedErrorNotACrash()
     {
         var missing = Path.Combine(Path.GetTempPath(), "travelrepo-missing-" + Guid.NewGuid());

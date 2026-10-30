@@ -101,23 +101,14 @@ public static partial class TripExport
     {
         var filter = new ExportFilter(trip, options ?? new());
         var lines = new List<string> { "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//TravelRepo//TravelRepo 1.0//EN", "CALSCALE:GREGORIAN" };
-        // Nested parents are omitted: their steps are exported individually.
-        foreach (var e in trip.Entities.Values.Where(e => e.Type == "schedule_item" && e.Data["children"] is not System.Text.Json.Nodes.JsonArray { Count: > 0 } && filter.Includes(e)))
+        foreach (var entry in TripCalendar.Entries(trip, filter.Includes))
         {
-            var span = ScheduleQueries.Span(trip, e); if (!span.IsPlaced || span.Derived) continue;
-            lines.AddRange(["BEGIN:VEVENT", "UID:" + e.Id + "@travelrepo", "DTSTAMP:" + Format(SystemClock.Instance.GetCurrentInstant()), "SUMMARY:" + Escape(e.Title)]);
-            if (span.Precision == TimePrecision.AllDay && span.Date is { } date) { lines.Add("DTSTART;VALUE=DATE:" + date.ToString("yyyyMMdd", null)); lines.Add("DTEND;VALUE=DATE:" + date.PlusDays(1).ToString("yyyyMMdd", null)); }
-            else { lines.Add("DTSTART:" + Format(span.Start!.Value)); lines.Add("DTEND:" + Format(span.End!.Value)); }
-            var route = ScheduleQueries.Route(trip, e); var place = ScheduleQueries.PrimaryPlace(trip, e);
-            var location = route.From is not null && route.To is not null ? route.From.Title + " → " + route.To.Title : place is null ? null : place.Title + (place.Data["address"]?["formatted"]?.ToString() is { Length: > 0 } address ? ", " + address : "");
-            if (location is not null) lines.Add("LOCATION:" + Escape(location));
-            var people = string.Join(", ", ScheduleQueries.Participants(trip, e).Select(p => p.Title));
-            var booking = Guid.TryParse(e.Data["components"]?["booking"]?["ref"]?.ToString(), out var bookingId) ? trip.Find(bookingId)?.Data["reference"]?.ToString() : null;
-            var description = string.Join("\n", new[] { people, booking is null ? null : "Ref. " + booking, e.Data["status"]?.ToString() }.Where(x => !string.IsNullOrEmpty(x)));
-            if (description.Length > 0) lines.Add("DESCRIPTION:" + Escape(description));
-            if (e.Data["status"]?.ToString() == "cancelled") lines.Add("STATUS:CANCELLED");
-            else if (e.Data["status"]?.ToString() is "idea" or "planned") lines.Add("STATUS:TENTATIVE");
-            else lines.Add("STATUS:CONFIRMED");
+            lines.AddRange(["BEGIN:VEVENT", "UID:" + entry.Uid + "@travelrepo", "DTSTAMP:" + Format(SystemClock.Instance.GetCurrentInstant()), "SUMMARY:" + Escape(entry.Item.Title)]);
+            if (entry.Date is { } date) { lines.Add("DTSTART;VALUE=DATE:" + date.ToString("yyyyMMdd", null)); lines.Add("DTEND;VALUE=DATE:" + date.PlusDays(1).ToString("yyyyMMdd", null)); }
+            else { lines.Add("DTSTART:" + Format(entry.Start!.Value)); lines.Add("DTEND:" + Format(entry.End!.Value)); }
+            if (entry.Location is not null) lines.Add("LOCATION:" + Escape(entry.Location));
+            if (entry.Description is not null) lines.Add("DESCRIPTION:" + Escape(entry.Description));
+            lines.Add("STATUS:" + (entry.Status switch { "cancelled" => "CANCELLED", "idea" or "planned" => "TENTATIVE", _ => "CONFIRMED" }));
             lines.Add("END:VEVENT");
         }
         lines.Add("END:VCALENDAR"); return string.Join("\r\n", lines.Select(Fold)) + "\r\n";
