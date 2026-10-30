@@ -28,6 +28,14 @@ public static class Places
             && lat is >= -90 and <= 90 && lon is >= -180 and <= 180 ? (lat, lon) : null;
     }
 
+    /// <summary>The distance between two positions in metres, along the earth's surface.</summary>
+    public static double Distance((double Latitude, double Longitude) a, (double Latitude, double Longitude) b)
+    {
+        static double Rad(double degrees) => degrees * Math.PI / 180;
+        var h = Math.Pow(Math.Sin(Rad(b.Latitude - a.Latitude) / 2), 2) + Math.Cos(Rad(a.Latitude)) * Math.Cos(Rad(b.Latitude)) * Math.Pow(Math.Sin(Rad(b.Longitude - a.Longitude) / 2), 2);
+        return 2 * 6_371_000 * Math.Asin(Math.Min(1, Math.Sqrt(h)));
+    }
+
     /// <summary>The formatted address, if the place has one.</summary>
     public static string? Address(Entity? place) => place?.Data["address"]?["formatted"]?.ToString() is { Length: > 0 } address ? address : null;
 
