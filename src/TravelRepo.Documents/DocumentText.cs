@@ -28,7 +28,8 @@ public static class MediaTypes
         [".kml"] = "application/vnd.google-earth.kml+xml",
         [".docx"] = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         [".xlsx"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        [".zip"] = "application/zip"
+        [".zip"] = "application/zip",
+        [".pkpass"] = WalletPass.MediaType
     };
 
     public static string FromFileName(string name) => ByExtension.GetValueOrDefault(Path.GetExtension(name)) ?? "application/octet-stream";
@@ -52,6 +53,7 @@ public static class DocumentText
             {
                 "application/pdf" => Pdf(bytes, maxCharacters),
                 Mail.MediaType => MailText(Mail.Read(bytes)),
+                WalletPass.MediaType => WalletPass.Read(bytes)?.Text(),
                 var type when type.StartsWith("text/", StringComparison.Ordinal) && type != "text/html" => Encoding.UTF8.GetString(bytes),
                 "text/html" => HtmlText.Convert(Encoding.UTF8.GetString(bytes)).Text,
                 _ => null
