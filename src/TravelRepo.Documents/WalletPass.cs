@@ -49,7 +49,11 @@ public sealed record WalletPass(string? Description, string? Organization, strin
             {
                 var format = c.TryGetProperty("format", out var f) ? f.GetString() switch
                 {
-                    "PKBarcodeFormatQR" => "qr", "PKBarcodeFormatPDF417" => "pdf417", "PKBarcodeFormatAztec" => "aztec", "PKBarcodeFormatCode128" => "code128", _ => null
+                    "PKBarcodeFormatQR" => "qr",
+                    "PKBarcodeFormatPDF417" => "pdf417",
+                    "PKBarcodeFormatAztec" => "aztec",
+                    "PKBarcodeFormatCode128" => "code128",
+                    _ => null
                 } : null;
                 if (format is not null) barcode = new(text, format, Text(c, "altText"), c.TryGetProperty("messageEncoding", out var enc) ? enc.GetString() ?? "iso-8859-1" : "iso-8859-1");
             }

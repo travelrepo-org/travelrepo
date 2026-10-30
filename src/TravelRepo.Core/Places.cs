@@ -36,6 +36,12 @@ public static class Places
         return 2 * 6_371_000 * Math.Asin(Math.Min(1, Math.Sqrt(h)));
     }
 
+    /// <summary>The name in the place's own language and script, such as 東京駅, if it has one.</summary>
+    public static string? LocalName(Entity? place) => place?.Data["local_name"]?.ToString() is { Length: > 0 } name ? name : null;
+
+    /// <summary>The address in the place's own language and script, if it has one.</summary>
+    public static string? LocalAddress(Entity? place) => place?.Data["address"]?["local"]?.ToString() is { Length: > 0 } address ? address : null;
+
     /// <summary>The formatted address, if the place has one.</summary>
     public static string? Address(Entity? place) => place?.Data["address"]?["formatted"]?.ToString() is { Length: > 0 } address ? address : null;
 

@@ -17,6 +17,9 @@
     "name": {
       "type": "string"
     },
+    "local_name": {
+      "type": "string"
+    },
     "location": {
       "type": "object",
       "properties": {
@@ -39,7 +42,14 @@
     },
     "address": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "formatted": {
+          "type": "string"
+        },
+        "local": {
+          "type": "string"
+        }
+      },
       "required": [],
       "additionalProperties": true
     },
