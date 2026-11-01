@@ -120,6 +120,15 @@ public static class TripCommands
     public static Guid? BookingOf(Entity item) =>
         Guid.TryParse((item.Data["components"]?["booking"]?["ref"] ?? item.Data["components"]?["accommodation"]?["booking"])?.ToString(), out var id) ? id : null;
 
+    /// <summary>
+    /// The schedule items a booking is for, from either side: those it lists and those that point to it. Items that no
+    /// longer exist are left out.
+    /// </summary>
+    public static IReadOnlyList<Guid> BookedItems(TripSnapshot trip, Guid booking) =>
+        ((trip.Find(booking)?.Data["items"] as JsonArray ?? []).Select(n => Guid.TryParse(n?.ToString(), out var id) ? id : Guid.Empty)
+            .Concat(trip.Entities.Values.Where(e => e.Type == "schedule_item" && BookingOf(e) == booking).Select(e => e.Id)))
+        .Where(id => trip.Find(id) is { Type: "schedule_item" }).Distinct().ToArray();
+
     private static void RemoveItem(Entity booking, Guid item)
     {
         if (booking.Data["items"] is JsonArray list)

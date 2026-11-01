@@ -64,4 +64,15 @@ public class NestingTests
         Assert.Equal([bus.Id.ToString()], ((JsonArray)trip.Find(booking.Id)!.Data["items"]!).Select(n => n!.ToString()));
         Assert.DoesNotContain(SemanticValidation.Validate(trip), d => d.Severity == Severity.Error);
     }
+
+    [Fact]
+    public void ABookingsItemsComeFromEitherSide()
+    {
+        var booking = Entity.Create("booking", "Ferry"); var listed = Entity.Create("schedule_item", "Crossing out");
+        var pointing = Entity.Create("schedule_item", "Crossing back"); pointing.Data["components"] = new JsonObject { ["booking"] = new JsonObject { ["ref"] = booking.Id.ToString() } };
+        booking.Data["items"] = new JsonArray(listed.Id.ToString(), Guid.NewGuid().ToString());
+        var trip = Trip(booking, listed, pointing);
+        Assert.Equal([listed.Id, pointing.Id], TripCommands.BookedItems(trip, booking.Id));
+        Assert.Empty(TripCommands.BookedItems(trip, Guid.NewGuid()));
+    }
 }
