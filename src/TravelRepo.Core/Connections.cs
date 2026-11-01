@@ -27,7 +27,9 @@ public static class Connections
     /// <summary>
     /// The connections in a trip, in time order. Two journeys connect when the second is the next to leave after the
     /// first arrives, within <see cref="Longest"/>, from the place the first arrives at (the same place, or one within
-    /// <see cref="SamePlaceMetres"/>). Cancelled journeys and journeys without a time do not count.
+    /// <see cref="SamePlaceMetres"/>). Cancelled journeys and journeys without a time do not count, and neither does a
+    /// night back at a stay that began before the arrival, such as a day trip's return and the next morning's train.
+    /// A hotel checked into during the layover keeps it a connection.
     /// </summary>
     public static IReadOnlyList<Connection> In(TripSnapshot trip)
     {
@@ -37,6 +39,9 @@ public static class Connections
             .Select(e => (Item: e, Span: ScheduleQueries.Span(trip, e)))
             .Where(j => j.Span.IsPlaced && j.Span.Precision is not (TimePrecision.AllDay or TimePrecision.DayPart))
             .OrderBy(j => j.Span.Start).ToArray();
+        // Stays the travellers had checked into already: arriving back at one ends the journey, it is not a change.
+        var stays = Stays.All(trip).Where(st => st.CheckIn is not null && st.CheckOut is not null)
+            .Select(st => (In: st.CheckIn!.ToInstant(), Out: st.CheckOut!.ToInstant())).ToArray();
         var found = new List<Connection>();
         for (var i = 0; i < journeys.Length; i++)
         {
@@ -45,6 +50,7 @@ public static class Connections
             if (next.Item is null || next.Span.Start - span.End > Longest) continue;
             var at = ScheduleQueries.Route(trip, arriving).To; var from = ScheduleQueries.Route(trip, next.Item).From;
             if (!SamePlace(at, from)) continue;
+            if (stays.Any(st => st.In < span.End && st.Out > span.End && st.In < next.Span.Start)) continue;
             found.Add(new(arriving, next.Item, span.End!.Value, next.Span.Start!.Value, at ?? from));
         }
         return found;
