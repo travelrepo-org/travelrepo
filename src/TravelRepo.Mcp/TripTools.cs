@@ -21,7 +21,7 @@ namespace TravelRepo.Mcp;
 /// The tools of the trip server. Each call reads the current files, so edits made in Jourfold or elsewhere are
 /// always seen. Results are compact JSON; errors are returned to the assistant as readable messages.
 /// </summary>
-internal sealed class TripTools(TravelRepository repository, IGitBackend git, bool readOnly, Func<CachedWeatherSource?>? weather = null, string? clientName = null)
+internal sealed class TripTools(TravelRepository repository, IGitBackend git, bool readOnly, Func<CachedWeatherSource?>? weather = null, string? clientName = null, Func<string?>? exchangeRates = null)
 {
     private static readonly JsonSerializerOptions Output = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
     private static readonly string[] Creatable = ["schedule_item", "place", "person", "booking", "task", "expense", "budget", "collection", "note"];
@@ -94,6 +94,8 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
             .Select(c => (JsonNode)new JsonObject { ["file"] = c["file"]!.ToString(), ["markdown"] = trip.Resources.TryGetValue(c["file"]!.ToString(), out var bytes) ? Encoding.UTF8.GetString(bytes) : null }).ToArray();
         if (notes.Length > 0) result["notes"] = new JsonArray(notes);
         if (TripQueries.Parent(trip, entity.Id) is { } parent) result["parent"] = Summary(trip, parent);
+        if (entity.Data["children"] is JsonArray { Count: > 0 } children)
+            result["steps"] = new JsonArray(children.Select(c => Guid.TryParse(c?.ToString(), out var step) ? trip.Find(step) : null).OfType<Entity>().Select(e => (JsonNode)Summary(trip, e)).ToArray());
         result["referenced_by"] = new JsonArray(TripSummaries.ReferencesTo(trip, entity.Id).Select(e => (JsonNode)Summary(trip, e)).ToArray());
         return result;
     });
@@ -371,6 +373,193 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
             ["items"] = new JsonArray(items),
             ["attribution"] = new JsonArray(result.Sources.Select(a => (JsonNode)(a.Text + (a.License is null ? "" : " (" + a.License + ")") + ", " + a.Url)).ToArray())
         };
+    });
+
+    [McpServerTool(Name = "list_connections", Title = "List changes between journeys", ReadOnly = true, Idempotent = true, OpenWorld = false)]
+    [Description("Changes from one journey to the next, such as a layover between two flights or a train after landing: the arriving and departing journey, where the change happens and how long there is, in real time across time zones. Journeys count as connected when the next one leaves within a day from the same place or one close by.")]
+    public Task<string> ListConnections(CancellationToken ct = default) => Run(async () =>
+    {
+        var trip = (await repository.ReadAsync(ct)).Trip;
+        return new JsonObject
+        {
+            ["connections"] = new JsonArray(Connections.In(trip).Select(c => (JsonNode)new JsonObject
+            {
+                ["arriving"] = Summary(trip, c.Arriving),
+                ["departing"] = Summary(trip, c.Departing),
+                ["place"] = c.Place?.Title,
+                ["layover_minutes"] = (long)c.Layover.TotalMinutes,
+                ["layover"] = Hours(c.Layover)
+            }).ToArray())
+        };
+    });
+
+    private static string Hours(Duration d) => (d < Duration.Zero ? "-" : "") + ((long)Math.Abs(d.TotalHours)).ToString(CultureInfo.InvariantCulture) + " h " + Math.Abs(d.Minutes).ToString("00", CultureInfo.InvariantCulture) + " min";
+
+    [McpServerTool(Name = "add_to_group", Title = "Add a plan to a group", Destructive = false, OpenWorld = false)]
+    [Description("Makes a schedule item a step of a group, such as a day tour, at the end of its steps. Any schedule item can be a group. A step belongs to one group only, so it leaves the group it was in; a step without people of its own takes the group's.")]
+    public Task<string> AddToGroup([Description("The group's id.")] string group, [Description("The id of the plan that becomes a step.")] string item, CancellationToken ct = default) => Run(async () =>
+    {
+        var saved = await Write(state => (TripCommands.Nest(state.Trip, Find(state.Trip, group).Id, Find(state.Trip, item).Id).Select(e => new EntityEdit(e.Id, e)).ToArray(), null), ct);
+        return GroupJson(saved.Trip, Find(saved.Trip, group));
+    });
+
+    [McpServerTool(Name = "remove_from_group", Title = "Take a plan out of its group", Destructive = false, OpenWorld = false)]
+    [Description("Takes a step out of its group; it stays in the plan on its own.")]
+    public Task<string> RemoveFromGroup([Description("The step's id.")] string item, CancellationToken ct = default) => Run(async () =>
+    {
+        Guid? group = null;
+        var saved = await Write(state =>
+        {
+            var step = Find(state.Trip, item); group = TripQueries.Parent(state.Trip, step.Id)?.Id;
+            return (TripCommands.Unnest(state.Trip, step.Id).Select(e => new EntityEdit(e.Id, e)).ToArray(), null);
+        }, ct);
+        return group is { } g && saved.Trip.Find(g) is { } parent ? GroupJson(saved.Trip, parent) : new JsonObject { ["note"] = "The plan was not in a group." };
+    });
+
+    private static JsonObject GroupJson(TripSnapshot trip, Entity group) => new()
+    {
+        ["group"] = Summary(trip, group),
+        ["steps"] = new JsonArray((group.Data["children"] as JsonArray ?? []).Select(c => Guid.TryParse(c?.ToString(), out var id) ? trip.Find(id) : null).OfType<Entity>().Select(e => (JsonNode)Summary(trip, e)).ToArray())
+    };
+
+    [McpServerTool(Name = "get_bookings", Title = "Read the bookings", ReadOnly = true, Idempotent = true, OpenWorld = false)]
+    [Description("The trip's bookings with provider, booking number, status, price, free cancellation deadline, travellers, the plans they are for (with their times) and attached files.")]
+    public Task<string> GetBookings(CancellationToken ct = default) => Run(async () =>
+    {
+        var trip = (await repository.ReadAsync(ct)).Trip;
+        return new JsonObject { ["bookings"] = new JsonArray(trip.Entities.Values.Where(e => e.Type == "booking").OrderBy(e => e.Title, StringComparer.Ordinal).Select(b => (JsonNode)BookingJson(trip, b)).ToArray()) };
+    });
+
+    private static JsonObject BookingJson(TripSnapshot trip, Entity booking)
+    {
+        var plans = (booking.Data["items"] as JsonArray ?? []).Select(n => Guid.TryParse(n?.ToString(), out var id) ? id : Guid.Empty)
+            .Concat(trip.Entities.Values.Where(e => e.Type == "schedule_item" && TripCommands.BookingOf(e) == booking.Id).Select(e => e.Id))
+            .Distinct().Select(trip.Find).OfType<Entity>().Where(e => e.Type == "schedule_item");
+        return new JsonObject
+        {
+            ["id"] = booking.Id.ToString(),
+            ["title"] = booking.Title,
+            ["provider"] = booking.Data["provider"] is JsonObject provider ? provider["name"]?.DeepClone() : booking.Data["provider"]?.DeepClone(),
+            ["reference"] = booking.Data["reference"]?.DeepClone(),
+            ["status"] = booking.Data["status"]?.DeepClone(),
+            ["price"] = booking.Data["price"]?.DeepClone(),
+            ["free_cancellation_until"] = booking.Data["cancellation"]?["free_until"]?.DeepClone(),
+            ["travelers"] = Names(trip, booking.Data["travelers"]),
+            ["plans"] = new JsonArray(plans.Select(e => (JsonNode)Summary(trip, e)).ToArray()),
+            ["files"] = new JsonArray(TripCommands.AttachedDocuments(trip, booking).Select(d => (JsonNode)new JsonObject { ["id"] = d.Id.ToString(), ["name"] = d.Title }).ToArray())
+        };
+    }
+
+    private static JsonArray Names(TripSnapshot trip, JsonNode? ids) =>
+        new((ids as JsonArray ?? []).Select(n => Guid.TryParse(n?.ToString(), out var id) ? trip.Find(id)?.Title : null).OfType<string>().Select(t => (JsonNode)t).ToArray());
+
+    [McpServerTool(Name = "link_booking", Title = "Link a booking to its plans", Destructive = false, OpenWorld = false)]
+    [Description("Sets which plans a booking is for, for example the outbound and return flight of one booking. The list replaces the old one; the booking lists the plans and each plan points back to it. A plan that belonged to another booking leaves that one. Create bookings with create_entity (type booking).")]
+    public Task<string> LinkBooking([Description("The booking's id.")] string booking, [Description("The ids of all plans the booking is for; empty to link none.")] string[] items, CancellationToken ct = default) => Run(async () =>
+    {
+        var saved = await Write(state =>
+        {
+            var target = Find(state.Trip, booking);
+            var plans = items.Select(i => Find(state.Trip, i)).ToArray();
+            if (plans.FirstOrDefault(p => p.Type != "schedule_item") is { } other) throw new McpException(other.Title + " is not a plan. Only schedule items can belong to a booking.");
+            return (TripCommands.LinkBooking(state.Trip, target.Id, plans.Select(p => p.Id).ToArray()).Select(e => new EntityEdit(e.Id, e)).ToArray(), null);
+        }, ct);
+        return BookingJson(saved.Trip, Find(saved.Trip, booking));
+    });
+
+    [McpServerTool(Name = "get_costs", Title = "Read the costs", ReadOnly = true, Idempotent = true, OpenWorld = false)]
+    [Description("Costs of the trip per currency: paid, still estimated, budget and what is left; then every expense with amount, currency, whether it is an estimate, who paid and what it belongs to, and booking prices. Amounts are never converted unless `in` names a currency: then totals are also given in it, using the exchange rates the app last downloaded (reference rates for orientation, with their date).")]
+    public Task<string> GetCosts([Description("Optional currency to also show totals in, for example EUR.")] string? @in = null, CancellationToken ct = default) => Run(async () =>
+    {
+        var trip = (await repository.ReadAsync(ct)).Trip;
+        var target = @in is null ? null : ExchangeRates.Code(@in) ?? throw new McpException("\"in\" must be a currency code with three letters, such as EUR.");
+        var rates = target is null ? null : Rates();
+        decimal? Converted(decimal amount, string currency) => rates?.Convert(amount, currency, target!) is { } v ? Math.Round(v, 2) : null;
+        var totals = TripSummaries.Costs(trip).Select(t => (JsonNode)new JsonObject
+        {
+            ["currency"] = t.Currency,
+            ["paid"] = t.Paid,
+            ["estimated"] = t.Estimated,
+            ["total"] = t.Total,
+            ["budget"] = t.Budget > 0 ? t.Budget : null,
+            ["left"] = t.Budget > 0 ? t.Budget - t.Total : null,
+            ["total_in"] = target is null ? null : Converted(t.Total, t.Currency)
+        }).ToArray();
+        var expenses = trip.Entities.Values.Where(e => e.Type == "expense").OrderBy(e => e.Title, StringComparer.Ordinal).Select(e =>
+        {
+            var money = TripSummaries.Money(e.Data["amount"]);
+            var related = (e.Data["related"] as JsonArray ?? []).Select(r => Guid.TryParse(r?["id"]?.ToString(), out var id) ? trip.Find(id)?.Title : null).OfType<string>();
+            return (JsonNode)new JsonObject
+            {
+                ["id"] = e.Id.ToString(),
+                ["title"] = e.Title,
+                ["amount"] = money?.Value,
+                ["currency"] = money?.Currency,
+                ["estimated"] = e.Data["estimated"]?.DeepClone(),
+                ["paid_by"] = Names(trip, e.Data["paid_by"]),
+                ["belongs_to"] = new JsonArray(related.Select(t => (JsonNode)t).ToArray())
+            };
+        }).ToArray();
+        var result = new JsonObject { ["totals"] = new JsonArray(totals), ["expenses"] = new JsonArray(expenses) };
+        var prices = trip.Entities.Values.Where(e => e.Type == "booking" && TripSummaries.Money(e.Data["price"]) is not null)
+            .Select(b => (JsonNode)new JsonObject { ["booking"] = b.Title, ["price"] = b.Data["price"]!.DeepClone(), ["status"] = b.Data["status"]?.DeepClone() }).ToArray();
+        if (prices.Length > 0) result["booking_prices"] = new JsonArray(prices);
+        if (target is not null) result["rates"] = RatesNote(rates);
+        return result;
+    });
+
+    [McpServerTool(Name = "convert_currency", Title = "Convert an amount", ReadOnly = true, Idempotent = true, OpenWorld = false)]
+    [Description("Converts an amount between currencies with the European Central Bank's reference rates the app last downloaded. They are for orientation: card and cash rates differ. This tool never fetches rates; when they are off in the app, the answer says so.")]
+    public Task<string> ConvertCurrency(
+        [Description("The amount, for example 48.50.")] string amount,
+        [Description("Its currency, for example NZD.")] string from,
+        [Description("The currency to convert to, for example EUR.")] string to,
+        CancellationToken ct = default) => Run(() =>
+    {
+        var value = ExchangeRates.Amount(amount) ?? throw new McpException("\"amount\" must be a number such as 48.50.");
+        var (a, b) = (ExchangeRates.Code(from), ExchangeRates.Code(to));
+        if (a is null || b is null) throw new McpException("Currencies are codes with three letters, such as EUR or NZD.");
+        var rates = Rates();
+        if (rates is null) return Task.FromResult<JsonNode>(RatesNote(null));
+        var converted = rates.Convert(value, a, b) ?? throw new McpException("The rates do not include " + (rates.Knows(a) ? b : a) + ". Known: " + string.Join(", ", rates.Currencies) + ".");
+        return Task.FromResult<JsonNode>(new JsonObject { ["amount"] = value, ["from"] = a, ["to"] = b, ["result"] = Math.Round(converted, 2), ["rates"] = RatesNote(rates) });
+    });
+
+    private ExchangeRates? Rates() => exchangeRates?.Invoke() is { } path ? ExchangeRates.Load(path) : null;
+
+    private JsonObject RatesNote(ExchangeRates? rates)
+    {
+        var app = clientName is { Length: > 0 } name ? name : "the trip app";
+        return rates is null
+            ? new JsonObject { ["available"] = false, ["note"] = "Exchange rates are off in " + app + " or have not been downloaded yet. The user can turn them on there. This server never downloads rates." }
+            : new JsonObject { ["available"] = true, ["date"] = rates.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), ["source"] = "European Central Bank reference rates", ["note"] = "For orientation; card and cash rates differ." };
+    }
+
+    [McpServerTool(Name = "add_expense", Title = "Add an expense", Destructive = false, OpenWorld = false)]
+    [Description("Adds an expense with its amount and currency as the travellers typed it (\"12,50\" and \"12.50\" both work; the currency is a three-letter code such as NZD), who paid it (ids or names, several allowed), and optionally the plan or booking it belongs to and whether it is only an estimate. Amounts stay in their currency; nothing is converted.")]
+    public Task<string> AddExpense(
+        [Description("What it was for, for example \"Ferry tickets\".")] string title,
+        [Description("The amount, for example 48.50.")] string amount,
+        [Description("The currency, for example NZD.")] string currency,
+        [Description("Optional people who paid it (ids or names).")] string[]? paid_by = null,
+        [Description("Optional id of the plan or booking it belongs to.")] string? belongs_to = null,
+        [Description("True when it is only an estimate so far.")] bool estimated = false,
+        CancellationToken ct = default) => Run(async () =>
+    {
+        if (string.IsNullOrWhiteSpace(title)) throw new McpException("An expense needs a title.");
+        var value = ExchangeRates.Amount(amount) ?? throw new McpException("\"amount\" must be a number such as 48.50.");
+        var code = ExchangeRates.Code(currency) ?? throw new McpException("\"currency\" must be a code with three letters, such as EUR or NZD.");
+        var expense = Entity.Create("expense", title.Trim());
+        var saved = await Write(state =>
+        {
+            var e = expense.Copy();
+            e.Data["amount"] = new JsonObject { ["value"] = value.ToString("0.00", CultureInfo.InvariantCulture), ["currency"] = code };
+            e.Data["estimated"] = estimated;
+            if (paid_by is { Length: > 0 }) e.Data["paid_by"] = new JsonArray(paid_by.Select(p => (JsonNode)Person(state.Trip, p).Id.ToString()).ToArray());
+            if (belongs_to is not null && Find(state.Trip, belongs_to) is var target) e.Data["related"] = new JsonArray(new JsonObject { ["id"] = target.Id.ToString(), ["type"] = target.Type });
+            return ([new EntityEdit(e.Id, e)], null);
+        }, ct);
+        return new JsonObject { ["id"] = expense.Id.ToString(), ["entity"] = saved.Trip.Find(expense.Id)!.Data.DeepClone() };
     });
 
     [McpServerTool(Name = "get_schema", Title = "Read an entity schema", ReadOnly = true, Idempotent = true, OpenWorld = false)]

@@ -28,10 +28,10 @@ public sealed class McpServerTests : IDisposable
     }
 
     /// <summary>A real MCP client talking to the server through in-memory pipes, as an assistant would over stdio.</summary>
-    private async Task<McpClient> Connect(string path, bool readOnly = false, Func<CachedWeatherSource?>? weather = null)
+    private async Task<McpClient> Connect(string path, bool readOnly = false, Func<CachedWeatherSource?>? weather = null, Func<string?>? rates = null)
     {
         var toServer = new Pipe(); var toClient = new Pipe();
-        var server = TripServer.Create(new StreamServerTransport(toServer.Reader.AsStream(), toClient.Writer.AsStream()), path, new(ReadOnly: readOnly, ClientName: "Jourfold", RecoveryRoot: Path.Combine(root, "recovery"), Weather: weather));
+        var server = TripServer.Create(new StreamServerTransport(toServer.Reader.AsStream(), toClient.Writer.AsStream()), path, new(ReadOnly: readOnly, ClientName: "Jourfold", RecoveryRoot: Path.Combine(root, "recovery"), Weather: weather, ExchangeRates: rates));
         _ = server.RunAsync(stop.Token);
         return await McpClient.CreateAsync(new StreamClientTransport(toServer.Writer.AsStream(), toClient.Reader.AsStream()), cancellationToken: stop.Token);
     }
@@ -251,5 +251,69 @@ public sealed class McpServerTests : IDisposable
         Assert.Contains("\u2610 Plates", text); Assert.DoesNotContain("Grill", text);
         Assert.Contains("Use dates like", await Call(client, "export_text", """{"from":"next week"}""", expectError: true));
         Assert.Contains("Nobody in the trip", await Call(client, "set_packed", "{\"item\":\"" + grill + "\",\"person\":\"Zoe\"}", expectError: true));
+    }
+
+    private static Entity Journey(string title, Entity from, Entity to, string start, string startZone, string end, string endZone)
+    {
+        var item = Entity.Create("schedule_item", title); item.Data["status"] = "confirmed";
+        item.Data["time"] = new JsonObject { ["precision"] = "exact", ["start"] = new ZonedTime(start, startZone).ToJson(), ["end"] = new ZonedTime(end, endZone).ToJson() };
+        item.Data["components"] = new JsonObject { ["transport"] = new JsonObject { ["type"] = "flight", ["departure"] = new JsonObject { ["place"] = from.Id.ToString() }, ["arrival"] = new JsonObject { ["place"] = to.Id.ToString() } } };
+        return item;
+    }
+
+    [Fact]
+    public async Task AssistantsLinkBookingsGroupPlansAndSeeLayovers()
+    {
+        var (repo, _) = await Trip(); var client = await Connect(repo.Root);
+        Entity Place(string name, double lat, double lon) { var p = Entity.Create("place", name); p.Data["location"] = new JsonObject { ["latitude"] = lat, ["longitude"] = lon }; return p; }
+        var home = Place("Home airport", 50.03, 8.57); var hub = Place("Hub airport", 37.46, 126.44); var far = Place("Destination airport", 34.43, 135.23);
+        var first = Journey("First flight", home, hub, "2027-03-01T13:00:00", "Europe/Berlin", "2027-03-02T07:00:00", "Asia/Seoul");
+        var second = Journey("Second flight", hub, far, "2027-03-02T09:30:00", "Asia/Seoul", "2027-03-02T11:30:00", "Asia/Tokyo");
+        var tour = Entity.Create("schedule_item", "Day tour"); var temple = Entity.Create("schedule_item", "Temple");
+        var booking = Entity.Create("booking", "Flights");
+        await repo.ApplyAsync(await repo.ReadAsync(), new[] { home, hub, far, first, second, tour, temple, booking }.Select(e => new EntityEdit(e.Id, e)).ToArray());
+
+        var connection = (await Call(client, "list_connections"))["connections"]![0]!;
+        Assert.Equal(("First flight", "Second flight", "Hub airport", 150L), (connection["arriving"]!["title"]!.ToString(), connection["departing"]!["title"]!.ToString(), connection["place"]!.ToString(), connection["layover_minutes"]!.GetValue<long>()));
+        Assert.Equal("2 h 30 min", connection["layover"]!.ToString());
+
+        var linked = await Call(client, "link_booking", "{\"booking\":\"" + booking.Id + "\",\"items\":[\"" + first.Id + "\",\"" + second.Id + "\"]}");
+        Assert.Equal(["First flight", "Second flight"], linked["plans"]!.AsArray().Select(n => n!["title"]!.ToString()).Order());
+        Assert.Equal(booking.Id, TripCommands.BookingOf((await repo.ReadAsync()).Trip.Find(second.Id)!));
+        Assert.Contains("not a plan", await Call(client, "link_booking", "{\"booking\":\"" + booking.Id + "\",\"items\":[\"" + hub.Id + "\"]}", expectError: true));
+        Assert.Equal("Flights", (await Call(client, "get_bookings"))["bookings"]![0]!["title"]!.ToString());
+
+        var group = await Call(client, "add_to_group", "{\"group\":\"" + tour.Id + "\",\"item\":\"" + temple.Id + "\"}");
+        Assert.Equal("Temple", group["steps"]![0]!["title"]!.ToString());
+        Assert.Equal("Temple", (await Call(client, "get_entity", "{\"id\":\"" + tour.Id + "\"}"))["steps"]![0]!["title"]!.ToString());
+        Assert.Contains("nest.cycle", await Call(client, "add_to_group", "{\"group\":\"" + temple.Id + "\",\"item\":\"" + tour.Id + "\"}", expectError: true));
+        Assert.Empty((await Call(client, "remove_from_group", "{\"item\":\"" + temple.Id + "\"}"))["steps"]!.AsArray());
+        Assert.DoesNotContain((await repo.ReadAsync()).Diagnostics, d => d.Severity == Severity.Error);
+    }
+
+    [Fact]
+    public async Task AssistantsAddExpensesAsTypedAndConvertOnlyWithCachedRates()
+    {
+        var (repo, _) = await Trip();
+        var ratesFile = Path.Combine(root, "rates.json"); string? rates = null;
+        var client = await Connect(repo.Root, rates: () => rates);
+        var ana = Entity.Create("person", "Ana"); var ferry = Entity.Create("schedule_item", "Ferry");
+        await repo.ApplyAsync(await repo.ReadAsync(), [new(ana.Id, ana), new(ferry.Id, ferry)]);
+
+        var added = await Call(client, "add_expense", "{\"title\":\"Ferry tickets\",\"amount\":\"1.234,50\",\"currency\":\"nzd\",\"paid_by\":[\"Ana\"],\"belongs_to\":\"" + ferry.Id + "\"}");
+        Assert.Equal(("1234.50", "NZD"), (added["entity"]!["amount"]!["value"]!.ToString(), added["entity"]!["amount"]!["currency"]!.ToString()));
+        Assert.Contains("three letters", await Call(client, "add_expense", """{"title":"Lunch","amount":"12","currency":"euro"}""", expectError: true));
+        Assert.Contains("number", await Call(client, "add_expense", """{"title":"Lunch","amount":"twelve","currency":"EUR"}""", expectError: true));
+
+        // Rates off in the app: nothing is converted, and the assistant is told why.
+        Assert.False((await Call(client, "convert_currency", """{"amount":"10","from":"EUR","to":"NZD"}"""))["available"]!.GetValue<bool>());
+        new ExchangeRates(new DateOnly(2027, 3, 1), new Dictionary<string, decimal> { ["NZD"] = 1.8m, ["JPY"] = 160m }).Save(ratesFile); rates = ratesFile;
+        var converted = await Call(client, "convert_currency", """{"amount":"18","from":"NZD","to":"JPY"}""");
+        Assert.Equal(1600m, converted["result"]!.GetValue<decimal>());
+        Assert.Equal("2027-03-01", converted["rates"]!["date"]!.ToString());
+        var costs = await Call(client, "get_costs", """{"in":"EUR"}""");
+        Assert.Equal(("NZD", 685.83m), (costs["totals"]![0]!["currency"]!.ToString(), costs["totals"]![0]!["total_in"]!.GetValue<decimal>()));
+        Assert.Equal(["Ana"], costs["expenses"]![0]!["paid_by"]!.AsArray().Select(n => n!.ToString()));
+        Assert.Equal(["Ferry"], costs["expenses"]![0]!["belongs_to"]!.AsArray().Select(n => n!.ToString()));
     }
 }
