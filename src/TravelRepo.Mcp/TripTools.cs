@@ -273,6 +273,59 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         var trip = (await repository.ReadAsync(ct)).Trip; return PackingItemJson(PackingLists.Item(trip, PackingTask(trip, item)));
     });
 
+    [McpServerTool(Name = "rename_packing_list", Title = "Rename a packing list", Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Gives a packing list a new title.")]
+    public Task<string> RenamePackingList([Description("The packing list's id.")] string list, [Description("The new title.")] string title, CancellationToken ct = default) => Run(async () =>
+    {
+        Entity? renamed = null;
+        await Write(state =>
+        {
+            var collection = Find(state.Trip, list); if (!PackingLists.IsList(collection)) throw new McpException("This is not a packing list. Use get_packing_lists to find their ids.");
+            renamed = PackingLists.Rename(collection, title); return ([new EntityEdit(renamed.Id, renamed)], null);
+        }, ct);
+        return new JsonObject { ["id"] = renamed!.Id.ToString(), ["title"] = renamed.Title };
+    });
+
+    [McpServerTool(Name = "delete_packing_list", Title = "Delete a packing list", Destructive = true, OpenWorld = false)]
+    [Description("Deletes a packing list and its items. Items that are also on another list stay there. Ask before deleting a list that has items.")]
+    public Task<string> DeletePackingList([Description("The packing list's id.")] string list, CancellationToken ct = default) => Run(async () =>
+    {
+        IReadOnlySet<Guid> removed = new HashSet<Guid>();
+        await Write(state =>
+        {
+            var collection = Find(state.Trip, list); if (!PackingLists.IsList(collection)) throw new McpException("This is not a packing list. Use get_packing_lists to find their ids.");
+            var (gone, updated) = PackingLists.DeleteList(state.Trip, collection.Id); removed = gone;
+            return ([.. gone.Select(id => new EntityEdit(id, null)), .. updated.Select(e => new EntityEdit(e.Id, e))], null);
+        }, ct);
+        return new JsonObject { ["deleted"] = removed.Count, ["items_deleted"] = removed.Count - 1 };
+    });
+
+    [McpServerTool(Name = "update_packing_item", Title = "Change a packing item", Destructive = false, OpenWorld = false)]
+    [Description("Changes a packing item's title, group or quantity, or moves it to the end of another packing list. Left-out values stay as they are; an empty group or quantity removes it. Who brings it is changed with assign_packing_item; delete_entity deletes an item.")]
+    public Task<string> UpdatePackingItem(
+        [Description("The item's id.")] string item,
+        [Description("Optional new title.")] string? title = null,
+        [Description("Optional group, for example \"Cooking\"; empty to remove it.")] string? group = null,
+        [Description("Optional quantity, for example \"2 packs\"; empty to remove it.")] string? quantity = null,
+        [Description("Optional id of the packing list to move the item to.")] string? list = null,
+        CancellationToken ct = default) => Run(async () =>
+    {
+        await Write(state =>
+        {
+            var task = PackingTask(state.Trip, item); var current = PackingLists.Item(state.Trip, task);
+            if (title is not null) task = PackingLists.Rename(task, title);
+            if (group is not null || quantity is not null) task = PackingLists.Describe(task, group ?? current.Group, quantity ?? current.Quantity);
+            var edits = new List<EntityEdit> { new(task.Id, task) };
+            if (list is not null)
+            {
+                var target = Find(state.Trip, list); if (!PackingLists.IsList(target)) throw new McpException("This is not a packing list. Use get_packing_lists to find their ids.");
+                edits.AddRange(PackingLists.MoveItem(state.Trip, task.Id, target.Id).Select(l => new EntityEdit(l.Id, l)));
+            }
+            return (edits, null);
+        }, ct);
+        var trip = (await repository.ReadAsync(ct)).Trip; return PackingItemJson(PackingLists.Item(trip, PackingTask(trip, item)));
+    });
+
     private static JsonObject PackingItemJson(PackingItem i) => new()
     {
         ["id"] = i.Task.Id.ToString(),

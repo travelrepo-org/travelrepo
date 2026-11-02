@@ -251,6 +251,17 @@ public sealed class McpServerTests : IDisposable
         Assert.Contains("\u2610 Plates", text); Assert.DoesNotContain("Grill", text);
         Assert.Contains("Use dates like", await Call(client, "export_text", """{"from":"next week"}""", expectError: true));
         Assert.Contains("Nobody in the trip", await Call(client, "set_packed", "{\"item\":\"" + grill + "\",\"person\":\"Zoe\"}", expectError: true));
+
+        // A second list: items are changed, moved there, the first list renamed and then deleted with what is left on it.
+        var camping = (await Call(client, "create_packing_list", """{"title":"Camping"}"""))["id"]!.ToString();
+        var tent = (await Call(client, "add_packing_item", "{\"list\":\"" + camping + "\",\"title\":\"Tent\",\"people\":[\"Ben\"]}"))["id"]!.ToString();
+        var changed = await Call(client, "update_packing_item", "{\"item\":\"" + grill + "\",\"title\":\"Small grill\",\"quantity\":\"1\",\"group\":\"\",\"list\":\"" + camping + "\"}");
+        Assert.Equal(("Small grill", "1"), (changed["title"]!.ToString(), changed["quantity"]!.ToString())); Assert.Null(changed["group"]);
+        Assert.Equal("Picnic", (await Call(client, "rename_packing_list", "{\"list\":\"" + list + "\",\"title\":\"Picnic\"}"))["title"]!.ToString());
+        Assert.Equal(2, (await Call(client, "delete_packing_list", "{\"list\":\"" + list + "\"}"))["items_deleted"]!.GetValue<int>());
+        await Call(client, "delete_entity", "{\"id\":\"" + tent + "\"}");
+        var left = Assert.Single((await Call(client, "get_packing_lists"))["lists"]!.AsArray());
+        Assert.Equal(("Camping", "Small grill"), (left!["title"]!.ToString(), Assert.Single(left["items"]!.AsArray())!["title"]!.ToString()));
     }
 
     private static Entity Journey(string title, Entity from, Entity to, string start, string startZone, string end, string endZone)

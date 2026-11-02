@@ -110,6 +110,46 @@ public static class PackingLists
         return copy;
     }
 
+    /// <summary>A list's or an item's new title.</summary>
+    public static Entity Rename(Entity entity, string title)
+    {
+        if (string.IsNullOrWhiteSpace(title)) throw new DomainException("packing.title", "A packing list or item needs a title.");
+        var copy = entity.Copy(); copy.Data["title"] = title.Trim(); return copy;
+    }
+
+    /// <summary>
+    /// What deleting a list removes: the list and its items that no other list holds. Entities that link to them,
+    /// such as comments, lose the link and are returned as <c>Updated</c>.
+    /// </summary>
+    public static (IReadOnlySet<Guid> Removed, IReadOnlyList<Entity> Updated) DeleteList(TripSnapshot trip, Guid list)
+    {
+        if (trip.Find(list) is not { } collection || !IsList(collection)) throw new DomainException("packing.list", "This is not a packing list.");
+        var elsewhere = All(trip).Where(l => l.Collection.Id != list).SelectMany(l => l.Items).Select(i => i.Task.Id).ToHashSet();
+        var removed = Resolve(trip, collection).Items.Select(i => i.Task.Id).Where(id => !elsewhere.Contains(id)).Append(list).ToHashSet();
+        var updated = trip.Entities.Values.Where(e => !removed.Contains(e.Id) && TripReferences.From(e).Any(r => removed.Contains(r.Target)))
+            .Select(e => TripReferences.Detach(e, removed)).ToArray();
+        return (removed, updated);
+    }
+
+    /// <summary>Moves an item to the end of another list. Returns the lists that changed.</summary>
+    public static IReadOnlyList<Entity> MoveItem(TripSnapshot trip, Guid item, Guid toList)
+    {
+        if (trip.Find(item) is not { } task || !IsItem(task)) throw new DomainException("packing.item", "This is not a packing item.");
+        if (trip.Find(toList) is not { } target || !IsList(target)) throw new DomainException("packing.list", "This is not a packing list.");
+        var changed = new List<Entity>();
+        foreach (var list in trip.Entities.Values.Where(IsList))
+        {
+            var ids = (list.Data["items"] as JsonArray ?? []).Select(n => n?.ToString()).OfType<string>().ToList();
+            var has = ids.Contains(item.ToString());
+            if (list.Id == toList ? has : !has) continue;
+            var copy = list.Copy();
+            if (list.Id == toList) ids.Add(item.ToString()); else ids.RemoveAll(i => i == item.ToString());
+            copy.Data["items"] = new JsonArray(ids.Select(i => (JsonNode)i).ToArray());
+            changed.Add(copy);
+        }
+        return changed;
+    }
+
     private static JsonObject Component(Entity task)
     {
         if (task.Data["components"] is not JsonObject components) task.Data["components"] = components = new JsonObject();
