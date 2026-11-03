@@ -25,6 +25,7 @@ public static partial class TripExport
             .Append("table{border-collapse:collapse;width:100%}td{padding:8px 6px;vertical-align:top;border-bottom:1px solid #e1e7e8}td.time{width:150px;color:#4d6170;white-space:nowrap}td.box{width:22px;font-size:17px;line-height:1.2}")
             .Append(".title{font-weight:600}.sub{color:#4d6170;font-size:13px}.detail{color:#4d6170;font-size:13px;margin-top:2px}.tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:10px;background:#eef2f2;color:#4d6170;margin-left:6px}")
             .Append(".done .title{color:#76889a;text-decoration:line-through}tr.night td{background:#f4f1f8;color:#5b4a73;font-size:13px;border-bottom:none}")
+            .Append(".comments{margin:6px 0 2px;padding:6px 10px;background:#f5f8f8;border-left:3px solid #b9dcd9;border-radius:0 6px 6px 0;font-size:13px}.comment+.comment{margin-top:6px}.who{font-weight:600}.when{color:#76889a;font-size:12px;margin-left:6px}")
             .Append("footer{margin-top:40px;color:#76889a;font-size:12px}@media print{body{margin:0;max-width:none}h2{break-after:avoid}tr{break-inside:avoid}}")
             .Append("</style></head><body><h1>").Append(E(document.Title)).Append("</h1>");
         foreach (var line in document.Meta) s.Append("<p class=\"meta\">").Append(E(line)).Append("</p>");
@@ -32,7 +33,9 @@ public static partial class TripExport
         {
             s.Append("<h2>");
             if (section.Overline is { } overline) s.Append("<span class=\"day\">").Append(E(overline)).Append("</span>");
-            s.Append(E(section.Title)).Append("</h2><table>");
+            s.Append(E(section.Title)).Append("</h2>");
+            if (section.Comments.Count > 0) Comments(section.Comments);
+            s.Append("<table>");
             foreach (var row in section.Rows)
             {
                 if (row.Kind == ExportRowKind.Heading) { s.Append("</table><h3>").Append(E(row.Title)).Append("</h3><table>"); continue; }
@@ -45,11 +48,24 @@ public static partial class TripExport
                 if (row.Summary is { Length: > 0 } summary) s.Append("<div class=\"sub\">").Append(E(summary)).Append("</div>");
                 foreach (var detail in row.DetailLines) s.Append("<div class=\"detail\">").Append(E(detail)).Append("</div>");
                 if (row.AttachmentLabels.Count > 0) s.Append("<div class=\"detail\">").Append(E(AttachmentNote(document, row))).Append("</div>");
+                if (row.Comments.Count > 0) Comments(row.Comments);
                 s.Append("</td></tr>");
             }
             s.Append("</table>");
         }
         return s.Append("<footer>").Append(E(document.Footer)).Append("</footer></body></html>").ToString();
+
+        void Comments(IReadOnlyList<ExportComment> comments)
+        {
+            s.Append("<div class=\"comments\">");
+            foreach (var c in comments)
+            {
+                s.Append("<div class=\"comment\"><span class=\"who\">").Append(E(c.Author)).Append("</span>");
+                if (c.When.Length > 0) s.Append("<span class=\"when\">").Append(E(c.When)).Append("</span>");
+                s.Append("<div>").Append(string.Join("<br>", c.Lines.Select(E))).Append("</div></div>");
+            }
+            s.Append("</div>");
+        }
     }
 
     /// <summary>
@@ -63,6 +79,7 @@ public static partial class TripExport
         foreach (var section in document.Sections)
         {
             s.Append('\n').Append(section.Overline is { } overline && section.Part != ExportParts.Packing ? overline + " · " : "").Append(section.Title).Append('\n');
+            Comments(section.Comments, "");
             foreach (var row in section.Rows)
             {
                 if (row.Kind == ExportRowKind.Heading) { s.Append('\n').Append(row.Title).Append(":\n"); continue; }
@@ -77,9 +94,21 @@ public static partial class TripExport
                 if (row.Kind != ExportRowKind.Check && row.Summary is { Length: > 0 } summary) s.Append(indent).Append(summary).Append('\n');
                 foreach (var detail in row.DetailLines) s.Append(indent).Append(detail).Append('\n');
                 if (row.AttachmentLabels.Count > 0) s.Append(indent).Append(AttachmentNote(document, row)).Append('\n');
+                Comments(row.Comments, indent);
             }
         }
         return s.ToString();
+
+        // "» Mia, 2 Mar 2027: text", with further lines under the text.
+        void Comments(IReadOnlyList<ExportComment> comments, string indent)
+        {
+            foreach (var c in comments)
+            {
+                var head = indent + "» " + c.Author + (c.When.Length > 0 ? ", " + c.When : "") + ": ";
+                s.Append(head).Append(c.Lines[0]).Append('\n');
+                foreach (var line in c.Lines.Skip(1)) s.Append(indent).Append("  ").Append(line).Append('\n');
+            }
+        }
     }
 
     /// <summary>The note that points from a row to its appendix pages, such as "Attachment A1, A2".</summary>

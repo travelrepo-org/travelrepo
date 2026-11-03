@@ -13,6 +13,8 @@ public sealed record PackingExportOptions
     public Guid? Person { get; init; }
     /// <summary>Only items nobody brings yet.</summary>
     public bool UnassignedOnly { get; init; }
+    /// <summary>Whether items and lists carry their comments.</summary>
+    public bool Comments { get; init; }
 }
 
 /// <summary>
@@ -30,10 +32,11 @@ public static class PackingExport
         options.UnassignedOnly ? PackingLists.Unassigned(list) : options.Person is { } person ? PackingLists.For(list, person) : list.Items;
 
     /// <summary>One section per list that has items, with a heading row per group and a check row per item.</summary>
-    public static IReadOnlyList<ExportSection> Sections(TripSnapshot trip, PackingExportOptions options, ExportLabels? labels = null)
+    public static IReadOnlyList<ExportSection> Sections(TripSnapshot trip, PackingExportOptions options, ExportLabels? labels = null, CultureInfo? culture = null)
     {
         labels ??= new();
         var sections = new List<ExportSection>();
+        var talk = options.Comments ? new ExportComments(trip, labels, culture ?? CultureInfo.CurrentCulture) : null;
         foreach (var list in Lists(trip, options))
         {
             var items = Items(list, options);
@@ -43,22 +46,22 @@ public static class PackingExport
             foreach (var (group, groupItems) in groups)
             {
                 if (group is not null || groups.Count > 1) rows.Add(new(group ?? labels.OtherItems, Kind: ExportRowKind.Heading));
-                rows.AddRange(groupItems.Select(i => new ExportRow(i.Task.Title, i.Quantity ?? "", Who(i, options, labels), Kind: ExportRowKind.Check, Checked: options.Person is { } p ? i.IsPackedBy(p) : i.Done)));
+                rows.AddRange(groupItems.Select(i => new ExportRow(i.Task.Title, i.Quantity ?? "", Who(i, options, labels), Kind: ExportRowKind.Check, Checked: options.Person is { } p ? i.IsPackedBy(p) : i.Done) { Comments = talk?.On([i.Task]) ?? [] }));
             }
-            sections.Add(new(ExportParts.Packing, list.Collection.Title, rows, labels.PackingLists));
+            sections.Add(new(ExportParts.Packing, list.Collection.Title, rows, labels.PackingLists) { Comments = talk?.On([list.Collection]) ?? [] });
         }
         return sections;
     }
 
     /// <summary>A packing list document for print, PDF or text.</summary>
-    public static ExportDocument Document(TripSnapshot trip, PackingExportOptions? options = null, ExportLabels? labels = null)
+    public static ExportDocument Document(TripSnapshot trip, PackingExportOptions? options = null, ExportLabels? labels = null, CultureInfo? culture = null)
     {
         options ??= new(); labels ??= new();
         var subtitle = options.UnassignedOnly ? labels.NobodyYet : options.Person is { } p && trip.Find(p) is { } person ? string.Format(CultureInfo.CurrentCulture, labels.PackingFor, person.Title) : labels.PackingLists;
-        return new(trip.Manifest.Title, [subtitle], Sections(trip, options, labels), null, [], labels.GeneratedBy, trip.Manifest.Data["language"]?.ToString() ?? "en", new ExportOptions { Parts = ExportParts.Packing, Person = options.Person }, labels);
+        return new(trip.Manifest.Title, [subtitle], Sections(trip, options, labels, culture), null, [], labels.GeneratedBy, trip.Manifest.Data["language"]?.ToString() ?? "en", new ExportOptions { Parts = ExportParts.Packing, Person = options.Person, Comments = options.Comments }, labels);
     }
 
-    public static string Text(TripSnapshot trip, PackingExportOptions? options = null, ExportLabels? labels = null) => TripExport.Text(Document(trip, options, labels));
+    public static string Text(TripSnapshot trip, PackingExportOptions? options = null, ExportLabels? labels = null, CultureInfo? culture = null) => TripExport.Text(Document(trip, options, labels, culture));
 
     /// <summary>
     /// One row per item. <paramref name="separator"/> defaults to the culture's list separator, so spreadsheets open

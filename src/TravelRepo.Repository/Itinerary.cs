@@ -68,6 +68,9 @@ public sealed record ExportLabels
     public string NightOf { get; init; } = "night {0} of {1}";
     /// <summary>Names the time zone of all times, for example "Time zone: Tokyo (JST, UTC+9)".</summary>
     public string TimeZone { get; init; } = "Time zone: {0}";
+    public string Comments { get; init; } = "Comments";
+    /// <summary>The author of a comment whose person is not in the trip.</summary>
+    public string Someone { get; init; } = "Someone";
     public IReadOnlyDictionary<string, string> DayParts { get; init; } = new Dictionary<string, string> { ["morning"] = "Morning", ["afternoon"] = "Afternoon", ["evening"] = "Evening", ["night"] = "Night" };
     public IReadOnlyDictionary<string, string> Statuses { get; init; } = new Dictionary<string, string>();
     public IReadOnlyDictionary<string, string> Access { get; init; } = new Dictionary<string, string> { ["reception"] = "Reception", ["self"] = "Self check-in", ["host"] = "The host lets you in" };
