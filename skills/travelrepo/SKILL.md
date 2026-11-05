@@ -30,9 +30,9 @@ Every entity has `id` (a UUID, version 7), `type` and usually `extensions: {}`. 
 |---|---|---|---|
 | `trip` | `travel.yaml` | `title`, `language`, `variant` | `dates.start`, `dates.end` (`YYYY-MM-DD`), `default_timezone`, `participants` (person IDs) |
 | `schedule_item` | `schedule/` | `title`, `status` | `time`, `category`, `outdoor`, `default_place`, `duration`, `participants`, `components`, `children`, `content`, `constraints`, `tags` |
-| `place` | `places/` | `name` | `location.latitude`, `location.longitude`, `address.formatted`, `timezone` |
+| `place` | `places/` | `name` | `location.latitude`, `location.longitude`, `address.formatted`, `timezone`, `local_name` and `address.local` (name and address in the local script, for a taxi driver) |
 | `person` | `people/` | `display_name` | `roles` |
-| `booking` | `bookings/` | | `provider.name`, `reference`, `status`, `travelers`, `items` (schedule item IDs), `price` |
+| `booking` | `bookings/` | | `provider.name`, `reference`, `status` (`idea`, `pending`, `reserved`, `confirmed`, `cancelled`, `completed`), `travelers`, `items` (schedule item IDs), `price`, `cancellation.free_until` |
 | `task` | `tasks/` | `title`, `status` (`open`, `in_progress`, `completed`, `cancelled`) | `assigned_to`, `due.date`, `related` (`[{type, id}]`) |
 | `expense` | `expenses/` | `title`, `amount`, `estimated` (true or false) | `paid_by`, `related` |
 | `budget` | `budgets/` | `title`, `amount` | `scope` |
@@ -41,6 +41,10 @@ Every entity has `id` (a UUID, version 7), `type` and usually `extensions: {}`. 
 | `comment` | `comments/` | `target`, `author` (person ID), `created_at`, `body` | |
 
 Money is `{ value: "149.90", currency: EUR }`: the value is a decimal string and the currency an ISO 4217 code. Durations use ISO 8601, for example `PT1H30M`.
+
+Costs stay in the currency they were paid in; never convert them when saving. `add_expense` takes an amount as people type it ("12,50") and a currency code, who paid (several people are listed, TravelRepo does not split costs) and what it belongs to. `get_costs` sums per currency, with budgets; `get_costs` with `in` and `convert_currency` use the exchange rates the user's app last downloaded, which are reference rates for orientation, not what a card or cash desk charges. Say the rates' date when it matters.
+
+A booking and its plans point to each other: the booking's `items` and each plan's `components.booking.ref` (a stay: `components.accommodation.booking`). Use `link_booking` to set which plans a booking is for, rather than editing either side by hand; `get_bookings` shows bookings with their plans, prices and deadlines.
 
 ## Schedule items
 
@@ -72,7 +76,7 @@ Optional stay details, all inside `accommodation`: `check_in_window` and `check_
 
 A stay overlapping other plans is normal and not a conflict. Overlapping activities are allowed too; they are shown side by side.
 
-`children` lists the IDs of nested schedule items (for example the stops of a day trip). Children are separate entities with their own files.
+`children` lists the IDs of nested schedule items (for example the stops of a day trip). Children are separate entities with their own files. A step belongs to one group only; use `add_to_group` and `remove_from_group`, which keep that rule. A step with `participants: { inherit: true }` is for the same people as its group. `list_connections` shows changes between journeys, such as a layover, with the time there is to change.
 
 ## Time
 

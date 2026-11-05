@@ -1,6 +1,6 @@
 # Developer setup
 
-Install .NET SDK 10.0.401 and Git. `global.json` pins the SDK. From this repository:
+Install a .NET 10 SDK and Git. `global.json` accepts any .NET 10 SDK from 10.0.100 on; CI and releases use exactly 10.0.401 from `eng/sdk.json`, and its `dotnet format` check decides; older feature bands indent a few lines differently. From this repository:
 
 ```sh
 dotnet restore --locked-mode

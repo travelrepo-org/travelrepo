@@ -34,12 +34,22 @@ public sealed record ExportRow(string Title, string Lead = "", string? Summary =
     public string? Tone { get; init; }
     public IReadOnlyList<string> DetailLines => Details ?? [];
     public IReadOnlyList<string> AttachmentLabels => Attachments ?? [];
+    /// <summary>The comments on what the row stands for, oldest first, when the export includes comments.</summary>
+    public IReadOnlyList<ExportComment> Comments { get; init; } = [];
 }
+
+/// <summary>A comment in an export.</summary>
+/// <param name="Author">Who wrote it, or the export's word for someone unknown.</param>
+/// <param name="When">The day it was written, formatted for the export's language, or empty.</param>
+/// <param name="Lines">Its text as plain lines, without Markdown.</param>
+public sealed record ExportComment(string Author, string When, IReadOnlyList<string> Lines);
 
 public sealed record ExportSection(ExportParts Part, string Title, IReadOnlyList<ExportRow> Rows, string? Overline = null)
 {
     /// <summary>For a day of the schedule: its plans on a time line, when the export asks for one.</summary>
     public ExportTimeline? Timeline { get; init; }
+    /// <summary>Comments on the section itself, such as on a packing list, when the export includes comments.</summary>
+    public IReadOnlyList<ExportComment> Comments { get; init; } = [];
 }
 
 /// <summary>A plan on a day's time line, cut off at the day's edges.</summary>
@@ -108,6 +118,8 @@ public static partial class TripExport
         var zone = DateTimeZoneProviders.Tzdb.GetZoneOrNull(it.Zone) ?? DateTimeZone.Utc;
         var compact = options.Compact;
         var sections = new List<ExportSection>();
+        var talk = options.Comments ? new ExportComments(trip, labels, culture) : null;
+        IReadOnlyList<ExportComment> Comments(IEnumerable<Entity> owners) => talk?.On(owners) ?? [];
 
         var attachments = new List<(Entity Document, List<string> UsedBy)>();
         IReadOnlyList<string> Attach(Entity owner, string usedBy)
@@ -156,8 +168,10 @@ public static partial class TripExport
             var title = e.Role switch { ItineraryRole.CheckIn => string.Format(culture, labels.CheckInAt, e.Item.Title), ItineraryRole.CheckOut => string.Format(culture, labels.CheckOutAt, e.Item.Title), _ => e.Item.Title };
             var sub = compact ? new[] { e.Where, e.BookingReference is null ? null : labels.Reference + " " + e.BookingReference }
                 : new[] { e.Group, e.Where, e.People.Count > 0 ? string.Join(", ", e.People) : null, e.BookingReference is null ? null : labels.Reference + " " + e.BookingReference };
-            // A stay's documents belong to the stay, not to its check-in and check-out lines.
-            return new(title, e.Time, Join(sub), compact ? null : e.Notes, compact ? null : e.Status, Attachments: e.Role == ItineraryRole.Item ? Attach(e.Item, e.Item.Title) : null) { Tone = Tone(e.Kind) };
+            // A stay's documents belong to the stay, not to its check-in and check-out lines. Its comments go with the
+            // check-in, unless the stays have their own section.
+            var talked = e.Role == ItineraryRole.Item || (e.Role == ItineraryRole.CheckIn && !options.Includes(ExportParts.Stays));
+            return new(title, e.Time, Join(sub), compact ? null : e.Notes, compact ? null : e.Status, Attachments: e.Role == ItineraryRole.Item ? Attach(e.Item, e.Item.Title) : null) { Tone = Tone(e.Kind), Comments = talked ? Comments([e.Item]) : [] };
         }
         ExportRow Night(ItineraryNight n) => new(string.Format(culture, labels.NightAt, n.Run.Main.Item.Title), "", n.Run.Nights > 1 ? string.Format(culture, labels.NightOf, n.Number, n.Run.Nights) : null, Kind: ExportRowKind.Night) { Tone = Tone(ScheduleKind.Accommodation) };
         ExportTimeline Timeline(ItineraryDay day)
@@ -212,7 +226,7 @@ public static partial class TripExport
                 var summary = compact ? Join([labels.NightCount(run.Nights), checkIn, booking?.Data["reference"]?.ToString() is { } r1 ? labels.Reference + " " + r1 : null])
                     : Join([place?.Title != stay.Item.Title ? place?.Title : null, labels.NightCount(run.Nights), booking?.Data["reference"]?.ToString() is { } r2 ? labels.Reference + " " + r2 : null]);
                 var docs = run.Stays.SelectMany(s => Attach(s.Item, stay.Item.Title)).Concat(booking is null ? [] : Attach(booking, stay.Item.Title)).Distinct().ToArray();
-                rows.Add(new(stay.Item.Title, lead, summary, compact ? null : details.OfType<string>().Where(x => x.Length > 0).ToArray(), compact ? null : labels.Status(stay.Item.Data["status"]?.ToString()), Attachments: docs) { Tone = Tone(ScheduleKind.Accommodation) });
+                rows.Add(new(stay.Item.Title, lead, summary, compact ? null : details.OfType<string>().Where(x => x.Length > 0).ToArray(), compact ? null : labels.Status(stay.Item.Data["status"]?.ToString()), Attachments: docs) { Tone = Tone(ScheduleKind.Accommodation), Comments = Comments(run.Stays.Select(s => s.Item)) });
             }
             sections.Add(new(ExportParts.Stays, labels.Stays, rows));
         }
@@ -224,7 +238,8 @@ public static partial class TripExport
                 var free = Stays.Zoned(booking.Data["cancellation"]?["free_until"]);
                 var details = compact ? null : new[] { free is null ? null : string.Format(culture, labels.FreeCancellation, Clock(free, false)), Contact(ContactDetails.Read(booking.Data["provider"]?["contact"] ?? booking.Data["provider"])) }.OfType<string>().ToArray();
                 return new ExportRow(booking.Title, booking.Data["reference"]?.ToString() ?? "",
-                    Join([booking.Data["provider"]?["name"]?.ToString(), price is null ? null : price.Amount.ToString("N2", culture) + " " + price.Currency, compact ? null : labels.Status(booking.Data["status"]?.ToString())]), details, Attachments: Attach(booking, booking.Title));
+                    Join([booking.Data["provider"]?["name"]?.ToString(), price is null ? null : price.Amount.ToString("N2", culture) + " " + price.Currency, compact ? null : labels.Status(booking.Data["status"]?.ToString())]), details, Attachments: Attach(booking, booking.Title))
+                { Comments = Comments([booking]) };
             }).ToArray()));
 
         if (options.Includes(ExportParts.Contacts))
@@ -255,7 +270,7 @@ public static partial class TripExport
                 {
                     var due = LocalDatePattern.Iso.Parse(t.Data["due"]?["date"]?.ToString() ?? "") is { Success: true } d ? string.Format(culture, labels.Due, Date(d.Value)) : "";
                     var people = (t.Data["assigned_to"] as JsonArray ?? []).Select(n => Guid.TryParse(n?.ToString(), out var id) ? trip.Find(id)?.Title : null).OfType<string>().ToArray();
-                    return new ExportRow(t.Title, due, people.Length > 0 ? string.Join(", ", people) : null, Kind: ExportRowKind.Check, Checked: t.Data["status"]?.ToString() == "completed", Attachments: Attach(t, t.Title));
+                    return new ExportRow(t.Title, due, people.Length > 0 ? string.Join(", ", people) : null, Kind: ExportRowKind.Check, Checked: t.Data["status"]?.ToString() == "completed", Attachments: Attach(t, t.Title)) { Comments = Comments([t]) };
                 }).ToArray()));
         }
 
@@ -268,7 +283,7 @@ public static partial class TripExport
                     if (TripSummaries.Money(expense.Data["amount"]) is not { } money) continue;
                     var payers = (expense.Data["paid_by"] as JsonArray ?? []).Select(n => Guid.TryParse(n?.ToString(), out var id) ? trip.Find(id)?.Title : null).OfType<string>().ToArray();
                     var estimated = expense.Data["estimated"] is JsonValue v && v.TryGetValue<bool>(out var flag) && flag;
-                    rows.Add(new(expense.Title, money.Amount.ToString("N2", culture) + " " + money.Currency, Join([payers.Length > 0 ? string.Format(culture, labels.PaidBy, string.Join(", ", payers)) : null, estimated ? labels.Estimated : null]), Attachments: Attach(expense, expense.Title)));
+                    rows.Add(new(expense.Title, money.Amount.ToString("N2", culture) + " " + money.Currency, Join([payers.Length > 0 ? string.Format(culture, labels.PaidBy, string.Join(", ", payers)) : null, estimated ? labels.Estimated : null]), Attachments: Attach(expense, expense.Title)) { Comments = Comments([expense]) });
                 }
             sections.Add(new(ExportParts.Costs, labels.Costs, rows));
         }
@@ -276,12 +291,12 @@ public static partial class TripExport
         if (options.Includes(ExportParts.Notes))
         {
             var notes = trip.Entities.Values.Where(e => e.Type == "note").OrderBy(e => e.Title, StringComparer.Create(culture, false))
-                .Select(n => new ExportRow(n.Title, "", null, ExportText.Notes(trip, n))).Where(r => r.DetailLines.Count > 0 || r.Title.Length > 0).ToArray();
+                .Select(n => new ExportRow(n.Title, "", null, ExportText.Notes(trip, n)) { Comments = Comments([n]) }).Where(r => r.DetailLines.Count > 0 || r.Title.Length > 0).ToArray();
             if (notes.Length > 0) sections.Add(new(ExportParts.Notes, labels.Notes, notes));
         }
 
         if (options.Includes(ExportParts.Packing))
-            sections.AddRange(PackingExport.Sections(trip, new PackingExportOptions { Person = options.Person }, labels));
+            sections.AddRange(PackingExport.Sections(trip, new PackingExportOptions { Person = options.Person, Comments = options.Comments }, labels, culture));
 
         ExportMap? map = null;
         if (options.Includes(ExportParts.Map))
@@ -319,6 +334,19 @@ public static partial class TripExport
         var note = parking["note"]?.ToString();
         return Join([included ? labels.ParkingIncluded : note is { Length: > 0 } ? labels.Parking : null, note]);
     }
+}
+
+/// <summary>Comments as an export shows them: author, day in the trip's time zone, and plain text.</summary>
+public sealed class ExportComments(TripSnapshot trip, ExportLabels labels, CultureInfo culture)
+{
+    private readonly ILookup<Guid, Entity> byTarget = TripComments.ByTarget(trip);
+    private readonly DateTimeZone zone = ScheduleQueries.TripZone(trip);
+
+    /// <summary>The comments on <paramref name="owners"/>, oldest first. Comments without text are left out.</summary>
+    public IReadOnlyList<ExportComment> On(IEnumerable<Entity> owners) =>
+        [.. owners.DistinctBy(o => o.Id).SelectMany(o => byTarget[o.Id]).OrderBy(c => TripComments.CreatedAt(c) ?? Instant.MaxValue).Select(c =>
+                new ExportComment(TripComments.Author(trip, c)?.Title ?? labels.Someone, TripComments.CreatedAt(c) is { } at ? at.InZone(zone).Date.ToString("d MMM yyyy", culture) : "", ExportText.Plain(c.Data["body"]?.ToString() ?? "")))
+            .Where(c => c.Lines.Count > 0)];
 }
 
 /// <summary>Plain text from trip content, for exports.</summary>

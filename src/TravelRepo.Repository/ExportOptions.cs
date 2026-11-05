@@ -48,6 +48,8 @@ public sealed record ExportOptions
     public PaperSize Paper { get; init; } = PaperSize.A4;
     /// <summary>Whether renderers with pages draw each day's plans on a time line beside the list.</summary>
     public bool Timeline { get; init; } = true;
+    /// <summary>Whether rows carry the comments on what they stand for.</summary>
+    public bool Comments { get; init; }
 
     public bool Includes(ExportParts part) => (Parts & part) == part;
     public bool Compact => Detail == ExportDetail.Compact;

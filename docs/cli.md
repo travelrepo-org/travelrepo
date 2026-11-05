@@ -23,7 +23,8 @@ Commands:
   - `--person NAME|ID`: only what concerns one person (see specification section 45.1).
   - `--parts schedule,stays,bookings,contacts,costs,tasks,notes,packing`: choose the parts. The default is schedule, stays, bookings, contacts and costs. Calendar files ignore this option.
   - `--compact`: times, titles, places and booking references only.
-- `export-lists PATH OUTPUT.txt|.csv [--person NAME|ID] [--list NAME|ID]... [--unassigned]`: packing lists as text with check boxes or as CSV for spreadsheets. Without `--list`, all lists are exported. `--unassigned` keeps only what nobody brings yet.
+  - `--comments`: show the comments on each plan, stay, booking, task, expense and note below it, with author and day.
+- `export-lists PATH OUTPUT.txt|.csv [--person NAME|ID] [--list NAME|ID]... [--unassigned] [--comments]`: packing lists as text with check boxes or as CSV for spreadsheets. Without `--list`, all lists are exported. `--unassigned` keeps only what nobody brings yet. `--comments` adds the comments on lists and items to the text file; CSV files leave them out.
 - `mcp [PATH] [--read-only]`: serve the trip to an AI assistant over the Model Context Protocol on standard input and output. See [AI assistants](mcp.md).
 
 The default path for inspect/validate is the current directory. The CLI never changes global Git configuration. Generic remotes use normal Git SSH configuration and credential helpers.

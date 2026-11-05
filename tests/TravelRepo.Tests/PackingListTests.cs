@@ -89,4 +89,30 @@ public class PackingListTests
         var broken = new TripSnapshot(trip.Manifest, trip.Entities.Values.Where(e => e.Id != grill.Id).Append(stranger).ToDictionary(e => e.Id));
         Assert.Contains(SemanticValidation.Validate(broken), d => d.Code == "reference.missing" && d.Path.Contains("packed_by"));
     }
+
+    [Fact]
+    public void ListsAreRenamedDeletedWithTheirItemsAndItemsMoveBetweenThem()
+    {
+        var (trip, list, grill, _, _, plates) = Barbecue();
+        (var tent, var camping) = PackingLists.AddItem(PackingLists.CreateList("Camping"), "Tent");
+        // The grill is on both lists, so it stays when the barbecue goes.
+        camping.Data["items"]!.AsArray().Add(grill.Id.ToString());
+        var comment = Entity.Create("comment", "Too heavy"); comment.Data["target"] = plates.Id.ToString(); comment.Data["body"] = "Too heavy";
+        trip = new TripSnapshot(trip.Manifest, trip.Entities.Values.Concat([camping, tent, comment]).ToDictionary(e => e.Id));
+
+        Assert.Equal("Grill party", PackingLists.Rename(list, " Grill party ").Title);
+        Assert.Throws<DomainException>(() => PackingLists.Rename(list, " "));
+
+        var (removed, updated) = PackingLists.DeleteList(trip, list.Id);
+        Assert.Contains(list.Id, removed); Assert.Contains(plates.Id, removed); Assert.DoesNotContain(grill.Id, removed);
+        Assert.Equal(4, removed.Count);
+        Assert.Contains(updated, e => e.Id == comment.Id);
+
+        // Moving takes the item off its list and puts it at the end of the other.
+        var moved = PackingLists.MoveItem(trip, plates.Id, camping.Id);
+        var after = new TripSnapshot(trip.Manifest, trip.Entities.Values.Where(e => moved.All(m => m.Id != e.Id)).Concat(moved).ToDictionary(e => e.Id));
+        Assert.Equal(["Tent", "Grill", "Plates"], PackingLists.Resolve(after, after.Find(camping.Id)!).Items.Select(i => i.Task.Title));
+        Assert.DoesNotContain(PackingLists.Resolve(after, after.Find(list.Id)!).Items, i => i.Task.Id == plates.Id);
+        Assert.Empty(PackingLists.MoveItem(after, plates.Id, camping.Id));
+    }
 }

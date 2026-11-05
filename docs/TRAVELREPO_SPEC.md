@@ -370,8 +370,11 @@ location:
   latitude: 35.681236
   longitude: 139.767125
 
+local_name: 東京駅
+
 address:
   formatted: "1 Chome Marunouchi, Chiyoda City, Tokyo"
+  local: "東京都千代田区丸の内1丁目"
 
 timezone: Asia/Tokyo
 
@@ -383,6 +386,10 @@ extensions: {}
 ```
 
 Except for `id`, `type`, and `name`, place fields may be optional.
+
+`local_name` and `address.local` hold the name and the address as written in the place's own language and script,
+for showing to a taxi driver or matching street signs. They are optional and are only set when they differ from
+`name` and `address.formatted`.
 
 ## 14. Schedule items
 

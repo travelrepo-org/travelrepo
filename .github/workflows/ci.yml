@@ -18,9 +18,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Use the pinned SDK
+        shell: bash
+        run: cp eng/sdk.json global.json
       - uses: actions/setup-dotnet@v4
         with:
-          global-json-file: global.json
+          global-json-file: eng/sdk.json
           cache: true
           cache-dependency-path: '**/packages.lock.json'
       - uses: actions/setup-python@v5

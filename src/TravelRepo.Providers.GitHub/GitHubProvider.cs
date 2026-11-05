@@ -9,7 +9,13 @@ using TravelRepo.Serialization;
 namespace TravelRepo.Providers.GitHub;
 
 /// <summary>GitHub App device authorization and capability-based hosting integration.</summary>
-public sealed class GitHubProvider(HttpClient http, ISecretStore secrets, string clientId) : IProviderAuthentication, IProviderAccount, IRepositoryDiscoveryProvider, IRepositoryCreationProvider, IRepositoryPrivacyProvider, ICollaboratorProvider, IUserSearchProvider, IShareProvider
+/// <param name="http">Sends the requests to GitHub.</param>
+/// <param name="secrets">Keeps the user token.</param>
+/// <param name="clientId">The public client ID of the GitHub App.</param>
+/// <param name="appSlug">The App's name in its GitHub address (<c>github.com/apps/&lt;slug&gt;</c>), for the page where
+/// users install it on their repositories. Signing in does not install the App, so without an installation it sees no
+/// repository.</param>
+public sealed class GitHubProvider(HttpClient http, ISecretStore secrets, string clientId, string? appSlug = null) : IProviderAuthentication, IProviderAccount, IRepositoryDiscoveryProvider, IRepositoryAccessProvider, IRepositoryCreationProvider, IRepositoryPrivacyProvider, ICollaboratorProvider, IUserSearchProvider, IShareProvider
 {
     private const string TokenKey = "github.user-token";
     private async Task<JsonNode> Send(HttpMethod method, string uri, object? body = null, bool authenticated = true, CancellationToken ct = default)
@@ -45,23 +51,61 @@ public sealed class GitHubProvider(HttpClient http, ISecretStore secrets, string
         var n = await Send(HttpMethod.Post, "https://github.com/login/device/code", new { client_id = clientId }, false, ct);
         return new(n["device_code"]!.ToString(), n["user_code"]!.ToString(), n["verification_uri"]!.ToString(), (int)n["expires_in"]!, (int)n["interval"]!);
     }
+    /// <summary>
+    /// Waits until the user has entered the code, polling at GitHub's interval. A request lost to a phone falling
+    /// asleep or changing networks does not end the sign-in; the code stays valid, so the next poll asks again.
+    /// </summary>
     public async Task CompleteAsync(DeviceAuthorization authorization, CancellationToken ct = default)
     {
         var end = DateTimeOffset.UtcNow.AddSeconds(authorization.ExpiresIn); var interval = Math.Max(5, authorization.Interval);
         while (DateTimeOffset.UtcNow < end)
         {
             await Task.Delay(TimeSpan.FromSeconds(interval), ct);
-            var n = await Send(HttpMethod.Post, "https://github.com/login/oauth/access_token", new { client_id = clientId, device_code = authorization.DeviceCode, grant_type = "urn:ietf:params:oauth:grant-type:device_code" }, false, ct);
-            if (n["access_token"] is { } token) { await secrets.WriteAsync(TokenKey, token.ToString(), ct); return; }
-            switch (n["error"]?.ToString())
+            try
             {
-                case "authorization_pending": continue;
-                case "slow_down": interval += 5; continue;
-                default: throw new DomainException("github.authorization", "Authorization was declined or expired. Connect again to retry.");
+                switch (await PollAsync(authorization, ct))
+                {
+                    case DeviceSignIn.Connected: return;
+                    case DeviceSignIn.SlowDown: interval += 5; break;
+                }
             }
+            catch (Exception ex) when (IsTransient(ex, ct)) { }
         }
         throw new DomainException("github.expired", "The authorization code expired.");
     }
+
+    /// <summary>
+    /// Asks GitHub once whether the user has entered the code, and stores the token when they have. For clients that
+    /// pace the polling themselves, such as a phone app that asks again as soon as it is back in the foreground.
+    /// Callers must wait at least the authorization's interval between calls, and longer after
+    /// <see cref="DeviceSignIn.SlowDown"/>.
+    /// </summary>
+    /// <exception cref="DomainException">The user declined, or the code expired.</exception>
+    public async Task<DeviceSignIn> PollAsync(DeviceAuthorization authorization, CancellationToken ct = default)
+    {
+        var n = await Send(HttpMethod.Post, "https://github.com/login/oauth/access_token", new { client_id = clientId, device_code = authorization.DeviceCode, grant_type = "urn:ietf:params:oauth:grant-type:device_code" }, false, ct);
+        if (n["access_token"] is { } token) { await secrets.WriteAsync(TokenKey, token.ToString(), ct); return DeviceSignIn.Connected; }
+        return n["error"]?.ToString() switch
+        {
+            "authorization_pending" => DeviceSignIn.Pending,
+            "slow_down" => DeviceSignIn.SlowDown,
+            "expired_token" => throw new DomainException("github.expired", "The authorization code expired."),
+            _ => throw new DomainException("github.authorization", "Authorization was declined or expired. Connect again to retry.")
+        };
+    }
+
+    /// <summary>
+    /// Whether a failed request is worth repeating: no network, a dropped connection, a timeout, or a GitHub server
+    /// error. Declined sign-ins and missing permissions are not.
+    /// </summary>
+    public static bool IsTransient(Exception ex, CancellationToken ct = default) => ex switch
+    {
+        HttpRequestException or IOException => true,
+        TaskCanceledException => !ct.IsCancellationRequested,
+        DomainException { Code: var code } => code.StartsWith("github.http.5", StringComparison.Ordinal),
+        _ => false
+    };
+
     private async Task<List<JsonNode>> Pages(string endpoint, string? key, CancellationToken ct)
     {
         var result = new List<JsonNode>();
@@ -72,22 +116,41 @@ public sealed class GitHubProvider(HttpClient http, ISecretStore secrets, string
             result.AddRange(a.OfType<JsonNode>()); if (a.Count < 100) return result;
         }
     }
-    public async Task<IReadOnlyList<RemoteRepository>> DiscoverAsync(CancellationToken ct = default)
+    /// <summary>Whether the App is installed on at least one account the user can reach, their own or an organisation's.</summary>
+    public async Task<bool> HasRepositoryAccessAsync(CancellationToken ct = default) =>
+        (int?)(await Send(HttpMethod.Get, "user/installations?per_page=1", ct: ct))["total_count"] is > 0;
+
+    public Uri? RepositoryAccessUri => string.IsNullOrWhiteSpace(appSlug) ? null : new("https://github.com/apps/" + Uri.EscapeDataString(appSlug.Trim()) + "/installations/new");
+
+    /// <summary>
+    /// Lists every repository the App's installations can reach, then reads their travel.yaml a few at a time. Empty
+    /// repositories are skipped without a request.
+    /// </summary>
+    public async Task<IReadOnlyList<RemoteRepository>> DiscoverAsync(IProgress<DiscoveryProgress>? progress = null, CancellationToken ct = default)
     {
-        var result = new List<RemoteRepository>();
+        var repos = new List<JsonNode>();
         foreach (var installation in await Pages("user/installations", "installations", ct))
-            foreach (var repo in await Pages("user/installations/" + installation["id"] + "/repositories", "repositories", ct))
-            {
-                var name = repo["full_name"]!.ToString();
-                try
-                {
-                    var content = await Send(HttpMethod.Get, "repos/" + EscapeName(name) + "/contents/travel.yaml", ct: ct);
-                    var yaml = Encoding.UTF8.GetString(Convert.FromBase64String(content["content"]!.ToString()));
-                    var manifest = YamlCodec.Read(yaml); if (SchemaValidation.Validate(manifest).Count == 0 && manifest.Type == "trip") result.Add(Parse(repo));
-                }
-                catch (DomainException ex) when (ex.Code == "github.http.404" || ex.Code.StartsWith("yaml.", StringComparison.Ordinal)) { }
-            }
-        return result.DistinctBy(r => r.FullName).ToArray();
+            repos.AddRange(await Pages("user/installations/" + installation["id"] + "/repositories", "repositories", ct));
+        repos = repos.DistinctBy(r => r["full_name"]!.ToString()).ToList();
+        progress?.Report(new(0, repos.Count));
+        var found = new bool[repos.Count]; var done = 0;
+        await Parallel.ForEachAsync(Enumerable.Range(0, repos.Count), new ParallelOptions { MaxDegreeOfParallelism = 8, CancellationToken = ct }, async (i, token) =>
+        {
+            found[i] = (int?)repos[i]["size"] != 0 && await HoldsTripAsync(repos[i]["full_name"]!.ToString(), token);
+            progress?.Report(new(Interlocked.Increment(ref done), repos.Count));
+        });
+        return repos.Where((_, i) => found[i]).Select(Parse).ToArray();
+    }
+
+    private async Task<bool> HoldsTripAsync(string name, CancellationToken ct)
+    {
+        try
+        {
+            var content = await Send(HttpMethod.Get, "repos/" + EscapeName(name) + "/contents/travel.yaml", ct: ct);
+            var manifest = YamlCodec.Read(Encoding.UTF8.GetString(Convert.FromBase64String(content["content"]!.ToString())));
+            return SchemaValidation.Validate(manifest).Count == 0 && manifest.Type == "trip";
+        }
+        catch (DomainException ex) when (ex.Code == "github.http.404" || ex.Code.StartsWith("yaml.", StringComparison.Ordinal)) { return false; }
     }
     public async Task<RemoteRepository> CreateAsync(string name, CancellationToken ct = default) => Parse(await Send(HttpMethod.Post, "user/repos", new { name, @private = true, auto_init = false }, ct: ct));
     public async Task<RemoteRepository> InspectAsync(string fullName, CancellationToken ct = default) => Parse(await Send(HttpMethod.Get, "repos/" + EscapeName(fullName), authenticated: await secrets.ReadAsync(TokenKey, ct) is not null, ct: ct));

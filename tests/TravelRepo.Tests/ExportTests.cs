@@ -27,6 +27,41 @@ public class ExportTests
         return new(manifest, entities.Concat([Mia, Noah]).DistinctBy(e => e.Id).ToDictionary(e => e.Id));
     }
 
+    [Fact]
+    public void ACalendarShowsStaysAsCheckInAndCheckOut()
+    {
+        Entity Stay(string title, string checkIn, string checkOut, bool approximateIn = false, bool approximateOut = false)
+        {
+            var item = Entity.Create("schedule_item", title); item.Data["components"] = new JsonObject { ["accommodation"] = new JsonObject() };
+            return Stays.WithSpan(item, new ZonedTime(checkIn, Zone), new ZonedTime(checkOut, Zone), approximateIn, approximateOut);
+        }
+        // A fixed check-in and a check-out window; check-in hours without a fixed arrival and no departure hour.
+        var ryokan = Stay("Ryokan", "2027-04-01T16:00:00", "2027-04-03T10:00:00", approximateOut: true);
+        ((JsonObject)ryokan.Data["components"]!["accommodation"]!)["check_out_window"] = new JsonObject { ["until"] = "11:00" };
+        var hotel = Stay("Hotel", "2027-04-03T15:00:00", "2027-04-05T10:00:00", approximateIn: true, approximateOut: true);
+        ((JsonObject)hotel.Data["components"]!["accommodation"]!)["check_in_window"] = new JsonObject { ["from"] = "15:00", ["until"] = "19:00" };
+        var hike = Item("Hike", "2027-04-02T09:00:00", "2027-04-02T15:00:00");
+        var trip = Trip(ryokan, hotel, hike);
+        Instant At(string local) => new ZonedTime(local, Zone).ToInstant();
+
+        var entries = TripCalendar.Entries(trip, staysAsCheckInOut: true).ToDictionary(e => e.Uid);
+        Assert.Equal(5, entries.Count);
+        Assert.Equal(CalendarEntryRole.Plan, entries[hike.Id.ToString()].Role);
+        var arrive = entries[ryokan.Id + "-check-in"];
+        Assert.Equal((CalendarEntryRole.CheckIn, At("2027-04-01T16:00:00"), At("2027-04-01T16:00:00")), (arrive.Role, arrive.Start!.Value, arrive.End!.Value));
+        var leave = entries[ryokan.Id + "-check-out"];
+        Assert.Equal((At("2027-04-03T11:00:00"), At("2027-04-03T11:00:00")), (leave.Start!.Value, leave.End!.Value));
+        var window = entries[hotel.Id + "-check-in"];
+        Assert.Equal((At("2027-04-03T15:00:00"), At("2027-04-03T19:00:00")), (window.Start!.Value, window.End!.Value));
+        var unknown = entries[hotel.Id + "-check-out"];
+        Assert.True(unknown.AllDay); Assert.Equal(new LocalDate(2027, 4, 5), unknown.Date);
+        Assert.All(entries.Values.Where(e => e.Role != CalendarEntryRole.Plan), e => Assert.Equal(ScheduleKind.Accommodation, e.Kind));
+
+        // The iCalendar file keeps one entry across the nights.
+        var ics = TripExport.Ics(trip);
+        Assert.Contains("UID:" + ryokan.Id + "@travelrepo", ics); Assert.DoesNotContain("-check-in@", ics);
+    }
+
     /// <summary>A shared breakfast, Mia's museum, Noah's hike on the next day, and an idea without a time.</summary>
     private static (TripSnapshot Trip, Entity Breakfast, Entity Museum, Entity Hike, Entity Idea) Plan()
     {
@@ -258,6 +293,55 @@ public class ExportTests
         Assert.Null(TripExport.Document(Trip(night), new ExportOptions { Parts = ExportParts.Schedule, Timeline = false }, culture: Invariant).Sections[0].Timeline);
     }
 
+    internal static Entity Comment(Entity on, Entity? author, string at, string body)
+    {
+        var c = Entity.Create("comment", "Comment"); c.Data.Remove("title");
+        c.Data["target"] = new JsonObject { ["type"] = on.Type, ["id"] = on.Id.ToString() };
+        if (author is not null) c.Data["author"] = author.Id.ToString();
+        c.Data["created_at"] = at; c.Data["body"] = body;
+        return c;
+    }
+
+    [Fact]
+    public void CommentsGoBelowWhatTheyAreAboutWhenAsked()
+    {
+        var hike = Item("Hike", "2027-04-02T09:00:00", "2027-04-02T15:00:00");
+        var inn = Entity.Create("schedule_item", "Inn"); inn.Data["components"] = new JsonObject { ["accommodation"] = new JsonObject() };
+        inn = Stays.WithSpan(inn, new ZonedTime("2027-04-02T16:00:00", Zone), new ZonedTime("2027-04-04T10:00:00", Zone));
+        var task = Entity.Create("task", "Buy tickets");
+        var later = Comment(hike, Noah, "2027-03-02T09:00:00Z", "I can carry **the stove**.");
+        var earlier = Comment(hike, Mia, "2027-03-01T23:30:00Z", "Start early?\n- before 9");
+        var stranger = Comment(task, null, "2027-03-03T10:00:00Z", "Done <today>");
+        var trip = Trip(hike, inn, task, later, earlier, stranger, Comment(inn, Mia, "2027-03-04T10:00:00Z", "Quiet room, please"), Comment(task, Mia, "2027-03-05T10:00:00Z", "  "));
+
+        var without = TripExport.Document(trip, new ExportOptions { Parts = ExportParts.All }, culture: Invariant);
+        Assert.All(without.Sections.SelectMany(s => s.Rows), r => Assert.Empty(r.Comments));
+
+        var plan = TripExport.Document(trip, new ExportOptions { Parts = ExportParts.Schedule | ExportParts.Tasks, Comments = true }, culture: Invariant);
+        var rows = plan.Sections.SelectMany(s => s.Rows).ToArray();
+        // Oldest first, dated in the trip's time zone, Markdown removed.
+        Assert.Equal([new("Mia", "2 Mar 2027", ["Start early?", "• before 9"]), new ExportComment("Noah", "2 Mar 2027", ["I can carry the stove."])], rows.Single(r => r.Title == "Hike").Comments, new CommentComparer());
+        // Without a stays section, the stay's comments go with its check-in; empty comments are left out.
+        Assert.Equal(["Quiet room, please"], rows.Single(r => r.Title.StartsWith("Check-in", StringComparison.Ordinal)).Comments.SelectMany(c => c.Lines));
+        Assert.Empty(rows.Single(r => r.Title.StartsWith("Check-out", StringComparison.Ordinal)).Comments);
+        Assert.Equal("Someone", rows.Single(r => r.Title == "Buy tickets").Comments.Single().Author);
+
+        var stays = TripExport.Document(trip, new ExportOptions { Parts = ExportParts.Schedule | ExportParts.Stays, Comments = true }, culture: Invariant);
+        Assert.Empty(stays.Sections.SelectMany(s => s.Rows).Single(r => r.Title.StartsWith("Check-in", StringComparison.Ordinal)).Comments);
+        Assert.Single(stays.Sections.Single(s => s.Part == ExportParts.Stays).Rows.Single().Comments);
+
+        var text = TripExport.Text(plan);
+        Assert.Contains("» Mia, 2 Mar 2027: Start early?\n", text); Assert.Contains("  • before 9\n", text);
+        var html = TripExport.Html(plan);
+        Assert.Contains("<span class=\"who\">Someone</span>", html); Assert.Contains("Done &lt;today&gt;", html);
+    }
+
+    private sealed class CommentComparer : IEqualityComparer<ExportComment>
+    {
+        public bool Equals(ExportComment? a, ExportComment? b) => a is not null && b is not null && a.Author == b.Author && a.When == b.When && a.Lines.SequenceEqual(b.Lines);
+        public int GetHashCode(ExportComment c) => c.Author.GetHashCode(StringComparison.Ordinal);
+    }
+
     [Fact]
     public void MarkdownBecomesPlainLines()
     {
@@ -332,6 +416,20 @@ public class PackingExportTests
         var german = PackingExport.Csv(trip, new() { Person = Cleo.Id }, culture: new CultureInfo("de-DE")).Split("\r\n");
         Assert.Equal("List;Group;Item;Quantity;Brought by;Packed", german[0]);
         Assert.Equal("Barbecue;Food;Bread;;Ben, Cleo/Ä;no", german[1]);
+    }
+
+    [Fact]
+    public void ListsAndItemsCarryTheirCommentsWhenAsked()
+    {
+        var (trip, camping) = Trip();
+        var tent = PackingLists.All(trip).Single(l => l.Collection.Id == camping.Id).Items.Single().Task;
+        trip = trip with { Entities = trip.Entities.Values.Concat([ExportTests.Comment(tent, Ana, "2027-03-01T10:00:00Z", "Mine has a broken pole"), ExportTests.Comment(camping, Ben, "2027-03-02T10:00:00Z", "Pack by Friday")]).ToDictionary(e => e.Id) };
+        Assert.All(PackingExport.Sections(trip, new()), s => { Assert.Empty(s.Comments); Assert.All(s.Rows, r => Assert.Empty(r.Comments)); });
+        var section = PackingExport.Sections(trip, new() { Comments = true }, culture: English).Single(s => s.Title == "Camping");
+        Assert.Equal(("Ben", "Pack by Friday"), (section.Comments.Single().Author, section.Comments.Single().Lines.Single()));
+        Assert.Equal("Ana", section.Rows.Single().Comments.Single().Author);
+        var text = PackingExport.Text(trip, new() { Lists = [camping.Id], Comments = true }, culture: English);
+        Assert.Contains("Camping\n» Ben, 2 Mar 2027: Pack by Friday\n☐ Tent · Ben\n  » Ana, 1 Mar 2027: Mine has a broken pole\n", text);
     }
 
     [Fact]

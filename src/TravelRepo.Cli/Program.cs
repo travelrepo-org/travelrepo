@@ -9,7 +9,7 @@ try
 {
     if (args.Length == 0 || args[0] is "--help" or "help")
     {
-        Console.WriteLine("travelrepo validate [path]\ntravelrepo inspect [path]\ntravelrepo diff <path> <revision>\ntravelrepo repair <path> [--apply]\ntravelrepo export <path> <output.html|output.txt|output.ics> [--from yyyy-mm-dd] [--to yyyy-mm-dd] [--person name|id] [--parts schedule,stays,bookings,contacts,costs,tasks,notes,packing] [--compact]\ntravelrepo export-lists <path> <output.txt|output.csv> [--person name|id] [--list name|id]... [--unassigned]\ntravelrepo init <path> <title>\ntravelrepo format [path]\ntravelrepo version <path> <message>\ntravelrepo mcp [path] [--read-only]   serve the trip to AI assistants (MCP over stdio)"); return 0;
+        Console.WriteLine("travelrepo validate [path]\ntravelrepo inspect [path]\ntravelrepo diff <path> <revision>\ntravelrepo repair <path> [--apply]\ntravelrepo export <path> <output.html|output.txt|output.ics> [--from yyyy-mm-dd] [--to yyyy-mm-dd] [--person name|id] [--parts schedule,stays,bookings,contacts,costs,tasks,notes,packing] [--compact] [--comments]\ntravelrepo export-lists <path> <output.txt|output.csv> [--person name|id] [--list name|id]... [--unassigned] [--comments]\ntravelrepo init <path> <title>\ntravelrepo format [path]\ntravelrepo version <path> <message>\ntravelrepo mcp [path] [--read-only]   serve the trip to AI assistants (MCP over stdio)"); return 0;
     }
     if (args[0] == "mcp")
     {
@@ -52,7 +52,8 @@ try
                     To = ExportOptions.ParseDate(Option("--to")),
                     Person = Person(state.Trip, Option("--person")),
                     Parts = Option("--parts") is { } parts ? ExportOptions.ParseParts(parts) : ExportParts.Standard,
-                    Detail = args.Contains("--compact") ? ExportDetail.Compact : ExportDetail.Detailed
+                    Detail = args.Contains("--compact") ? ExportDetail.Compact : ExportDetail.Detailed,
+                    Comments = args.Contains("--comments")
                 };
                 var contents = Path.GetExtension(output).ToLowerInvariant() switch
                 {
@@ -69,7 +70,7 @@ try
                 var lists = PackingLists.All(state.Trip);
                 var chosen = args.Select((a, i) => (a, i)).Where(x => x.a == "--list").Select(x => args.ElementAtOrDefault(x.i + 1) ?? "")
                     .Select(name => lists.FirstOrDefault(l => l.Collection.Id.ToString() == name || string.Equals(l.Collection.Title, name, StringComparison.CurrentCultureIgnoreCase))?.Collection.Id ?? throw new DomainException("export.list", "No packing list called " + name + ".")).ToArray();
-                var options = new PackingExportOptions { Lists = chosen.Length > 0 ? chosen : null, Person = Person(state.Trip, Option("--person")), UnassignedOnly = args.Contains("--unassigned") };
+                var options = new PackingExportOptions { Lists = chosen.Length > 0 ? chosen : null, Person = Person(state.Trip, Option("--person")), UnassignedOnly = args.Contains("--unassigned"), Comments = args.Contains("--comments") };
                 var contents = Path.GetExtension(output).ToLowerInvariant() switch
                 {
                     ".txt" => PackingExport.Text(state.Trip, options),
