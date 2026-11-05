@@ -19,6 +19,21 @@ public sealed class LibGit2Backend(ICredentialBroker? credentialBroker = null) :
 {
     static LibGit2Backend() => ManagedHttpTransport.Register();
 
+    /// <summary>The name LibGit2Sharp loads libgit2 by, which contains the libgit2 commit it was built for.</summary>
+    public const string NativeLibraryName = "git2-5853918";
+
+    /// <summary>
+    /// Loads libgit2 from <paramref name="path"/> where the system cannot find it by <see cref="NativeLibraryName"/>,
+    /// such as on iOS, where it ships as a framework inside the app (<c>Frameworks/git2.framework/git2</c>, built by
+    /// <c>eng/build-libgit2-ios.sh</c>). Call it once, before the first Git command.
+    /// </summary>
+    public static void UseNativeLibrary(string path)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(path);
+        System.Runtime.Loader.AssemblyLoadContext.Default.ResolvingUnmanagedDll += (assembly, name) =>
+            name == NativeLibraryName && assembly == typeof(GitRepo).Assembly && System.Runtime.InteropServices.NativeLibrary.TryLoad(path, out var handle) ? handle : IntPtr.Zero;
+    }
+
     public async Task<GitResult> ExecuteAsync(string directory, IReadOnlyList<string> arguments, string? input = null, CancellationToken cancellationToken = default)
     {
         if (!Directory.Exists(directory)) throw new DomainException("git.folder_missing", "The trip folder no longer exists: " + directory);

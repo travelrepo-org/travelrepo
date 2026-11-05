@@ -63,6 +63,16 @@ public sealed class GitSyncTests : IDisposable
     }
 
     [Fact]
+    public async Task ALibgit2PathForIosLeavesTheLibraryFoundByItsName()
+    {
+        // iOS apps name the framework libgit2 is in; it is used only where the usual name finds nothing.
+        TravelRepo.Git.LibGit2.LibGit2Backend.UseNativeLibrary(Path.Combine(root, "Frameworks", "git2.framework", "git2"));
+        Directory.CreateDirectory(root);
+        Assert.Equal(0, (await new TravelRepo.Git.LibGit2.LibGit2Backend().ExecuteAsync(root, ["init"])).ExitCode);
+        Assert.True(Directory.Exists(Path.Combine(root, ".git")));
+    }
+
+    [Fact]
     public async Task FilesOutsideTheTripDoNotCountAsChanges()
     {
         var (repo, git, _, _) = await TwoClones();

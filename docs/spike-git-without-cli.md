@@ -53,6 +53,11 @@ Times on the Pixel 2:
   anything that ships the library.
 - The Android binaries come from LibGit2Sharp's version of libgit2. When LibGit2Sharp updates, the build has to follow,
   because the library name contains the commit.
+- **iOS:** `eng/build-libgit2-ios.sh` builds the same commit as `git2.xcframework` (devices and simulator) on a Mac.
+  iOS loads libraries only from frameworks, so the app calls `LibGit2Backend.UseNativeLibrary` with the path of
+  `git2.framework/git2` before the first Git command. LibGit2Sharp passes delegates to libgit2 (the HTTP transport,
+  progress, sign-in) without `MonoPInvokeCallback`, so a device build needs the Mono interpreter enabled
+  (`UseInterpreter`), which turns such delegates into native callbacks that ahead-of-time code alone cannot.
 - An Android app must exclude the native files of `LibGit2Sharp.NativeBinaries`
   (`ExcludeAssets="native;build;buildTransitive"`). Otherwise Android picks the glibc build for Linux through the RID
   fallback, and it cannot load.
