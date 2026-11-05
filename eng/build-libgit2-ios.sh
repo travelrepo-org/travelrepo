@@ -9,6 +9,9 @@
 # frameworks, so LibGit2Sharp does not find this one by its usual name (git2-5853918): the app passes the path of
 # git2.framework/git2 to LibGit2Backend.UseNativeLibrary.
 #
+# iOS has zlib, so the system's is used; the copy bundled with libgit2 does not compile against current iOS SDKs
+# (its zutil.h turns fdopen into a macro that stdio.h then declares).
+#
 # As on Android, HTTPS and SSH are left out: TravelRepo.Git.LibGit2 talks HTTP(S) through .NET's HttpClient, so the
 # system's TLS and certificates are used.
 set -eu
@@ -25,7 +28,7 @@ framework() {
     -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT="$SDK" -DCMAKE_OSX_ARCHITECTURES="$ARCHS" -DCMAKE_OSX_DEPLOYMENT_TARGET=$MINIMUM \
     -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_CLI=OFF -DBUILD_EXAMPLES=OFF \
     -DUSE_HTTPS=OFF -DUSE_SSH=OFF -DUSE_NTLMCLIENT=OFF -DUSE_GSSAPI=OFF \
-    -DUSE_BUNDLED_ZLIB=ON -DREGEX_BACKEND=builtin -DUSE_HTTP_PARSER=builtin \
+    -DUSE_BUNDLED_ZLIB=OFF -DREGEX_BACKEND=builtin -DUSE_HTTP_PARSER=builtin \
     -DLIBGIT2_FILENAME=git2-5853918
   "$CMAKE" --build "$BUILD" --parallel
   DIR="$OUTPUT/build/$NAME/git2.framework"
