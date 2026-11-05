@@ -2,6 +2,26 @@
 
 All notable changes to TravelRepo. Generated from `docs/releases` by `python eng/changelog.py`; do not edit by hand.
 
+## 0.7.0 – 2026-11-05
+
+### Changes
+
+- The new TravelRepo.Git.LibGit2 package runs Git through libgit2 where there is no git program, such as on Android. LibGit2Backend answers GitRepository's commands with Git's output and messages, so errors are classified as before, and ManagedHttpTransport speaks Git's smart HTTP protocol through HttpClient, so the platform's TLS and certificates are used. TRAVELREPO_TEST_GIT=libgit2 runs the test suite through it. eng/build-libgit2-android.sh builds libgit2 for Android with 16 KB page alignment.
+- GitRepository.PullAsync takes the remote's versions only as a fast-forward, for updates nobody watches. It never sends and never combines, and leaves a trip with changes or versions of its own as it was.
+- TripAgenda lays out the plan day by day as data, with schedule items and their spans, groups with their steps, check-ins, check-outs and nights. A line belongs to the day it starts on in its own time zone; items past midnight continue on every day they touch.
+- TripCalendar.Entries turns a trip's placed plans into calendar entries for device calendars. A stay can become its check-in and its check-out, and the iCalendar export uses the same entries.
+- Connections.In finds changes between journeys with their layover, also between nearby places such as a city's second airport. A night back at a stay the travellers had already checked into ends the journey instead. Places.Distance measures between two positions.
+- Places can carry `local_name` and `address.local`, their name and address in the local language and script (specification section 13), read through Places.LocalName and Places.LocalAddress. Format 1.0 is unchanged.
+- WalletPass.Read reads Wallet passes (.pkpass) without a wallet app, including fields, colours and the barcode, so clients can show a boarding pass offline. DocumentText reads passes for search.
+- TripCommands.Nest and Unnest move plans in and out of groups without cycles, LinkBooking links a booking to its plans in both directions, and BookedItems lists what a booking is for.
+- PackingLists gains Rename, DeleteList, which deletes the items no other list holds, and MoveItem.
+- ExportOptions.Comments and PackingExportOptions.Comments put comments into exports, oldest first with author and day. TripComments reads comments by target. The CLI takes --comments.
+- ExchangeRates moves into TravelRepo.Core with Amount and Code for typed input.
+- TripSummaries.Destinations lists the towns of a trip's stays, and TripSummaries.Town reads a place's town from its address.
+- GitHub: IRepositoryAccessProvider tells when a GitHub App may use no repository and links to its installation page. Discovery reads eight repositories at a time, skips empty ones and reports its progress. Device sign-in keeps polling when a request is lost to a sleeping phone or a network change.
+- MCP: list_connections, add_to_group, remove_from_group, get_bookings, link_booking, get_costs, add_expense and convert_currency are new, as are rename_packing_list, delete_packing_list and update_packing_item. The server stays offline: convert_currency uses only the rates a client downloaded.
+- global.json accepts any .NET 10 SDK from 10.0.100 on. CI and releases still pin 10.0.401 through eng/sdk.json.
+
 ## 0.6.0 – 2026-10-24
 
 ### Changes
