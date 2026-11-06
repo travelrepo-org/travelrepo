@@ -139,7 +139,7 @@ public static class TripItinerary
                 TimePrecision.Window when span.IsPlaced => string.Format(culture, labels.Between, At(span.Start!.Value, startZone), At(span.End!.Value, endZone)),
                 TimePrecision.Approximate when span.IsPlaced => "~" + At(span.Start!.Value, startZone),
                 TimePrecision.Exact when span.IsPlaced => At(span.Start!.Value, startZone) + (foreign ? " – " : "–")
-                    + (span.End!.Value.InZone(endZone).Date != span.Start.Value.InZone(startZone).Date ? span.End.Value.InZone(endZone).Date.ToString("d MMM", culture) + " " : "") + At(span.End.Value, endZone),
+                    + (span.End!.Value.InZone(endZone).Date != span.Start.Value.InZone(startZone).Date ? span.End.Value.InZone(endZone).Date.ToString(DatePatterns.For("d MMM", culture), culture) + " " : "") + At(span.End.Value, endZone),
                 _ => ""
             };
             var route = ScheduleQueries.Route(trip, item);
