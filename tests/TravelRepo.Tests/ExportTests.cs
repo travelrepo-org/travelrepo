@@ -303,6 +303,32 @@ public class ExportTests
     }
 
     [Fact]
+    public void GermanDatesHaveAFullStopAfterTheDayAndEnglishOnesDoNot()
+    {
+        var hike = Item("Hike", "2027-04-02T09:00:00", "2027-04-02T15:00:00");
+        var night = Item("Night train", "2027-04-02T22:00:00", "2027-04-03T07:00:00");
+        var task = Entity.Create("task", "Buy tickets"); task.Data["due"] = new JsonObject { ["date"] = "2027-03-20" };
+        var inn = Entity.Create("schedule_item", "Inn"); inn.Data["components"] = new JsonObject { ["accommodation"] = new JsonObject() };
+        inn = Stays.WithSpan(inn, new ZonedTime("2027-04-02T16:00:00", Zone), new ZonedTime("2027-04-04T10:00:00", Zone));
+        var trip = Trip(hike, night, inn, task, Comment(hike, Mia, "2027-03-02T09:00:00Z", "Start early?"));
+        var options = new ExportOptions { Parts = ExportParts.All & ~ExportParts.Map, Comments = true };
+        ExportRow[] Rows(ExportDocument d) => d.Sections.SelectMany(s => s.Rows).ToArray();
+
+        var german = TripExport.Document(trip, options, culture: new CultureInfo("de-DE"));
+        Assert.Equal("1. April 2027 – 5. April 2027", german.Meta[0]);
+        Assert.Contains(german.Sections, s => s.Title == "Freitag, 2. April");
+        Assert.StartsWith("2. M", Rows(german).Single(r => r.Title == "Hike").Comments.Single().When, StringComparison.Ordinal);
+        Assert.Contains("20. M", Rows(german).Single(r => r.Title == "Buy tickets").Lead, StringComparison.Ordinal);
+        Assert.Contains("3. Apr", Rows(german).Single(r => r.Title == "Night train").Lead, StringComparison.Ordinal);
+        Assert.Contains(", 2. Apr", string.Join(" | ", Rows(german).SelectMany(r => new[] { r.Lead, r.Title, r.Summary }.Concat(r.DetailLines))), StringComparison.Ordinal);
+
+        var english = TripExport.Document(trip, options, culture: new CultureInfo("en-GB"));
+        Assert.Equal("1 April 2027 – 5 April 2027", english.Meta[0]);
+        Assert.Contains(english.Sections, s => s.Title == "Friday, 2 April");
+        Assert.Equal("2 Mar 2027", Rows(english).Single(r => r.Title == "Hike").Comments.Single().When);
+    }
+
+    [Fact]
     public void CommentsGoBelowWhatTheyAreAboutWhenAsked()
     {
         var hike = Item("Hike", "2027-04-02T09:00:00", "2027-04-02T15:00:00");
