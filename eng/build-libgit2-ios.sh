@@ -7,7 +7,7 @@
 # Runs on macOS with Xcode and CMake. The source must be the commit LibGit2Sharp.NativeBinaries is built from
 # (5853918 for 2.0.324, libgit2 1.8.6), the same as for Android. iOS apps may only load libraries packaged as
 # frameworks, so LibGit2Sharp does not find this one by its usual name (git2-5853918): the app passes the path of
-# git2.framework/git2 to LibGit2Backend.UseNativeLibrary.
+# git2.framework/git2 to LibGit2Library.Use.
 #
 # iOS has zlib, so the system's is used; the copy bundled with libgit2 does not compile against current iOS SDKs
 # (its zutil.h turns fdopen into a macro that stdio.h then declares).
