@@ -63,6 +63,13 @@ public sealed class GitSyncTests : IDisposable
     }
 
     [Fact]
+    public void ALibgit2PathThatCannotBeLoadedSaysSoRightAway()
+    {
+        // iOS apps name the framework libgit2 is in; a wrong path fails where it is given, not at the first Git command.
+        Assert.Throws<DllNotFoundException>(() => TravelRepo.Git.LibGit2.LibGit2Library.Use(Path.Combine(root, "Frameworks", "git2.framework", "git2")));
+    }
+
+    [Fact]
     public async Task FilesOutsideTheTripDoNotCountAsChanges()
     {
         var (repo, git, _, _) = await TwoClones();
