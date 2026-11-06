@@ -23,15 +23,18 @@ public sealed class LibGit2Backend(ICredentialBroker? credentialBroker = null) :
     public const string NativeLibraryName = "git2-5853918";
 
     /// <summary>
-    /// Loads libgit2 from <paramref name="path"/> where the system cannot find it by <see cref="NativeLibraryName"/>,
-    /// such as on iOS, where it ships as a framework inside the app (<c>Frameworks/git2.framework/git2</c>, built by
-    /// <c>eng/build-libgit2-ios.sh</c>). Call it once, before the first Git command.
+    /// Loads libgit2 from <paramref name="path"/> and uses it where the system cannot find it by
+    /// <see cref="NativeLibraryName"/>, such as on iOS, where it ships as a framework inside the app
+    /// (<c>Frameworks/git2.framework/git2</c>, built by <c>eng/build-libgit2-ios.sh</c>). Call it once, before the first
+    /// Git command.
     /// </summary>
+    /// <exception cref="DllNotFoundException">The library cannot be loaded; the message says why.</exception>
     public static void UseNativeLibrary(string path)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
+        var handle = System.Runtime.InteropServices.NativeLibrary.Load(path);
         System.Runtime.Loader.AssemblyLoadContext.Default.ResolvingUnmanagedDll += (assembly, name) =>
-            name == NativeLibraryName && assembly == typeof(GitRepo).Assembly && System.Runtime.InteropServices.NativeLibrary.TryLoad(path, out var handle) ? handle : IntPtr.Zero;
+            name == NativeLibraryName && assembly == typeof(GitRepo).Assembly ? handle : IntPtr.Zero;
     }
 
     public async Task<GitResult> ExecuteAsync(string directory, IReadOnlyList<string> arguments, string? input = null, CancellationToken cancellationToken = default)
