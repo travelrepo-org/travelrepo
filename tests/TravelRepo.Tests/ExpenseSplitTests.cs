@@ -381,4 +381,48 @@ public class ExpenseSplitTests
         Assert.Equal("0.00", ((JsonArray)withCleo.Data["split"]!["parts"]!)[2]!["value"]!.ToString());
         Assert.Throws<DomainException>(() => Expenses.WithValue(trip, hotel, Ana.Id, 10m));
     }
+    [Fact]
+    public void TheAmountChargedOnACardSettlesInEuros()
+    {
+        // Ana paid 340 NZD on her card, which charged 190.40 EUR; Ben paid 81 NZD for dinner without a statement yet.
+        var tour = Expense("Hobbiton", "340.00", "NZD", Ana); var dinner = Expense("Dinner", "81.00", "NZD", Ben);
+        var trip = Trip(tour, dinner);
+        var charged = Expenses.WithCharge(tour, 190.40m, "eur", new LocalDate(2026, 11, 26));
+        Assert.Empty(SchemaValidation.Validate(charged));
+        var converted = (JsonObject)charged.Data["converted"]!;
+        Assert.Equal(("190.40", "EUR", "0.56", "2026-11-26", "card"), (converted["value"]!.ToString(), converted["currency"]!.ToString(), converted["rate"]!.ToString(), converted["rate_date"]!.ToString(), converted["source"]!.ToString()));
+        Assert.Equal(new Charge(190.40m, "EUR", 0.56m, new LocalDate(2026, 11, 26), "card"), Expenses.ChargeOf(charged));
+        Assert.Throws<DomainException>(() => Expenses.WithCharge(tour, 190m, "NZD"));
+        trip = With(trip, charged);
+
+        // A third of the tour in euros is exact; without rates the dinner stays in NZD.
+        Assert.Equal((63.46m, "EUR", Conversion.Charged), Expenses.Convert(charged, 113.33m, "NZD", "EUR"));
+        var plain = Expenses.SettleUp(trip, "EUR");
+        Assert.Contains(plain, t => t.Currency == "EUR" && !t.Estimated);
+        Assert.Contains(plain, t => t.Currency == "NZD");
+        var total = Expenses.Total(trip, "EUR");
+        Assert.Equal((190.40m, 0m, 1), (total.Exact, total.Estimated, total.WithoutCharge));
+        Assert.Equal([new Money("81.00", "NZD")], total.NotConverted);
+
+        // With reference rates the rest is an estimate and says so.
+        var rates = new ExchangeRates(new DateOnly(2026, 11, 20), new Dictionary<string, decimal> { ["NZD"] = 1.80m });
+        var all = Expenses.SettleUp(trip, "EUR", rates);
+        Assert.All(all, t => Assert.Equal("EUR", t.Currency));
+        Assert.All(all, t => Assert.True(t.Estimated));
+        var withRates = Expenses.Total(trip, "EUR", rates);
+        Assert.Equal((190.40m, 45.00m, 1, 0), (withRates.Exact, withRates.Estimated, withRates.WithoutCharge, withRates.NotConverted.Count));
+        foreach (var currency in Expenses.Balances(trip, "EUR", rates).GroupBy(b => b.Currency)) Assert.Equal(0, currency.Sum(b => b.Net));
+
+        // Once the dinner is charged too, everything is exact and the pay function works in euros.
+        trip = With(trip, Expenses.WithCharge(dinner, 45.36m, "EUR"));
+        Assert.All(Expenses.SettleUp(trip, "EUR", rates), t => Assert.False(t.Estimated));
+        var pay = Expenses.Pay(trip, Cleo.Id, Expenses.Open(trip, Cleo.Id).Select(d => d.Key), "EUR");
+        Assert.Equal([new Transfer(Cleo.Id, Ana.Id, "EUR", 63.46m), new Transfer(Cleo.Id, Ben.Id, "EUR", 15.12m)], pay.Payments);
+        Assert.Equal(78.58m, pay.Totals["EUR"]);
+        Assert.Null(Expenses.WithoutCharge(charged).Data["converted"]);
+
+        // Fields of converted this version does not know are kept.
+        var extended = charged.Copy(); extended.Data["converted"]!["org.example.card"] = "Visa";
+        Assert.Equal("Visa", Expenses.WithCharge(extended, 191m, "EUR").Data["converted"]!["org.example.card"]!.ToString());
+    }
 }

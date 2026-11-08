@@ -80,10 +80,46 @@ public sealed record ExpenseSplit(Entity Expense, Money? Amount, SplitMethod? Me
 }
 
 /// <summary>Where one person stands in one currency: positive when others owe them, negative when they owe others.</summary>
-public sealed record ExpenseBalance(Guid Person, string Currency, decimal Net);
+public sealed record ExpenseBalance(Guid Person, string Currency, decimal Net)
+{
+    /// <summary>Whether part of it was converted with reference rates because no charged amount was entered.</summary>
+    public bool Estimated { get; init; }
+}
 
 /// <summary>One payment: <see cref="From"/> pays <see cref="To"/> an amount in a currency.</summary>
-public sealed record Transfer(Guid From, Guid To, string Currency, decimal Amount);
+public sealed record Transfer(Guid From, Guid To, string Currency, decimal Amount)
+{
+    /// <summary>Whether part of it was converted with reference rates because no charged amount was entered.</summary>
+    public bool Estimated { get; init; }
+}
+
+/// <summary>
+/// What an expense really cost in another currency, for example the euros a card was charged for a payment in NZD
+/// (specification section 35). <see cref="Rate"/> is units of <see cref="Currency"/> per unit of the expense's currency.
+/// </summary>
+public sealed record Charge(decimal Value, string Currency, decimal Rate, LocalDate? Date, string? Source);
+
+/// <summary>How an amount came to be in the requested currency.</summary>
+public enum Conversion
+{
+    /// <summary>It already was in that currency.</summary>
+    Same,
+    /// <summary>With the amount actually charged, so it is exact.</summary>
+    Charged,
+    /// <summary>With reference rates, so it is an estimate.</summary>
+    Reference,
+    /// <summary>It could not be converted and stays in its own currency.</summary>
+    None
+}
+
+/// <summary>
+/// The paid expenses in one currency: <see cref="Exact"/> from amounts in that currency or charged in it,
+/// <see cref="Estimated"/> converted with reference rates, and the expenses that could not be converted at all.
+/// </summary>
+public sealed record ConvertedTotal(string Currency, decimal Exact, decimal Estimated, int WithoutCharge, IReadOnlyList<Money> NotConverted)
+{
+    public decimal Total => Exact + Estimated;
+}
 
 /// <summary>
 /// What paying the chosen open items comes to for one person: one payment per other person and currency, after
@@ -192,16 +228,97 @@ public static class Expenses
         Debts(trip).Where(d => !d.IsSettled && (person is not { } p || d.From == p || d.To == p)).ToArray();
 
     /// <summary>Where everyone stands per currency over the open debts. People who are even are left out.</summary>
-    public static IReadOnlyList<ExpenseBalance> Balances(TripSnapshot trip)
+    /// <remarks>
+    /// With <paramref name="currency"/>, each debt is converted first, see <see cref="Convert"/>: exactly with the amount
+    /// charged for its expense, otherwise with <paramref name="rates"/> as an estimate; a debt that cannot be converted
+    /// stays in its own currency.
+    /// </remarks>
+    public static IReadOnlyList<ExpenseBalance> Balances(TripSnapshot trip, string? currency = null, ExchangeRates? rates = null)
     {
-        var net = new Dictionary<(Guid, string), decimal>();
+        var net = new Dictionary<(Guid, string), decimal>(); var estimated = new HashSet<(Guid, string)>();
         foreach (var d in Open(trip))
         {
-            net[(d.To, d.Currency)] = net.GetValueOrDefault((d.To, d.Currency)) + d.Open;
-            net[(d.From, d.Currency)] = net.GetValueOrDefault((d.From, d.Currency)) - d.Open;
+            var (open, code, how) = currency is null || trip.Find(d.Expense) is not { } expense ? (d.Open, d.Currency, Conversion.Same) : Convert(expense, d.Open, d.Currency, currency, rates);
+            net[(d.To, code)] = net.GetValueOrDefault((d.To, code)) + open;
+            net[(d.From, code)] = net.GetValueOrDefault((d.From, code)) - open;
+            if (how == Conversion.Reference) { estimated.Add((d.To, code)); estimated.Add((d.From, code)); }
         }
-        return net.Where(p => p.Value != 0).Select(p => new ExpenseBalance(p.Key.Item1, p.Key.Item2, p.Value))
+        return net.Where(p => p.Value != 0).Select(p => new ExpenseBalance(p.Key.Item1, p.Key.Item2, p.Value) { Estimated = estimated.Contains(p.Key) })
             .OrderBy(b => b.Currency, StringComparer.Ordinal).ThenByDescending(b => b.Net).ThenBy(b => b.Person).ToArray();
+    }
+
+    /// <summary>
+    /// The amount actually charged for an expense in another currency, from its <c>converted</c> field, or null when
+    /// none was entered.
+    /// </summary>
+    public static Charge? ChargeOf(Entity expense)
+    {
+        if (expense.Data["converted"] is not JsonObject c || ExchangeRates.Code(c["currency"]?.ToString()) is not { } code || !TryDecimal(c["value"], out var value)) return null;
+        var rate = TryDecimal(c["rate"], out var stored) ? stored : TripSummaries.Money(expense.Data["amount"]) is { Amount: not 0 } money ? value / money.Amount : 0;
+        LocalDate? date = c["rate_date"] is JsonValue d && LocalDatePattern.Iso.Parse(d.ToString()).TryGetValue(default, out var day) ? day : null;
+        return new(value, code, rate, date, c["source"]?.ToString());
+    }
+
+    /// <summary>
+    /// A copy of the expense with the amount actually charged in another currency, such as what a card statement shows
+    /// in euros for a payment in NZD. The rate is worked out from both amounts and kept with the day and the source
+    /// <c>card</c>, so the conversion stays as it was (specification section 35). Other fields of <c>converted</c> are kept.
+    /// </summary>
+    public static Entity WithCharge(Entity expense, decimal value, string currency, LocalDate? on = null, string source = "card")
+    {
+        var code = ExchangeRates.Code(currency) ?? throw new DomainException("expense.charge_currency", "A currency is a code with three letters, such as EUR.");
+        var money = TripSummaries.Money(expense.Data["amount"]) ?? throw new DomainException("expense.amount", "The expense needs an amount first.");
+        if (code == money.Currency) throw new DomainException("expense.charge_currency", "The charged amount is for another currency than the expense's.");
+        if (money.Amount == 0) throw new DomainException("expense.amount", "The expense needs an amount first.");
+        var copy = expense.Copy();
+        var converted = copy.Data["converted"] as JsonObject ?? new JsonObject();
+        converted["value"] = Format(value, code);
+        converted["currency"] = code;
+        converted["rate"] = Math.Round(value / money.Amount, 6, MidpointRounding.AwayFromZero).ToString("0.######", CultureInfo.InvariantCulture);
+        converted["rate_date"] = on is { } day ? LocalDatePattern.Iso.Format(day) : converted["rate_date"]?.DeepClone() ?? null;
+        if (converted["rate_date"] is null) converted.Remove("rate_date");
+        converted["source"] = source;
+        copy.Data["converted"] = converted;
+        return copy;
+    }
+
+    /// <summary>A copy of the expense without its charged amount.</summary>
+    public static Entity WithoutCharge(Entity expense) { var copy = expense.Copy(); copy.Data.Remove("converted"); return copy; }
+
+    /// <summary>
+    /// <paramref name="amount"/> of <paramref name="expense"/>, in <paramref name="from"/>, as <paramref name="to"/>:
+    /// unchanged when the currencies match, exactly with the amount charged when one in <paramref name="to"/> was
+    /// entered, otherwise with reference rates as an estimate, and unchanged in <paramref name="from"/> when neither works.
+    /// Results are rounded to the target currency's smallest unit.
+    /// </summary>
+    public static (decimal Amount, string Currency, Conversion How) Convert(Entity expense, decimal amount, string from, string to, ExchangeRates? rates = null)
+    {
+        if (from == to) return (amount, from, Conversion.Same);
+        if (ChargeOf(expense) is { } charge && charge.Currency == to && TripSummaries.Money(expense.Data["amount"]) is { Amount: not 0 } money && money.Currency == from)
+            return (Math.Round(amount * charge.Value / money.Amount, MinorDigits(to), MidpointRounding.AwayFromZero), to, Conversion.Charged);
+        if (rates?.Convert(amount, from, to) is { } reference) return (Math.Round(reference, MinorDigits(to), MidpointRounding.AwayFromZero), to, Conversion.Reference);
+        return (amount, from, Conversion.None);
+    }
+
+    /// <summary>
+    /// What the paid expenses come to in <paramref name="currency"/>: exactly where an amount is in it or was charged
+    /// in it, otherwise estimated with <paramref name="rates"/>. Estimates and budgets are left out.
+    /// </summary>
+    public static ConvertedTotal Total(TripSnapshot trip, string currency, ExchangeRates? rates = null)
+    {
+        decimal exact = 0, estimated = 0; var withoutCharge = 0; var missing = new List<Money>();
+        foreach (var expense in trip.Entities.Values.Where(e => e.Type == "expense"))
+        {
+            if (TripSummaries.Money(expense.Data["amount"]) is not { } money || expense.Data["estimated"] is JsonValue flag && flag.TryGetValue<bool>(out var guess) && guess) continue;
+            var (value, _, how) = Convert(expense, money.Amount, money.Currency, currency, rates);
+            if (how is Conversion.Reference or Conversion.None) withoutCharge++;
+            if (how == Conversion.None) missing.Add(money);
+            else if (how == Conversion.Reference) estimated += value;
+            else exact += value;
+        }
+        var notConverted = missing.GroupBy(m => m.Currency, StringComparer.Ordinal).OrderBy(g => g.Key, StringComparer.Ordinal)
+            .Select(g => new Money(Format(g.Sum(m => m.Amount), g.Key), g.Key)).ToArray();
+        return new(currency, exact, estimated, withoutCharge, notConverted);
     }
 
     /// <summary>
@@ -209,7 +326,7 @@ public static class Expenses
     /// what someone else is owed pay each other first, then whoever owes most pays whoever is owed most. Nobody pays
     /// more than they owe in all, and nobody receives more than they are owed.
     /// </summary>
-    public static IReadOnlyList<Transfer> SettleUp(TripSnapshot trip) => Minimize(Balances(trip));
+    public static IReadOnlyList<Transfer> SettleUp(TripSnapshot trip, string? currency = null, ExchangeRates? rates = null) => Minimize(Balances(trip, currency, rates));
 
     /// <summary>The fewest payments this finds that bring the given balances to zero, per currency.</summary>
     public static IReadOnlyList<Transfer> Minimize(IEnumerable<ExpenseBalance> balances)
@@ -217,19 +334,20 @@ public static class Expenses
         var result = new List<Transfer>();
         foreach (var group in balances.GroupBy(b => b.Currency, StringComparer.Ordinal).OrderBy(g => g.Key, StringComparer.Ordinal))
         {
+            var estimated = group.Any(b => b.Estimated);
             var debtors = group.Where(b => b.Net < 0).Select(b => (b.Person, Amount: -b.Net)).OrderByDescending(x => x.Amount).ThenBy(x => x.Person).ToList();
             var creditors = group.Where(b => b.Net > 0).Select(b => (b.Person, Amount: b.Net)).OrderByDescending(x => x.Amount).ThenBy(x => x.Person).ToList();
             for (var i = 0; i < debtors.Count; i++)
             {
                 var match = creditors.FindIndex(c => c.Amount == debtors[i].Amount);
                 if (match < 0) continue;
-                result.Add(new(debtors[i].Person, creditors[match].Person, group.Key, debtors[i].Amount));
+                result.Add(new(debtors[i].Person, creditors[match].Person, group.Key, debtors[i].Amount) { Estimated = estimated });
                 creditors.RemoveAt(match); debtors.RemoveAt(i--);
             }
             while (debtors.Count > 0 && creditors.Count > 0)
             {
                 var d = debtors[0]; var c = creditors[0]; var amount = Math.Min(d.Amount, c.Amount);
-                result.Add(new(d.Person, c.Person, group.Key, amount));
+                result.Add(new(d.Person, c.Person, group.Key, amount) { Estimated = estimated });
                 debtors.RemoveAt(0); creditors.RemoveAt(0);
                 if (d.Amount > amount) Insert(debtors, (d.Person, d.Amount - amount));
                 if (c.Amount > amount) Insert(creditors, (c.Person, c.Amount - amount));
@@ -249,14 +367,16 @@ public static class Expenses
     /// Items that do not concern the person are left out, as are items already paid. Per other person and currency,
     /// what they owe each other is set off into one payment. Payments the person makes come first, by name.
     /// </summary>
-    public static PaymentPlan Pay(TripSnapshot trip, Guid person, IEnumerable<DebtKey> chosen)
+    /// <remarks>With <paramref name="currency"/>, the items are converted first as in <see cref="Balances"/>.</remarks>
+    public static PaymentPlan Pay(TripSnapshot trip, Guid person, IEnumerable<DebtKey> chosen, string? currency = null, ExchangeRates? rates = null)
     {
         var keys = chosen.ToHashSet();
         var items = Open(trip, person).Where(d => keys.Contains(d.Key)).ToArray();
-        var payments = items.GroupBy(d => (Other: d.From == person ? d.To : d.From, d.Currency))
-            .Select(g => (g.Key.Other, g.Key.Currency, Amount: g.Sum(d => d.From == person ? d.Open : -d.Open)))
+        var converted = items.Select(d => (Debt: d, Value: currency is null || trip.Find(d.Expense) is not { } e ? (d.Open, d.Currency, Conversion.Same) : Convert(e, d.Open, d.Currency, currency, rates))).ToArray();
+        var payments = converted.GroupBy(x => (Other: x.Debt.From == person ? x.Debt.To : x.Debt.From, Currency: x.Value.Item2))
+            .Select(g => (g.Key.Other, g.Key.Currency, Amount: g.Sum(x => x.Debt.From == person ? x.Value.Item1 : -x.Value.Item1), Estimated: g.Any(x => x.Value.Item3 == Conversion.Reference)))
             .Where(x => x.Amount != 0)
-            .Select(x => x.Amount > 0 ? new Transfer(person, x.Other, x.Currency, x.Amount) : new Transfer(x.Other, person, x.Currency, -x.Amount))
+            .Select(x => (x.Amount > 0 ? new Transfer(person, x.Other, x.Currency, x.Amount) : new Transfer(x.Other, person, x.Currency, -x.Amount)) with { Estimated = x.Estimated })
             .OrderBy(t => t.Currency, StringComparer.Ordinal).ThenBy(t => t.From == person ? 0 : 1)
             .ThenBy(t => trip.Find(t.From == person ? t.To : t.From)?.Title, StringComparer.Ordinal).ThenBy(t => t.From == person ? t.To : t.From).ToArray();
         return new(person, items, payments);
