@@ -55,6 +55,11 @@ public sealed record ExportOptions
     /// is shown in. Null uses the trip's default time zone and shows a time in another zone in that zone's local time.
     /// </summary>
     public string? TimeZone { get; init; }
+    /// <summary>
+    /// More time zones whose local times are shown beside each time, such as home. The days and the date range still
+    /// follow <see cref="TimeZone"/> or the trip's zone.
+    /// </summary>
+    public IReadOnlyList<string> OtherTimeZones { get; init; } = [];
 
     public bool Includes(ExportParts part) => (Parts & part) == part;
     public bool Compact => Detail == ExportDetail.Compact;
@@ -64,6 +69,14 @@ public sealed record ExportOptions
     public DateTimeZone Zone(TripSnapshot trip) => TimeZone is { } id
         ? DateTimeZoneProviders.Tzdb.GetZoneOrNull(id) ?? throw new DomainException("export.timezone", "Unknown time zone: " + id)
         : ScheduleQueries.TripZone(trip);
+
+    /// <summary>The zones of <see cref="OtherTimeZones"/> without the export's own zone and repeats.</summary>
+    public IReadOnlyList<DateTimeZone> OtherZones(TripSnapshot trip)
+    {
+        var main = Zone(trip).Id;
+        return [.. OtherTimeZones.Select(id => DateTimeZoneProviders.Tzdb.GetZoneOrNull(id) ?? throw new DomainException("export.timezone", "Unknown time zone: " + id))
+            .Where(z => z.Id != main).DistinctBy(z => z.Id)];
+    }
 
     /// <summary>Letter in the countries that use it, A4 everywhere else.</summary>
     public static PaperSize PaperFor(CultureInfo culture)
@@ -87,6 +100,10 @@ public sealed record ExportOptions
     /// <summary>A time zone id such as <c>Pacific/Auckland</c> or <c>UTC</c> in its canonical spelling, or null for none.</summary>
     public static string? ParseZone(string? text) =>
         string.IsNullOrWhiteSpace(text) ? null : DateTimeZoneProviders.Tzdb.GetZoneOrNull(text.Trim())?.Id ?? throw new DomainException("export.timezone", "Use a time zone such as Pacific/Auckland or UTC.");
+
+    /// <summary>Comma-separated time zones such as <c>Europe/Berlin,UTC</c>, in their canonical spelling.</summary>
+    public static IReadOnlyList<string> ParseZones(string? text) =>
+        [.. (text ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(z => ParseZone(z)!).Distinct()];
 
     public static LocalDate? ParseDate(string? text) =>
         string.IsNullOrWhiteSpace(text) ? null : LocalDatePattern.Iso.Parse(text.Trim()) is { Success: true } r ? r.Value : throw new DomainException("export.date", "Use dates like 2027-05-14.");

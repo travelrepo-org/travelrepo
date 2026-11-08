@@ -1159,6 +1159,8 @@ Times are shown in the trip's default time zone, which the export names once nea
 
 An export can instead name an explicit time zone, for example to read a plan from home. Then every exact time, the days the schedule is grouped by, the date range, the time line and the days of comments follow that zone, and the zone is named at the top in place of the trip's. No time carries another zone's name. Approximate check-in and check-out times keep their planned day. Calendar files are unaffected, since they store exact times that calendar applications show in their own zone.
 
+An export can also name more time zones to show beside each time, for example home and the next stop. The days stay those of the export's own zone. Each exact, window or approximate time then also appears in each of these zones, named by its city, with the date when the day there differs from the day it is listed on, for example "Berlin 31 Mar 23:00–23:30". The header names all zones.
+
 Attached documents are numbered A1, A2 and so on in order of first use, and every entry that uses one refers to its number. Renderers that cannot embed files list them by name.
 
 Packing list exports show, for everyone, who brings each item and whether it is done; for one person, the items that person brings and whether that person has packed them. An export can also show only the items nobody brings yet. A batch export writes one file per person who brings at least one item. CSV uses the separator that spreadsheets expect for the reader's language and prefixes cells that would start a formula with an apostrophe.

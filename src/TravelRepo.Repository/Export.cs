@@ -22,7 +22,7 @@ public static partial class TripExport
             .Append("body{font:15px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:#0f2a3d;max-width:860px;margin:40px auto;padding:0 20px}")
             .Append("h1{font-size:30px;margin:0 0 4px}h2{font-size:19px;margin:32px 0 10px;padding-bottom:6px;border-bottom:2px solid #0f7b7a}h3{font-size:14px;margin:14px 0 2px;color:#4d6170}")
             .Append(".meta{color:#4d6170;margin:0 0 8px}.day{color:#0f7b7a;font-weight:600;font-size:13px;letter-spacing:.04em;text-transform:uppercase;margin-right:8px}")
-            .Append("table{border-collapse:collapse;width:100%}td{padding:8px 6px;vertical-align:top;border-bottom:1px solid #e1e7e8}td.time{width:150px;color:#4d6170;white-space:nowrap}td.box{width:22px;font-size:17px;line-height:1.2}")
+            .Append("table{border-collapse:collapse;width:100%}td{padding:8px 6px;vertical-align:top;border-bottom:1px solid #e1e7e8}td.time{width:150px;color:#4d6170;white-space:nowrap}td.time .also{font-size:.85em;color:#6b7c88}td.box{width:22px;font-size:17px;line-height:1.2}")
             .Append(".title{font-weight:600}.sub{color:#4d6170;font-size:13px}.detail{color:#4d6170;font-size:13px;margin-top:2px}.tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:10px;background:#eef2f2;color:#4d6170;margin-left:6px}")
             .Append(".done .title{color:#76889a;text-decoration:line-through}tr.night td{background:#f4f1f8;color:#5b4a73;font-size:13px;border-bottom:none}")
             .Append(".comments{margin:6px 0 2px;padding:6px 10px;background:#f5f8f8;border-left:3px solid #b9dcd9;border-radius:0 6px 6px 0;font-size:13px}.comment+.comment{margin-top:6px}.who{font-weight:600}.when{color:#76889a;font-size:12px;margin-left:6px}")
@@ -42,7 +42,9 @@ public static partial class TripExport
                 if (row.Kind == ExportRowKind.Night) { s.Append("<tr class=\"night\"><td class=\"time\"></td><td>").Append(E(row.Summary is { Length: > 0 } n ? row.Title + " · " + n : row.Title)).Append("</td></tr>"); continue; }
                 s.Append(row.Kind == ExportRowKind.Check && row.Checked ? "<tr class=\"done\">" : "<tr>");
                 if (row.Kind == ExportRowKind.Check) s.Append("<td class=\"box\">").Append(row.Checked ? "&#9745;" : "&#9744;").Append("</td>");
-                s.Append("<td class=\"time\">").Append(E(row.Lead)).Append("</td><td><div class=\"title\">").Append(E(row.Title));
+                s.Append("<td class=\"time\">").Append(E(row.Lead));
+                foreach (var other in row.OtherTimes) s.Append("<div class=\"also\">").Append(E(other)).Append("</div>");
+                s.Append("</td><td><div class=\"title\">").Append(E(row.Title));
                 if (!string.IsNullOrEmpty(row.Status)) s.Append("<span class=\"tag\">").Append(E(row.Status)).Append("</span>");
                 s.Append("</div>");
                 if (row.Summary is { Length: > 0 } summary) s.Append("<div class=\"sub\">").Append(E(summary)).Append("</div>");
@@ -91,6 +93,7 @@ public static partial class TripExport
                 if (!string.IsNullOrEmpty(row.Status)) s.Append(" [").Append(row.Status).Append(']');
                 s.Append('\n');
                 var indent = row.Kind == ExportRowKind.Check ? "  " : new string(' ', Math.Min(lead.Length, 8));
+                foreach (var other in row.OtherTimes) s.Append(indent).Append(other).Append('\n');
                 if (row.Kind != ExportRowKind.Check && row.Summary is { Length: > 0 } summary) s.Append(indent).Append(summary).Append('\n');
                 foreach (var detail in row.DetailLines) s.Append(indent).Append(detail).Append('\n');
                 if (row.AttachmentLabels.Count > 0) s.Append(indent).Append(AttachmentNote(document, row)).Append('\n');

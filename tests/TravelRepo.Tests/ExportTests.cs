@@ -350,6 +350,48 @@ public class ExportTests
     }
 
     [Fact]
+    public void MoreTimeZonesShowEachTimeBesideTheMainOne()
+    {
+        var early = Item("Early train", "2027-04-02T06:00:00", "2027-04-02T06:30:00");
+        var hike = Item("Hike", "2027-04-02T09:00:00", "2027-04-02T15:00:00");
+        var flight = Entity.Create("schedule_item", "Flight home");
+        flight.Data["time"] = new JsonObject { ["precision"] = "exact", ["start"] = new ZonedTime("2027-04-03T10:00:00", Zone).ToJson(), ["end"] = new ZonedTime("2027-04-03T15:00:00", "Europe/Berlin").ToJson() };
+        var inn = Entity.Create("schedule_item", "Inn"); inn.Data["components"] = new JsonObject { ["accommodation"] = new JsonObject() };
+        inn = Stays.WithSpan(inn, new ZonedTime("2027-04-01T16:00:00", Zone), new ZonedTime("2027-04-02T10:00:00", Zone));
+        var trip = Trip(early, hike, flight, inn);
+        IReadOnlyList<string> Others(Itinerary it, string title) => it.Days.SelectMany(d => d.Entries).First(e => e.Item.Title == title).OtherTimes;
+
+        // The trip's own zone is left out of the others, and days stay those of Tokyo.
+        var options = new ExportOptions { OtherTimeZones = ["Europe/Berlin", "UTC", Zone], Parts = ExportParts.Schedule | ExportParts.Stays };
+        var it = TripItinerary.Build(trip, culture: Invariant, options: options);
+        Assert.Equal(["Berlin 1 Apr 23:00–23:30", "UTC 1 Apr 21:00–21:30"], Others(it, "Early train"));
+        Assert.Equal(["Berlin 02:00–08:00", "UTC 00:00–06:00"], Others(it, "Hike"));
+        Assert.Equal("10:00 JST – 15:00 CEST", it.Days.SelectMany(d => d.Entries).Single(e => e.Item.Title == "Flight home").Time);
+        Assert.Equal(["Berlin 03:00–15:00", "UTC 01:00–13:00"], Others(it, "Flight home"));
+        Assert.Equal(["Berlin 09:00", "UTC 07:00"], it.Days.SelectMany(d => d.Entries).Single(e => e.Role == ItineraryRole.CheckIn).OtherTimes);
+        Assert.Equal(new LocalDate(2027, 4, 2), it.Days.Single(d => d.Entries.Any(e => e.Item.Title == "Early train")).Date);
+
+        var document = TripExport.Document(trip, options, culture: Invariant);
+        Assert.Equal("Time zones: Tokyo (JST, UTC+9) · Berlin (CEST, UTC+2) · UTC (UTC+0)", document.ZoneNote);
+        Assert.Equal(["Berlin 1 Apr 23:00–23:30", "UTC 1 Apr 21:00–21:30"], document.Sections.SelectMany(s => s.Rows).Single(r => r.Title == "Early train").OtherTimes);
+        Assert.Contains("(Berlin Thu 1 Apr, 09:00; UTC Thu 1 Apr, 07:00)", string.Join(" | ", document.Sections.SelectMany(s => s.Rows).SelectMany(r => r.DetailLines.Prepend(r.Summary ?? ""))));
+        var text = TripExport.Text(document);
+        Assert.Contains("06:00–06:30  Early train [idea]\n        Berlin 1 Apr 23:00–23:30\n        UTC 1 Apr 21:00–21:30\n", text);
+        Assert.Contains("<div class=\"also\">Berlin 1 Apr 23:00–23:30</div>", TripExport.Html(document));
+
+        // With Berlin as the main zone, Tokyo becomes the other one.
+        var berlin = TripItinerary.Build(trip, culture: Invariant, options: options with { TimeZone = "Europe/Berlin", OtherTimeZones = [Zone] });
+        Assert.Equal("23:00–23:30", berlin.Days.SelectMany(d => d.Entries).Single(e => e.Item.Title == "Early train").Time);
+        Assert.Equal(["Tokyo 2 Apr 06:00–06:30"], Others(berlin, "Early train"));
+
+        // Without other zones nothing is added.
+        Assert.All(TripItinerary.Build(trip, culture: Invariant).Days.SelectMany(d => d.Entries), e => Assert.Empty(e.OtherTimes));
+        Assert.Equal(["Europe/Berlin", "UTC"], ExportOptions.ParseZones("Europe/Berlin, UTC,Europe/Berlin"));
+        Assert.Empty(ExportOptions.ParseZones(null));
+        Assert.Throws<DomainException>(() => TripItinerary.Build(trip, options: new ExportOptions { OtherTimeZones = ["Middle/Earth"] }));
+    }
+
+    [Fact]
     public void GermanDatesHaveAFullStopAfterTheDayAndEnglishOnesDoNot()
     {
         var hike = Item("Hike", "2027-04-02T09:00:00", "2027-04-02T15:00:00");
