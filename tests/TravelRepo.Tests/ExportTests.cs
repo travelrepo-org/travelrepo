@@ -198,14 +198,39 @@ public class ExportTests
     }
 
     [Fact]
-    public void PersonalCostsShowWhatThatPersonPaid()
+    public void PersonalCostsShowThatPersonsShareAndWhatIsOpen()
     {
-        Entity Expense(string title, string value, Entity payer) { var e = Entity.Create("expense", title); e.Data["amount"] = new JsonObject { ["value"] = value, ["currency"] = "JPY" }; e.Data["paid_by"] = new JsonArray(payer.Id.ToString()); return e; }
+        Entity Expense(string title, string value, Entity payer, bool estimated = false) { var e = Entity.Create("expense", title); e.Data["amount"] = new JsonObject { ["value"] = value, ["currency"] = "JPY" }; e.Data["estimated"] = estimated; e.Data["paid_by"] = new JsonArray(payer.Id.ToString()); return e; }
         var budget = Entity.Create("budget", "Food"); budget.Data["amount"] = new JsonObject { ["value"] = "50000", ["currency"] = "JPY" };
-        var trip = Trip(Expense("Ramen", "2400", Mia), Expense("Taxi", "3000", Noah), budget);
-        Assert.Equal(5400m, TripItinerary.Build(trip, culture: Invariant).Costs.Single().Paid);
+        var ramen = Expense("Ramen", "2400", Mia); var taxi = Expense("Taxi", "3000", Noah);
+        var snacks = Expense("Snacks", "1000", Noah, estimated: true);
+        var trip = Trip(ramen, taxi, snacks, budget);
+        taxi = Expenses.Settle(trip, taxi, Mia.Id, new LocalDate(2027, 3, 2));
+        // Noah's sake is his alone, so it does not concern Mia.
+        var sake = Expenses.WithSplit(Expense("Sake", "1800", Noah), SplitMethod.Equal, [(Noah.Id, null)]);
+        trip = Trip(ramen, taxi, snacks, sake, budget);
+
+        Assert.Equal(7200m, TripItinerary.Build(trip, culture: Invariant).Costs.Single().Paid);
+        // Mia's half of the ramen and the taxi, and of the snacks still estimated; budgets are for the whole trip.
         var mine = TripItinerary.Build(trip, culture: Invariant, options: new ExportOptions { Person = Mia.Id }).Costs.Single();
-        Assert.Equal(2400m, mine.Paid); Assert.Equal(0m, mine.Budget);
+        Assert.Equal((2700m, 500m, 0m), (mine.Paid, mine.Estimated, mine.Budget));
+
+        var costs = TripExport.Document(trip, new ExportOptions { Person = Mia.Id, Parts = ExportParts.Costs }, culture: Invariant).Sections.Single();
+        Assert.Equal("2,700.00 share · 500.00 estimated", costs.Rows[0].Title);
+        Assert.Equal(["Ramen", "Snacks", "Taxi"], costs.Rows.Skip(1).Where(r => r.Kind == ExportRowKind.Item && !r.Title.Contains("pays", StringComparison.Ordinal)).Select(r => r.Title));
+        var ramenRow = costs.Rows.Single(r => r.Title == "Ramen");
+        Assert.Equal("paid by Mia · share 1,200.00 JPY", ramenRow.Summary);
+        Assert.Equal(["Noah owes Mia 1,200.00 JPY"], ramenRow.Details);
+        Assert.Equal(["Mia paid back Noah 1,500.00 JPY"], costs.Rows.Single(r => r.Title == "Taxi").Details);
+        Assert.Equal("To settle up", costs.Rows.Single(r => r.Kind == ExportRowKind.Heading).Title);
+        Assert.Equal(("Noah pays Mia", "1,200.00 JPY"), (costs.Rows[^1].Title, costs.Rows[^1].Lead));
+
+        // The whole trip's export says what is open per expense and how to settle up.
+        var all = TripExport.Document(trip, new ExportOptions { Parts = ExportParts.Costs }, culture: Invariant).Sections.Single();
+        Assert.Equal("paid by Mia · 1,200.00 JPY open", all.Rows.Single(r => r.Title == "Ramen").Summary);
+        Assert.Equal("paid by Noah · settled", all.Rows.Single(r => r.Title == "Taxi").Summary);
+        Assert.Contains(all.Rows, r => r.Title == "Sake");
+        Assert.Contains("Noah pays Mia", TripExport.Text(TripExport.Document(trip, new ExportOptions { Parts = ExportParts.Costs }, culture: Invariant)));
     }
 
     [Fact]

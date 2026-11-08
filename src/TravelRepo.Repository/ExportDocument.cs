@@ -292,15 +292,32 @@ public static partial class TripExport
 
         if (options.Includes(ExportParts.Costs) && it.Costs.Count > 0)
         {
-            var rows = it.Costs.Select(c => new ExportRow(c.Paid.ToString("N2", culture) + " " + labels.Paid + (c.Estimated > 0 ? " · " + c.Estimated.ToString("N2", culture) + " " + labels.Estimated : "") + (c.Budget > 0 ? " · " + c.Budget.ToString("N2", culture) + " " + labels.Budget : ""), c.Currency)).ToList();
+            var who = options.Person;
+            string Name(Guid id) => trip.Find(id)?.Title ?? "";
+            string Amount(decimal value, string currency) => value.ToString("N2", culture) + " " + currency;
+            var rows = it.Costs.Select(c => new ExportRow(c.Paid.ToString("N2", culture) + " " + (who is null ? labels.Paid : labels.Share) + (c.Estimated > 0 ? " · " + c.Estimated.ToString("N2", culture) + " " + labels.Estimated : "") + (c.Budget > 0 ? " · " + c.Budget.ToString("N2", culture) + " " + labels.Budget : ""), c.Currency)).ToList();
             if (!compact)
                 foreach (var expense in trip.Entities.Values.Where(e => e.Type == "expense" && filter.IncludesExpense(e)).OrderBy(e => e.Title, StringComparer.Create(culture, false)))
                 {
                     if (TripSummaries.Money(expense.Data["amount"]) is not { } money) continue;
                     var payers = (expense.Data["paid_by"] as JsonArray ?? []).Select(n => Guid.TryParse(n?.ToString(), out var id) ? trip.Find(id)?.Title : null).OfType<string>().ToArray();
                     var estimated = expense.Data["estimated"] is JsonValue v && v.TryGetValue<bool>(out var flag) && flag;
-                    rows.Add(new(expense.Title, money.Amount.ToString("N2", culture) + " " + money.Currency, Join([payers.Length > 0 ? string.Format(culture, labels.PaidBy, string.Join(", ", payers)) : null, estimated ? labels.Estimated : null]), Attachments: Attach(expense, expense.Title)) { Comments = Comments([expense]) });
+                    // Who owes whom for it: in one person's export the debts that concern that person, otherwise how much is open.
+                    var split = Expenses.Split(trip, expense);
+                    var debts = split.Debts.Where(d => who is not { } p || d.From == p || d.To == p).Select(d => d.IsSettled
+                        ? string.Format(culture, labels.PaidBack, Name(d.From), Name(d.To), Amount(d.Amount, d.Currency))
+                        : d.Open > 0 ? string.Format(culture, labels.Owes, Name(d.From), Name(d.To), Amount(d.Open, d.Currency)) : string.Format(culture, labels.Owes, Name(d.To), Name(d.From), Amount(-d.Open, d.Currency))).ToArray();
+                    var share = who is { } me && split.People.Contains(me) ? string.Format(culture, labels.ShareOf, Amount(split.ShareOf(me), money.Currency)) : null;
+                    var state = who is null && split.Debts.Count > 0 ? split.IsSettled ? labels.Settled : string.Format(culture, labels.OpenAmount, Amount(split.Open, money.Currency)) : null;
+                    rows.Add(new(expense.Title, money.Amount.ToString("N2", culture) + " " + money.Currency, Join([payers.Length > 0 ? string.Format(culture, labels.PaidBy, string.Join(", ", payers)) : null, share, estimated ? labels.Estimated : null, state]), who is null ? null : debts, Attachments: Attach(expense, expense.Title)) { Comments = Comments([expense]) });
                 }
+            // The fewest payments that settle everything; one person's export keeps those they make or receive.
+            var transfers = Expenses.SettleUp(trip).Where(t => who is not { } p || t.From == p || t.To == p).ToArray();
+            if (transfers.Length > 0)
+            {
+                rows.Add(new(labels.SettleUp, Kind: ExportRowKind.Heading));
+                rows.AddRange(transfers.Select(t => new ExportRow(string.Format(culture, labels.PaysTo, Name(t.From), Name(t.To)), Amount(t.Amount, t.Currency))));
+            }
             sections.Add(new(ExportParts.Costs, labels.Costs, rows));
         }
 
