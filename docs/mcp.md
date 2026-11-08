@@ -43,7 +43,7 @@ Each server serves exactly one trip folder. Add one entry per trip you want the 
 | `rename_packing_list`, `delete_packing_list`, `update_packing_item` | yes | Rename a list, delete a list with its items (items also on another list stay), change an item's title, group or quantity, or move it to another list. `delete_entity` deletes a single item. |
 | `get_weather` | no | The weather the client last downloaded for the trip, from its local cache: per day, per item with the outdoor estimate and warnings, each with its age. Never fetches; says so when weather is off in the client. |
 | `list_connections` | no | Changes from one journey to the next, such as a layover: both journeys, the place and the time to change, across time zones. |
-| `get_bookings` | no | Bookings with provider, number, status, price, free cancellation, travellers, their plans and files. |
+| `get_bookings` | no | Bookings with provider, number, status, price, free cancellation, travellers, their plans, files and expenses; marks bookings with a price but no expense yet. |
 | `get_costs` | no | Totals per currency with budgets, every expense with payers, what it belongs to, everyone's part and what is still open, booking prices, each person's balance and the fewest payments that settle up. With `in`, totals, balances and settle-up also in one currency: exactly with amounts charged, otherwise with the client's cached exchange rates, marked as estimated. |
 | `convert_currency` | no | Converts an amount with the European Central Bank reference rates the client last downloaded. Never fetches; says so when rates are off in the client. |
 | `add_expense` | yes | Adds an expense from an amount as typed ("12,50"), a currency code, payers and what it belongs to. Nothing is converted. |

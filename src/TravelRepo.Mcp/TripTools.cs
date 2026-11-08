@@ -478,7 +478,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
     };
 
     [McpServerTool(Name = "get_bookings", Title = "Read the bookings", ReadOnly = true, Idempotent = true, OpenWorld = false)]
-    [Description("The trip's bookings with provider, booking number, status, price, free cancellation deadline, travellers, the plans they are for (with their times) and attached files.")]
+    [Description("The trip's bookings with provider, booking number, status, price, free cancellation deadline, travellers, the plans they are for (with their times), attached files and the expenses recorded for them; `missing_expense` marks a booking with a price but no expense yet (add one with add_expense and belongs_to).")]
     public Task<string> GetBookings(CancellationToken ct = default) => Run(async () =>
     {
         var trip = (await repository.ReadAsync(ct)).Trip;
@@ -501,7 +501,9 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
             ["free_cancellation_until"] = booking.Data["cancellation"]?["free_until"]?.DeepClone(),
             ["travelers"] = Names(trip, booking.Data["travelers"]),
             ["plans"] = new JsonArray(plans.Select(e => (JsonNode)Summary(trip, e)).ToArray()),
-            ["files"] = new JsonArray(TripCommands.AttachedDocuments(trip, booking).Select(d => (JsonNode)new JsonObject { ["id"] = d.Id.ToString(), ["name"] = d.Title }).ToArray())
+            ["files"] = new JsonArray(TripCommands.AttachedDocuments(trip, booking).Select(d => (JsonNode)new JsonObject { ["id"] = d.Id.ToString(), ["name"] = d.Title }).ToArray()),
+            ["expenses"] = new JsonArray(Expenses.ForBooking(trip, booking.Id).Select(e => (JsonNode)new JsonObject { ["id"] = e.Id.ToString(), ["title"] = e.Title }).ToArray()),
+            ["missing_expense"] = Expenses.WithoutExpense(trip).Any(b => b.Id == booking.Id) ? true : null
         };
     }
 

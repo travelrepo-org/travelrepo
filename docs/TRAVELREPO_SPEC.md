@@ -1006,6 +1006,8 @@ What is still open is what is owed minus what is marked as paid. When the split 
 
 Clients work out balances per person and currency from what is still open, and may suggest the payments that settle them. Each currency is settled on its own; amounts are never converted for this. A person may choose which open debts to settle now; what they owe each other person for the chosen debts is set off into one payment per person and currency.
 
+A booking's `price` says what it costs; it is not an expense. An expense that belongs to a booking names it in `related`. Clients may point out bookings with a price but no such expense, which are missing from the costs, and offer to record one from the booking's title and price.
+
 Lists in `split.parts` and `settled` are entries of people. They merge per person (and `to`), so people who pay back at the same time on different devices do not conflict. Deleting a person removes their entries.
 
 ## 35. Historical currency conversion

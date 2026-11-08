@@ -522,6 +522,36 @@ public static class Expenses
     private static Dictionary<Guid, decimal> ValuesOf(TripSnapshot trip, Entity expense) =>
         ReadSplit(trip, expense).Parts.Where(p => p.Value is not null).ToDictionary(p => p.Person, p => p.Value!.Value);
 
+    /// <summary>The expenses that belong to <paramref name="booking"/> through their <c>related</c> entries.</summary>
+    public static IReadOnlyList<Entity> ForBooking(TripSnapshot trip, Guid booking) => trip.Entities.Values
+        .Where(e => e.Type == "expense" && (e.Data["related"] as JsonArray ?? []).Any(r => Id(r?["id"]) == booking)).OrderBy(e => e.Title, StringComparer.Ordinal).ToArray();
+
+    /// <summary>
+    /// Bookings with a price but no expense yet: what is booked but not recorded as paid, so it is missing from the
+    /// costs and from who owes whom. Cancelled bookings and ideas are left out. In order of title.
+    /// </summary>
+    public static IReadOnlyList<Entity> WithoutExpense(TripSnapshot trip)
+    {
+        var covered = trip.Entities.Values.Where(e => e.Type == "expense").SelectMany(e => (e.Data["related"] as JsonArray ?? []).Select(r => Id(r?["id"]))).OfType<Guid>().ToHashSet();
+        return trip.Entities.Values.Where(b => b.Type == "booking" && b.Data["status"]?.ToString() is not ("cancelled" or "idea") && TripSummaries.Money(b.Data["price"]) is { Amount: not 0 } && !covered.Contains(b.Id))
+            .OrderBy(b => b.Title, StringComparer.Ordinal).ToArray();
+    }
+
+    /// <summary>
+    /// A new expense for a booking: its title, its price as the amount and a link back to it, not an estimate. Who
+    /// paid and how it is divided are left to the caller; without a split it is divided equally among all travellers.
+    /// </summary>
+    public static Entity FromBooking(Entity booking)
+    {
+        if (booking.Type != "booking") throw new DomainException("expense.booking", "Only a booking can become an expense.");
+        var price = TripSummaries.Money(booking.Data["price"]) ?? throw new DomainException("expense.amount", "The booking has no price.");
+        var expense = Entity.Create("expense", booking.Title);
+        expense.Data["amount"] = new JsonObject { ["value"] = price.Value, ["currency"] = price.Currency };
+        expense.Data["estimated"] = false;
+        expense.Data["related"] = new JsonArray(new JsonObject { ["type"] = "booking", ["id"] = booking.Id.ToString() });
+        return expense;
+    }
+
     /// <summary>Semantic checks for splits and paid marks; references to missing people are reported by <see cref="SemanticValidation"/>.</summary>
     public static IEnumerable<Diagnostic> Validate(TripSnapshot trip)
     {
