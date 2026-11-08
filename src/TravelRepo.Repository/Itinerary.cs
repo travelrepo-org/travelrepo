@@ -116,7 +116,9 @@ public static class TripItinerary
     {
         labels ??= new(); culture ??= CultureInfo.CurrentCulture; options ??= new();
         var filter = new ExportFilter(trip, options);
-        var zone = ScheduleQueries.TripZone(trip);
+        var zone = options.Zone(trip);
+        // With an explicit time zone, every time is shown in it, whichever zone it was planned in.
+        var fixedZone = options.TimeZone is not null;
         static string Clock(ZonedDateTime t) => t.TimeOfDay.ToString("HH:mm", CultureInfo.InvariantCulture);
         string Short(Instant i, DateTimeZone z) => Clock(i.InZone(z)) + " " + ExportTimes.Abbreviation(z, i);
         var parents = trip.Entities.Values.Where(e => e.Data["children"] is JsonArray { Count: > 0 }).ToArray();
@@ -127,8 +129,8 @@ public static class TripItinerary
         foreach (var item in trip.Entities.Values.Where(e => e.Type == "schedule_item" && e.Data["children"] is not JsonArray { Count: > 0 } && !inRuns.Contains(e.Id) && filter.Includes(e)))
         {
             var span = ScheduleQueries.Span(trip, item);
-            var startZone = span.StartZone is { } sz ? DateTimeZoneProviders.Tzdb.GetZoneOrNull(sz) ?? zone : zone;
-            var endZone = span.EndZone is { } ez ? DateTimeZoneProviders.Tzdb.GetZoneOrNull(ez) ?? startZone : startZone;
+            var startZone = !fixedZone && span.StartZone is { } sz ? DateTimeZoneProviders.Tzdb.GetZoneOrNull(sz) ?? zone : zone;
+            var endZone = !fixedZone && span.EndZone is { } ez ? DateTimeZoneProviders.Tzdb.GetZoneOrNull(ez) ?? startZone : startZone;
             // When either end is in another zone, both ends show their local time with its short name.
             var foreign = startZone.Id != zone.Id || endZone.Id != zone.Id;
             string At(Instant i, DateTimeZone z) => foreign ? Short(i, z) : Clock(i.InZone(zone));
@@ -161,6 +163,7 @@ public static class TripItinerary
         {
             var main = run.Main; var place = main.Place is { } p ? trip.Find(p) : null;
             var stayZone = DateTimeZoneProviders.Tzdb.GetZoneOrNull(main.Zone) ?? zone;
+            var shownZone = fixedZone ? zone : stayZone;
             void Add(ItineraryRole role, LocalDate day, Stay? source, LocalTime fallback)
             {
                 if (!filter.InRange(day, day)) return;
@@ -169,7 +172,7 @@ public static class TripItinerary
                 Instant? at = null;
                 try { at = value?.ToInstant(); } catch (DomainException) { }
                 var sort = at ?? day.At(fallback).InZoneLeniently(stayZone).ToInstant();
-                var time = at is { } exact && !approximate ? (stayZone.Id == zone.Id ? Clock(exact.InZone(zone)) : Short(exact, stayZone)) : "";
+                var time = at is { } exact && !approximate ? (shownZone.Id == zone.Id ? Clock(exact.InZone(zone)) : Short(exact, shownZone)) : "";
                 var item = (source ?? main).Item;
                 entries.Add((sort, day, new ItineraryEntry(item, ScheduleKind.Accommodation, time, place?.Title != item.Title ? place?.Title : null, ScheduleQueries.Participants(trip, item).Select(x => x.Title).ToArray(),
                     labels.Status(item.Data["status"]?.ToString()) is { Length: > 0 } st ? st : null, run.Stays.Select(x => Reference(x.Item)).FirstOrDefault(r => r is not null), null, null, role)));

@@ -50,10 +50,20 @@ public sealed record ExportOptions
     public bool Timeline { get; init; } = true;
     /// <summary>Whether rows carry the comments on what they stand for.</summary>
     public bool Comments { get; init; }
+    /// <summary>
+    /// A time zone from the time zone database, such as <c>Pacific/Auckland</c>, that every time, day and date range
+    /// is shown in. Null uses the trip's default time zone and shows a time in another zone in that zone's local time.
+    /// </summary>
+    public string? TimeZone { get; init; }
 
     public bool Includes(ExportParts part) => (Parts & part) == part;
     public bool Compact => Detail == ExportDetail.Compact;
     public bool HasRange => From is not null || To is not null;
+
+    /// <summary>The zone the export shows times in: <see cref="TimeZone"/>, or else the trip's default time zone.</summary>
+    public DateTimeZone Zone(TripSnapshot trip) => TimeZone is { } id
+        ? DateTimeZoneProviders.Tzdb.GetZoneOrNull(id) ?? throw new DomainException("export.timezone", "Unknown time zone: " + id)
+        : ScheduleQueries.TripZone(trip);
 
     /// <summary>Letter in the countries that use it, A4 everywhere else.</summary>
     public static PaperSize PaperFor(CultureInfo culture)
@@ -74,6 +84,10 @@ public sealed record ExportOptions
         return parts;
     }
 
+    /// <summary>A time zone id such as <c>Pacific/Auckland</c> or <c>UTC</c> in its canonical spelling, or null for none.</summary>
+    public static string? ParseZone(string? text) =>
+        string.IsNullOrWhiteSpace(text) ? null : DateTimeZoneProviders.Tzdb.GetZoneOrNull(text.Trim())?.Id ?? throw new DomainException("export.timezone", "Use a time zone such as Pacific/Auckland or UTC.");
+
     public static LocalDate? ParseDate(string? text) =>
         string.IsNullOrWhiteSpace(text) ? null : LocalDatePattern.Iso.Parse(text.Trim()) is { Success: true } r ? r.Value : throw new DomainException("export.date", "Use dates like 2027-05-14.");
 }
@@ -85,9 +99,9 @@ public sealed record ExportOptions
 /// </remarks>
 public sealed class ExportFilter(TripSnapshot trip, ExportOptions options)
 {
-    private readonly DateTimeZone zone = ScheduleQueries.TripZone(trip);
+    private readonly DateTimeZone zone = options.Zone(trip);
 
-    /// <summary>The first and last day an item touches, in the trip's time zone, or null when it has no time.</summary>
+    /// <summary>The first and last day an item touches, in the export's time zone, or null when it has no time.</summary>
     public (LocalDate First, LocalDate Last)? Days(Entity item)
     {
         var span = ScheduleQueries.Span(trip, item);

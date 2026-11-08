@@ -53,8 +53,8 @@ public sealed record ExportSection(ExportParts Part, string Title, IReadOnlyList
 }
 
 /// <summary>A plan on a day's time line, cut off at the day's edges.</summary>
-/// <param name="Start">Minutes after midnight in the trip's time zone.</param>
-/// <param name="End">Minutes after midnight in the trip's time zone; at most 1440.</param>
+/// <param name="Start">Minutes after midnight in the export's time zone.</param>
+/// <param name="End">Minutes after midnight in the export's time zone; at most 1440.</param>
 /// <param name="Title">The plan's title.</param>
 /// <param name="Tone">The kind of plan, as in <see cref="ExportRow.Tone"/>.</param>
 /// <param name="Lane">Column of the block when plans overlap, starting at 0.</param>
@@ -118,7 +118,7 @@ public static partial class TripExport
         var zone = DateTimeZoneProviders.Tzdb.GetZoneOrNull(it.Zone) ?? DateTimeZone.Utc;
         var compact = options.Compact;
         var sections = new List<ExportSection>();
-        var talk = options.Comments ? new ExportComments(trip, labels, culture) : null;
+        var talk = options.Comments ? new ExportComments(trip, labels, culture, zone) : null;
         IReadOnlyList<ExportComment> Comments(IEnumerable<Entity> owners) => talk?.On(owners) ?? [];
 
         var attachments = new List<(Entity Document, List<string> UsedBy)>();
@@ -137,9 +137,15 @@ public static partial class TripExport
         }
         string Date(LocalDate d) => d.ToString(DatePatterns.For("d MMM", culture), culture);
         string Range(LocalDate a, LocalDate b) => a == b ? Date(a) : Date(a) + " – " + Date(b);
-        // A time in another zone than the trip's carries that zone's short name.
+        // A time in another zone than the trip's carries that zone's short name. With an explicit time zone, an exact
+        // time is shown in that zone instead; an approximate one keeps its planned day.
         string Clock(ZonedTime t, bool approximate)
         {
+            if (options.TimeZone is not null && !approximate)
+            {
+                try { var shown = t.ToInstant().InZone(zone); return shown.Date.ToString(DatePatterns.For("ddd d MMM", culture), culture) + ", " + shown.TimeOfDay.ToString("HH:mm", CultureInfo.InvariantCulture); }
+                catch (DomainException) { }
+            }
             if (LocalDateTimePattern.ExtendedIso.Parse(t.Local) is not { Success: true } r) return t.Local;
             var text = r.Value.Date.ToString(DatePatterns.For("ddd d MMM", culture), culture) + (approximate ? "" : ", " + r.Value.TimeOfDay.ToString("HH:mm", CultureInfo.InvariantCulture));
             if (approximate || t.Timezone == zone.Id || DateTimeZoneProviders.Tzdb.GetZoneOrNull(t.Timezone) is not { } other) return text;
@@ -336,11 +342,14 @@ public static partial class TripExport
     }
 }
 
-/// <summary>Comments as an export shows them: author, day in the trip's time zone, and plain text.</summary>
-public sealed class ExportComments(TripSnapshot trip, ExportLabels labels, CultureInfo culture)
+/// <summary>
+/// Comments as an export shows them: author, day and plain text. The day is in <c>timeZone</c>, or without one in the
+/// trip's default time zone.
+/// </summary>
+public sealed class ExportComments(TripSnapshot trip, ExportLabels labels, CultureInfo culture, DateTimeZone? timeZone = null)
 {
     private readonly ILookup<Guid, Entity> byTarget = TripComments.ByTarget(trip);
-    private readonly DateTimeZone zone = ScheduleQueries.TripZone(trip);
+    private readonly DateTimeZone zone = timeZone ?? ScheduleQueries.TripZone(trip);
 
     /// <summary>The comments on <paramref name="owners"/>, oldest first. Comments without text are left out.</summary>
     public IReadOnlyList<ExportComment> On(IEnumerable<Entity> owners) =>

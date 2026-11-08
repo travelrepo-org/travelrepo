@@ -1149,13 +1149,15 @@ Exports are read-only views of a trip: a printable document (HTML, PDF), plain t
 An export can be limited in these ways:
 
 - **Parts**: schedule, stays, bookings, contacts, costs, tasks, notes, packing lists, a map, and attached documents.
-- **Date range**: the first and last day, both inclusive, in the trip's default time zone. A schedule item belongs when any part of it falls in the range; an item that starts earlier is listed on the range's first day. Items without a time, and bookings that cover no schedule item, are left out of a limited range. Day numbers keep counting from the trip's first day.
+- **Date range**: the first and last day, both inclusive, in the export's time zone (see below). A schedule item belongs when any part of it falls in the range; an item that starts earlier is listed on the range's first day. Items without a time, and bookings that cover no schedule item, are left out of a limited range. Day numbers keep counting from the trip's first day.
 - **One person**: the export shows what concerns that person. Something with no people attached (no participants or guests, no travellers on a booking, nobody assigned to a task) concerns everyone and stays in. A booking with listed travellers belongs to them; one without belongs to the people of its schedule items. Costs show only the expenses that person paid, without trip budgets.
 - **Detail**: detailed exports add people, status, notes, stay house rules and contacts; compact exports keep times, titles, places and booking references.
 
 In the day-by-day schedule, a stay is not an item spanning several days. Consecutive or overlapping nights at the same place (or with the same title when there is no place) form one stay, also when they are stored as one item per night. Its check-in and check-out appear as lines on the days they happen, with their hour unless it is approximate, and every day ends with where the travellers sleep and which night of the stay it is. The stays part lists each stay once with its details.
 
 Times are shown in the trip's default time zone, which the export names once near the top (and page-based renderers on every page), for example "Tokyo (JST, UTC+9)". When the start or the end of an item is in another zone, such as a flight, both ends show their own local time with the zone's short name, for example "13:20 CEST – 08:35 JST". Where the time zone database has no letters for a zone, the offset is used, such as UTC-3.
+
+An export can instead name an explicit time zone, for example to read a plan from home. Then every exact time, the days the schedule is grouped by, the date range, the time line and the days of comments follow that zone, and the zone is named at the top in place of the trip's. No time carries another zone's name. Approximate check-in and check-out times keep their planned day. Calendar files are unaffected, since they store exact times that calendar applications show in their own zone.
 
 Attached documents are numbered A1, A2 and so on in order of first use, and every entry that uses one refers to its number. Renderers that cannot embed files list them by name.
 

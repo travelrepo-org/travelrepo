@@ -303,6 +303,53 @@ public class ExportTests
     }
 
     [Fact]
+    public void AnExplicitTimeZoneShowsEveryTimeAndDayInIt()
+    {
+        var early = Item("Early train", "2027-04-02T06:00:00", "2027-04-02T06:30:00");
+        var flight = Entity.Create("schedule_item", "Flight home");
+        flight.Data["time"] = new JsonObject { ["precision"] = "exact", ["start"] = new ZonedTime("2027-04-03T10:00:00", Zone).ToJson(), ["end"] = new ZonedTime("2027-04-03T15:00:00", "Europe/Berlin").ToJson() };
+        var inn = Entity.Create("schedule_item", "Inn"); inn.Data["components"] = new JsonObject { ["accommodation"] = new JsonObject() };
+        inn = Stays.WithSpan(inn, new ZonedTime("2027-04-01T16:00:00", Zone), new ZonedTime("2027-04-02T10:00:00", Zone));
+        var trip = Trip(early, flight, inn, Comment(early, Mia, "2027-03-01T20:00:00Z", "Book seats"));
+        ItineraryEntry Entry(Itinerary it, string title, out LocalDate day)
+        {
+            var found = it.Days.SelectMany(d => d.Entries.Select(e => (d.Date, e))).First(x => x.e.Item.Title == title);
+            day = found.Date; return found.e;
+        }
+
+        // Without a time zone, times follow the trip (Tokyo), and a time planned elsewhere names its zone.
+        var trips = TripItinerary.Build(trip, culture: Invariant);
+        Assert.Equal(Zone, trips.Zone);
+        Assert.Equal("06:00–06:30", Entry(trips, "Early train", out var tripDay).Time); Assert.Equal(new LocalDate(2027, 4, 2), tripDay);
+        Assert.Equal("10:00 JST – 15:00 CEST", Entry(trips, "Flight home", out _).Time);
+
+        // In Berlin the early train runs the evening before, and the flight needs no zone names.
+        var options = new ExportOptions { TimeZone = "Europe/Berlin", Comments = true, Parts = ExportParts.Schedule | ExportParts.Stays };
+        var berlin = TripItinerary.Build(trip, culture: Invariant, options: options);
+        Assert.Equal("Europe/Berlin", berlin.Zone);
+        Assert.Equal("23:00–23:30", Entry(berlin, "Early train", out var berlinDay).Time); Assert.Equal(new LocalDate(2027, 4, 1), berlinDay);
+        Assert.Equal("03:00–15:00", Entry(berlin, "Flight home", out _).Time);
+        Assert.Equal("09:00", berlin.Days.SelectMany(d => d.Entries).Single(e => e.Role == ItineraryRole.CheckIn).Time);
+
+        // The date range counts in the same zone.
+        Assert.Contains(TripItinerary.Build(trip, culture: Invariant, options: options with { From = new LocalDate(2027, 4, 1), To = new LocalDate(2027, 4, 1) }).Days.SelectMany(d => d.Entries), e => e.Item.Title == "Early train");
+        Assert.DoesNotContain(TripItinerary.Build(trip, culture: Invariant, options: new ExportOptions { From = new LocalDate(2027, 4, 1), To = new LocalDate(2027, 4, 1) }).Days.SelectMany(d => d.Entries), e => e.Item.Title == "Early train");
+
+        var document = TripExport.Document(trip, options, culture: Invariant);
+        Assert.Contains(document.Meta, m => m.Contains("Berlin (CEST, UTC+2)", StringComparison.Ordinal));
+        Assert.Contains("Berlin (CEST, UTC+2)", document.ZoneNote, StringComparison.Ordinal);
+        var rows = document.Sections.SelectMany(s => s.Rows).ToArray();
+        Assert.Equal("1 Mar 2027", rows.Single(r => r.Title == "Early train").Comments.Single().When);
+        Assert.Contains("Thu 1 Apr, 09:00", string.Join(" | ", rows.Select(r => r.Summary ?? "").Concat(rows.SelectMany(r => r.DetailLines))), StringComparison.Ordinal);
+        Assert.Equal("2 Mar 2027", TripExport.Document(trip, options with { TimeZone = null }, culture: Invariant).Sections.SelectMany(s => s.Rows).Single(r => r.Title == "Early train").Comments.Single().When);
+
+        Assert.Equal("Pacific/Auckland", ExportOptions.ParseZone(" Pacific/Auckland "));
+        Assert.Null(ExportOptions.ParseZone(""));
+        Assert.Equal("export.timezone", Assert.Throws<DomainException>(() => ExportOptions.ParseZone("Middle/Earth")).Code);
+        Assert.Throws<DomainException>(() => TripItinerary.Build(trip, options: new ExportOptions { TimeZone = "Middle/Earth" }));
+    }
+
+    [Fact]
     public void GermanDatesHaveAFullStopAfterTheDayAndEnglishOnesDoNot()
     {
         var hike = Item("Hike", "2027-04-02T09:00:00", "2027-04-02T15:00:00");
