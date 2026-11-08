@@ -1025,6 +1025,8 @@ converted:
 
 Clients must not silently rewrite historical conversions using current rates.
 
+For an expense, `converted` with `source: card` records what was actually charged in another currency, for example the euros a card statement shows for a payment in NZD. `rate` is units of the converted currency per unit of the expense's currency, worked out from both amounts; `rate_date` is the day of the charge. Clients use it to show costs and to settle debts in that currency: a share of the expense converts exactly at that rate. Where no amount was charged in the wanted currency, a client may convert with reference rates, but must present the result as an estimate and must not store it as `converted`. Debts stay recorded in the expense's own currency; paying back in another currency marks the debt as paid in full.
+
 ## 36. Budgets
 
 Budgets may exist for:

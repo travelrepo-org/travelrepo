@@ -351,6 +351,13 @@ public sealed class McpServerTests : IDisposable
         Assert.Equal("2027-05-03", paid["debts"]![0]!["paid_on"]!.ToString());
         Assert.Empty((await Call(client, "get_costs", "{}"))["settle_up"]!.AsArray());
         Assert.Equal(40m, (await Call(client, "mark_paid", "{\"expense\":\"" + id + "\",\"paid\":false}"))["open"]!.GetValue<decimal>());
+
+        // The card charged 33,60 EUR for 60 NZD. Ben owes 40 EUR and half the jet boat, 16,80 EUR, in one payment.
+        var nzd = (await Call(client, "add_expense", """{"title":"Jet boat","amount":"60","currency":"NZD","paid_by":["Ana"]}"""))["id"]!.ToString();
+        Assert.Equal("0.56", (await Call(client, "set_charged", "{\"expense\":\"" + nzd + "\",\"amount\":\"33,60\",\"currency\":\"eur\",\"date\":\"2027-05-03\"}"))["converted"]!["rate"]!.ToString());
+        var inEuros = await Call(client, "get_costs", """{"in":"EUR"}""");
+        Assert.Contains(inEuros["settle_up"]!.AsArray(), t => t!["currency"]!.ToString() == "EUR" && t["amount"]!.GetValue<decimal>() == 56.80m && t["estimated"] is null);
+        Assert.Equal(33.60m + 60m, inEuros["paid_in"]!["exact"]!.GetValue<decimal>());
         Assert.DoesNotContain((await repo.ReadAsync()).Diagnostics, d => d.Severity == Severity.Error);
     }
 }

@@ -523,7 +523,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
     });
 
     [McpServerTool(Name = "get_costs", Title = "Read the costs", ReadOnly = true, Idempotent = true, OpenWorld = false)]
-    [Description("Costs of the trip per currency: paid, still estimated, budget and what is left; then every expense with amount, currency, whether it is an estimate, who paid, what it belongs to, how it is divided (everyone's part) and what is still open, and booking prices. `balances` says per person and currency what they are owed (positive) or owe (negative) over what is not paid back yet, and `settle_up` the fewest payments that settle it. Amounts are never converted unless `in` names a currency: then totals are also given in it, using the exchange rates the app last downloaded (reference rates for orientation, with their date).")]
+    [Description("Costs of the trip per currency: paid, still estimated, budget and what is left; then every expense with amount, currency, whether it is an estimate, who paid, what it belongs to, how it is divided (everyone's part) and what is still open, and booking prices. `balances` says per person and currency what they are owed (positive) or owe (negative) over what is not paid back yet, and `settle_up` the fewest payments that settle it. With `in`, balances and settle-up are in that currency where possible: exactly with the amount a card actually charged (`charged`, see set_charged), otherwise estimated with the app's rates and marked `estimated`; `paid_in` totals the paid expenses that way. Amounts are never converted unless `in` names a currency: then totals are also given in it, using the exchange rates the app last downloaded (reference rates for orientation, with their date).")]
     public Task<string> GetCosts([Description("Optional currency to also show totals in, for example EUR.")] string? @in = null, CancellationToken ct = default) => Run(async () =>
     {
         var trip = (await repository.ReadAsync(ct)).Trip;
@@ -553,7 +553,8 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
                 ["estimated"] = e.Data["estimated"]?.DeepClone(),
                 ["paid_by"] = Names(trip, e.Data["paid_by"]),
                 ["belongs_to"] = new JsonArray(related.Select(t => (JsonNode)t).ToArray()),
-                ["split"] = SplitJson(trip, Expenses.Split(trip, e))
+                ["split"] = SplitJson(trip, Expenses.Split(trip, e)),
+                ["charged"] = Expenses.ChargeOf(e) is { } charge ? new JsonObject { ["amount"] = charge.Value, ["currency"] = charge.Currency, ["rate"] = charge.Rate, ["date"] = charge.Date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) } : null
             };
         }).ToArray();
         string Name(Guid id) => trip.Find(id)?.Title ?? id.ToString();
@@ -561,9 +562,18 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         {
             ["totals"] = new JsonArray(totals),
             ["expenses"] = new JsonArray(expenses),
-            ["balances"] = new JsonArray(Expenses.Balances(trip).Select(b => (JsonNode)new JsonObject { ["person"] = Name(b.Person), ["currency"] = b.Currency, ["net"] = b.Net }).ToArray()),
-            ["settle_up"] = new JsonArray(Expenses.SettleUp(trip).Select(t => (JsonNode)new JsonObject { ["from"] = Name(t.From), ["to"] = Name(t.To), ["currency"] = t.Currency, ["amount"] = t.Amount }).ToArray())
+            ["balances"] = new JsonArray(Expenses.Balances(trip, target, rates).Select(b => (JsonNode)new JsonObject { ["person"] = Name(b.Person), ["currency"] = b.Currency, ["net"] = b.Net, ["estimated"] = b.Estimated ? true : null }).ToArray()),
+            ["settle_up"] = new JsonArray(Expenses.SettleUp(trip, target, rates).Select(t => (JsonNode)new JsonObject { ["from"] = Name(t.From), ["to"] = Name(t.To), ["currency"] = t.Currency, ["amount"] = t.Amount, ["estimated"] = t.Estimated ? true : null }).ToArray())
         };
+        if (target is not null)
+        {
+            var paid = Expenses.Total(trip, target, rates);
+            result["paid_in"] = new JsonObject
+            {
+                ["currency"] = target, ["exact"] = paid.Exact, ["estimated"] = paid.Estimated, ["total"] = paid.Total, ["without_charged_amount"] = paid.WithoutCharge,
+                ["not_converted"] = new JsonArray(paid.NotConverted.Select(m => (JsonNode)new JsonObject { ["amount"] = m.Value, ["currency"] = m.Currency }).ToArray())
+            };
+        }
         var prices = trip.Entities.Values.Where(e => e.Type == "booking" && TripSummaries.Money(e.Data["price"]) is not null)
             .Select(b => (JsonNode)new JsonObject { ["booking"] = b.Title, ["price"] = b.Data["price"]!.DeepClone(), ["status"] = b.Data["status"]?.DeepClone() }).ToArray();
         if (prices.Length > 0) result["booking_prices"] = new JsonArray(prices);
@@ -608,6 +618,31 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
             return ([new EntityEdit(changed.Id, changed)], null);
         }, ct);
         return SplitJson(saved.Trip, Expenses.Split(saved.Trip, Find(saved.Trip, expense)));
+    });
+
+    [McpServerTool(Name = "set_charged", Title = "Enter the amount charged", Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Records what was actually charged for an expense in another currency, for example the euros on the card statement for a payment in NZD (\"190,40\" works). The rate is worked out from both amounts and kept with the day, so the conversion never changes later. get_costs with `in` then uses it exactly. Without an amount the charged amount is removed.")]
+    public Task<string> SetCharged(
+        [Description("The expense's id.")] string expense,
+        [Description("The amount charged, for example 190.40; empty removes it.")] string? amount = null,
+        [Description("Its currency, for example EUR.")] string currency = "EUR",
+        [Description("Optional day it was charged, such as 2026-11-26.")] string? date = null,
+        CancellationToken ct = default) => Run(async () =>
+    {
+        LocalDate? day = date is null ? null : NodaTime.Text.LocalDatePattern.Iso.Parse(date.Trim()) is { Success: true } parsed ? parsed.Value : throw new McpException("\"date\" must look like 2026-11-26.");
+        var code = ExchangeRates.Code(currency) ?? throw new McpException("\"currency\" must be a code with three letters, such as EUR.");
+        decimal? value = string.IsNullOrWhiteSpace(amount) ? null : ExchangeRates.Amount(amount) ?? throw new McpException("\"amount\" must be a number such as 190.40.");
+        var saved = await Write(state =>
+        {
+            var target = Find(state.Trip, expense);
+            if (target.Type != "expense") throw new McpException(target.Title + " is not an expense.");
+            Entity changed;
+            try { changed = value is { } v ? Expenses.WithCharge(target, v, code, day) : Expenses.WithoutCharge(target); }
+            catch (DomainException ex) { throw new McpException(ex.Message); }
+            return ([new EntityEdit(changed.Id, changed)], null);
+        }, ct);
+        var result = Find(saved.Trip, expense);
+        return new JsonObject { ["id"] = result.Id.ToString(), ["converted"] = result.Data["converted"]?.DeepClone() };
     });
 
     [McpServerTool(Name = "mark_paid", Title = "Mark an expense as paid back", Destructive = false, Idempotent = true, OpenWorld = false)]
