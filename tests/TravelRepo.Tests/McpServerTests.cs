@@ -327,4 +327,30 @@ public sealed class McpServerTests : IDisposable
         Assert.Equal(["Ana"], costs["expenses"]![0]!["paid_by"]!.AsArray().Select(n => n!.ToString()));
         Assert.Equal(["Ferry"], costs["expenses"]![0]!["belongs_to"]!.AsArray().Select(n => n!.ToString()));
     }
+    [Fact]
+    public async Task AssistantsDivideExpensesAndMarkThemPaid()
+    {
+        var (repo, _) = await Trip();
+        var client = await Connect(repo.Root);
+        var ana = Entity.Create("person", "Ana"); var ben = Entity.Create("person", "Ben");
+        await repo.ApplyAsync(await repo.ReadAsync(), [new(ana.Id, ana), new(ben.Id, ben)]);
+        var id = (await Call(client, "add_expense", """{"title":"Boat hire","amount":"60","currency":"EUR","paid_by":["Ana"]}"""))["id"]!.ToString();
+
+        // Equally among everyone by default.
+        var costs = await Call(client, "get_costs", "{}");
+        Assert.Equal("equal", costs["expenses"]![0]!["split"]!["method"]!.ToString());
+        Assert.Equal(30m, costs["expenses"]![0]!["split"]!["open"]!.GetValue<decimal>());
+        Assert.Equal(("Ben", "Ana", 30m), (costs["settle_up"]![0]!["from"]!.ToString(), costs["settle_up"]![0]!["to"]!.ToString(), costs["settle_up"]![0]!["amount"]!.GetValue<decimal>()));
+
+        var split = await Call(client, "split_expense", "{\"expense\":\"" + id + "\",\"method\":\"amount\",\"people\":[\"Ana\",\"Ben\"],\"values\":[\"20\",\"40,00\"]}");
+        Assert.Equal(40m, split["open"]!.GetValue<decimal>());
+        Assert.Contains("add up", await Call(client, "split_expense", "{\"expense\":\"" + id + "\",\"method\":\"percent\",\"people\":[\"Ana\",\"Ben\"],\"values\":[\"50\",\"40\"]}", expectError: true));
+
+        var paid = await Call(client, "mark_paid", "{\"expense\":\"" + id + "\",\"person\":\"Ben\",\"date\":\"2027-05-03\"}");
+        Assert.Equal(0m, paid["open"]!.GetValue<decimal>());
+        Assert.Equal("2027-05-03", paid["debts"]![0]!["paid_on"]!.ToString());
+        Assert.Empty((await Call(client, "get_costs", "{}"))["settle_up"]!.AsArray());
+        Assert.Equal(40m, (await Call(client, "mark_paid", "{\"expense\":\"" + id + "\",\"paid\":false}"))["open"]!.GetValue<decimal>());
+        Assert.DoesNotContain((await repo.ReadAsync()).Diagnostics, d => d.Severity == Severity.Error);
+    }
 }

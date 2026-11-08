@@ -98,6 +98,7 @@ public static class SemanticValidation
             while (parents.TryGetValue(current, out current)) if (!seen.Add(current)) { Error("nest.cycle", id.ToString(), "Schedule nesting contains a cycle."); break; }
         }
         if (trip.Manifest.Data["cover"]?["document"] is JsonValue cover && Guid.TryParse(cover.ToString(), out var coverId) && trip.Find(coverId) is { } doc && !((string?)doc.Data["media_type"] ?? "").StartsWith("image/", StringComparison.Ordinal)) Error("cover.type", "cover", "The cover must reference an image document.");
+        result.AddRange(Expenses.Validate(trip));
         var schedule = trip.Entities.Values.Where(e => e.Type == "schedule_item").ToArray();
         if (!result.Any(d => d.Severity == Severity.Error))
         {
