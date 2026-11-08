@@ -425,4 +425,29 @@ public class ExpenseSplitTests
         var extended = charged.Copy(); extended.Data["converted"]!["org.example.card"] = "Visa";
         Assert.Equal("Visa", Expenses.WithCharge(extended, 191m, "EUR").Data["converted"]!["org.example.card"]!.ToString());
     }
+    [Fact]
+    public void BookingsWithAPriceButNoExpenseAreFoundAndBecomeExpenses()
+    {
+        Entity Booking(string title, string? price, string status = "confirmed")
+        {
+            var b = Entity.Create("booking", title); b.Data["status"] = status;
+            if (price is not null) b.Data["price"] = new JsonObject { ["value"] = price, ["currency"] = "NZD" };
+            return b;
+        }
+        var teAnau = Booking("Te Anau Lakeview", "347.60"); var hobbiton = Booking("Hobbiton", "340.00");
+        var cancelled = Booking("Old motel", "120.00", "cancelled"); var noPrice = Booking("Ferry", null); var idea = Booking("Maybe a lodge", "200.00", "idea");
+        var paid = Expense("Hobbiton (2 people)", "340.00", "NZD", Ana);
+        paid.Data["related"] = new JsonArray(new JsonObject { ["type"] = "booking", ["id"] = hobbiton.Id.ToString() });
+        var trip = Trip(teAnau, hobbiton, cancelled, noPrice, idea, paid);
+        Assert.Equal([teAnau.Id], Expenses.WithoutExpense(trip).Select(b => b.Id));
+        Assert.Equal([paid.Id], Expenses.ForBooking(trip, hobbiton.Id).Select(e => e.Id));
+
+        var expense = Expenses.FromBooking(teAnau);
+        Assert.Empty(SchemaValidation.Validate(expense));
+        Assert.Equal(("Te Anau Lakeview", "347.60", "NZD"), (expense.Title, expense.Data["amount"]!["value"]!.ToString(), expense.Data["amount"]!["currency"]!.ToString()));
+        trip = With(trip, expense);
+        Assert.Empty(Expenses.WithoutExpense(trip));
+        Assert.DoesNotContain(SemanticValidation.Validate(trip), d => d.Severity == Severity.Error);
+        Assert.Throws<DomainException>(() => Expenses.FromBooking(noPrice));
+    }
 }
