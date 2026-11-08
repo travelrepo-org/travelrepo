@@ -354,4 +354,31 @@ public class ExpenseSplitTests
         Assert.Equal([new Transfer(carla, alex, "EUR", 45m)], Expenses.SettleUp(trip));
         foreach (var expense in trip.Entities.Values.Where(e => e.Type == "expense")) Assert.Equal(YamlCodec.Write(expense), YamlCodec.Write(YamlCodec.Read(YamlCodec.Write(expense))));
     }
+    [Fact]
+    public void ChangingTheMethodKeepsTheCurrentDivision()
+    {
+        var hotel = Expense("Hotel", "100.00", "EUR", Ben);
+        var trip = Trip(hotel);
+        var byAmount = Expenses.ChangeMethod(trip, hotel, SplitMethod.Amount);
+        Assert.Equal(["33.34", "33.33", "33.33"], ((JsonArray)byAmount.Data["split"]!["parts"]!).Select(p => p!["value"]!.ToString()));
+        var byPercent = Expenses.ChangeMethod(With(trip, byAmount), byAmount, SplitMethod.Percent);
+        Assert.Equal(["33.34", "33.33", "33.33"], ((JsonArray)byPercent.Data["split"]!["parts"]!).Select(p => p!["value"]!.ToString()));
+        Assert.Equal(100m, Expenses.Split(With(trip, byPercent), byPercent).Assigned);
+        var byShare = Expenses.ChangeMethod(trip, byPercent, SplitMethod.Share);
+        Assert.Equal(["1", "1", "1"], ((JsonArray)byShare.Data["split"]!["parts"]!).Select(p => p!["value"]!.ToString()));
+        Assert.Null(Expenses.ChangeMethod(With(trip, byShare), byShare, SplitMethod.Equal).Data["split"]);
+
+        // Leaving someone out, then giving an amount: the parts tell how much is still to divide.
+        var twoOnly = Expenses.WithPerson(trip, hotel, Cleo.Id, false);
+        Assert.Equal([Ana.Id, Ben.Id], Expenses.Split(With(trip, twoOnly), twoOnly).People);
+        Assert.Null(Expenses.WithPerson(With(trip, twoOnly), twoOnly, Cleo.Id, true).Data["split"]);
+        var amounts = Expenses.ChangeMethod(With(trip, twoOnly), twoOnly, SplitMethod.Amount);
+        var changed = Expenses.WithValue(With(trip, amounts), amounts, Ana.Id, 70m);
+        var split = Expenses.Split(With(trip, changed), changed);
+        Assert.Equal((120m, 100m), (split.Assigned, split.Target!.Value)); Assert.True(split.Issues.HasFlag(SplitIssues.SumMismatch));
+        Assert.Equal([Ana.Id, Ben.Id], split.People);
+        var withCleo = Expenses.WithPerson(With(trip, changed), changed, Cleo.Id, true);
+        Assert.Equal("0.00", ((JsonArray)withCleo.Data["split"]!["parts"]!)[2]!["value"]!.ToString());
+        Assert.Throws<DomainException>(() => Expenses.WithValue(trip, hotel, Ana.Id, 10m));
+    }
 }

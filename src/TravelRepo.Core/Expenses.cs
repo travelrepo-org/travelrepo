@@ -65,6 +65,16 @@ public sealed record ExpenseSplit(Entity Expense, Money? Amount, SplitMethod? Me
     public decimal Open => Debts.Sum(d => Math.Abs(d.Open));
     /// <summary>Whether everything owed for this expense is marked as paid. An expense without debts counts as settled.</summary>
     public bool IsSettled => Debts.All(d => d.IsSettled);
+    /// <summary>
+    /// What the parts add up to as stored: amounts for <see cref="SplitMethod.Amount"/>, percentages for
+    /// <see cref="SplitMethod.Percent"/>, weights for <see cref="SplitMethod.Share"/>, the amount for an equal split.
+    /// Compare it with <see cref="Target"/> to say how much is still to divide.
+    /// </summary>
+    public decimal Assigned { get; init; }
+    /// <summary>What <see cref="Assigned"/> must reach: the amount, or 100 for percentages; null for weights.</summary>
+    public decimal? Target => Method switch { SplitMethod.Percent => 100m, SplitMethod.Amount or SplitMethod.Equal => Amount?.Amount, _ => null };
+    /// <summary>The people who share the expense, in the order of the split, also when its parts do not add up.</summary>
+    public IReadOnlyList<Guid> People { get; init; } = [];
     /// <summary>The part of <paramref name="person"/>, or zero.</summary>
     public decimal ShareOf(Guid person) => Shares.Where(s => s.Person == person).Sum(s => s.Amount);
 }
@@ -170,7 +180,8 @@ public static class Expenses
             if (index >= 0) debts[index] = debts[index] with { Settled = debts[index].Settled + settled.Value, SettledOn = settled.On ?? debts[index].SettledOn };
             else if (issues == SplitIssues.None) debts.Add(new(expense.Id, settled.From, settled.To, currency, 0, settled.Value, settled.On));
         }
-        return new(expense, money, method, payers, shares, debts, issues);
+        var assigned = method switch { SplitMethod.Equal => money?.Amount ?? 0, _ => parts.Sum(p => p.Value ?? 0) };
+        return new(expense, money, method, payers, shares, debts, issues) { Assigned = assigned, People = parts.Select(p => p.Person).ToArray() };
     }
 
     /// <summary>Every debt between people over all expenses, settled or not.</summary>
@@ -329,6 +340,67 @@ public static class Expenses
         copy.Data["split"] = split;
         return copy;
     }
+
+    /// <summary>
+    /// A copy of the expense divided by another method, keeping the current division as far as the method allows:
+    /// amounts and percentages start from everyone's current part, weights from 1 each. An equal split among exactly
+    /// the travellers becomes the default, without a split.
+    /// </summary>
+    public static Entity ChangeMethod(TripSnapshot trip, Entity expense, SplitMethod method)
+    {
+        var split = Split(trip, expense);
+        if (split.Method == method) return expense.Copy();
+        var people = split.People;
+        var amounts = split.Shares.Count == people.Count && people.Count > 0 ? split.Shares.Select(x => x.Amount).ToArray()
+            : Split(trip, WithSplit(expense, SplitMethod.Equal, people.Select(p => (p, (decimal?)null)))).Shares.Select(x => x.Amount).ToArray();
+        switch (method)
+        {
+            case SplitMethod.Equal:
+                var travellers = TripPeople.Travelers(trip).Select(p => p.Id).ToArray();
+                return travellers.Order().SequenceEqual(people.Order()) ? WithSplit(expense, SplitMethod.Equal) : WithSplit(expense, SplitMethod.Equal, people.Select(p => (p, (decimal?)null)));
+            case SplitMethod.Amount:
+                return WithSplit(expense, method, people.Select((p, i) => (p, (decimal?)(i < amounts.Length ? amounts[i] : 0))));
+            case SplitMethod.Share:
+                return WithSplit(expense, method, people.Select(p => (p, (decimal?)1m)));
+            default:
+                var total = amounts.Sum();
+                var percent = total == 0 ? Allocate(100m, 2, people.Select(p => (p, 1m)).ToArray()) : Allocate(100m, 2, people.Select((p, i) => (p, i < amounts.Length ? Math.Abs(amounts[i]) : 0)).ToArray());
+                return WithSplit(expense, method, percent.Select(x => (x.Key, (decimal?)x.Amount)));
+        }
+    }
+
+    /// <summary>
+    /// A copy of the expense with <paramref name="person"/> sharing it or not. Someone who joins an amount or a
+    /// percentage split starts at zero, and a weight split at 1. Leaving an equal split names everyone else.
+    /// </summary>
+    public static Entity WithPerson(TripSnapshot trip, Entity expense, Guid person, bool shares)
+    {
+        var split = Split(trip, expense);
+        var method = split.Method ?? throw new DomainException("expense.split_method", "This split method is not known here.");
+        var people = split.People.ToList();
+        if (shares == people.Contains(person)) return expense.Copy();
+        if (shares) people.Add(person); else people.Remove(person);
+        if (method == SplitMethod.Equal)
+        {
+            var travellers = TripPeople.Travelers(trip).Select(p => p.Id).ToArray();
+            return travellers.Order().SequenceEqual(people.Order()) ? WithSplit(expense, SplitMethod.Equal) : WithSplit(expense, SplitMethod.Equal, people.Select(p => (p, (decimal?)null)));
+        }
+        var values = ValuesOf(trip, expense);
+        return WithSplit(expense, method, people.Select(p => (p, (decimal?)(values.TryGetValue(p, out var v) ? v : method == SplitMethod.Share ? 1m : 0m))));
+    }
+
+    /// <summary>A copy of the expense in which <paramref name="person"/>'s amount, weight or percentage is <paramref name="value"/>; the others stay.</summary>
+    public static Entity WithValue(TripSnapshot trip, Entity expense, Guid person, decimal value)
+    {
+        var split = Split(trip, expense);
+        if (split.Method is not ({ } method and not SplitMethod.Equal)) throw new DomainException("expense.split_method", "An equal split has no values.");
+        var values = ValuesOf(trip, expense); values[person] = value;
+        var people = split.People.Contains(person) ? split.People : [.. split.People, person];
+        return WithSplit(expense, method, people.Select(p => (p, (decimal?)values.GetValueOrDefault(p))));
+    }
+
+    private static Dictionary<Guid, decimal> ValuesOf(TripSnapshot trip, Entity expense) =>
+        ReadSplit(trip, expense).Parts.Where(p => p.Value is not null).ToDictionary(p => p.Person, p => p.Value!.Value);
 
     /// <summary>Semantic checks for splits and paid marks; references to missing people are reported by <see cref="SemanticValidation"/>.</summary>
     public static IEnumerable<Diagnostic> Validate(TripSnapshot trip)
