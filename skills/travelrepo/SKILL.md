@@ -34,7 +34,7 @@ Every entity has `id` (a UUID, version 7), `type` and usually `extensions: {}`. 
 | `person` | `people/` | `display_name` | `roles` |
 | `booking` | `bookings/` | | `provider.name`, `reference`, `status` (`idea`, `pending`, `reserved`, `confirmed`, `cancelled`, `completed`), `travelers`, `items` (schedule item IDs), `price`, `cancellation.free_until` |
 | `task` | `tasks/` | `title`, `status` (`open`, `in_progress`, `completed`, `cancelled`) | `assigned_to`, `due.date`, `related` (`[{type, id}]`) |
-| `expense` | `expenses/` | `title`, `amount`, `estimated` (true or false) | `paid_by`, `related` |
+| `expense` | `expenses/` | `title`, `amount`, `estimated` (true or false) | `paid_by`, `related`, `split`, `settled` |
 | `budget` | `budgets/` | `title`, `amount` | `scope` |
 | `collection` | `collections/` | `title`, `items` (entity IDs) | |
 | `note` | `documents/` | `title` | `body` (Markdown) |
@@ -42,7 +42,7 @@ Every entity has `id` (a UUID, version 7), `type` and usually `extensions: {}`. 
 
 Money is `{ value: "149.90", currency: EUR }`: the value is a decimal string and the currency an ISO 4217 code. Durations use ISO 8601, for example `PT1H30M`.
 
-Costs stay in the currency they were paid in; never convert them when saving. `add_expense` takes an amount as people type it ("12,50") and a currency code, who paid (several people are listed, TravelRepo does not split costs) and what it belongs to. `get_costs` sums per currency, with budgets; `get_costs` with `in` and `convert_currency` use the exchange rates the user's app last downloaded, which are reference rates for orientation, not what a card or cash desk charges. Say the rates' date when it matters.
+Costs stay in the currency they were paid in; never convert them when saving. `add_expense` takes an amount as people type it ("12,50") and a currency code, who paid (when several people paid, each paid an equal part) and what it belongs to. An expense is divided equally among all travellers unless `split_expense` divides it among some people, by amounts, weights or percentages; `mark_paid` records that someone paid their part back. `get_costs` shows everyone's part, what is still open, each person's balance and the fewest payments that settle up. `get_costs` sums per currency, with budgets; `get_costs` with `in` and `convert_currency` use the exchange rates the user's app last downloaded, which are reference rates for orientation, not what a card or cash desk charges. Say the rates' date when it matters.
 
 A booking and its plans point to each other: the booking's `items` and each plan's `components.booking.ref` (a stay: `components.accommodation.booking`). Use `link_booking` to set which plans a booking is for, rather than editing either side by hand; `get_bookings` shows bookings with their plans, prices and deadlines.
 

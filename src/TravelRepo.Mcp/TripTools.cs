@@ -523,7 +523,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
     });
 
     [McpServerTool(Name = "get_costs", Title = "Read the costs", ReadOnly = true, Idempotent = true, OpenWorld = false)]
-    [Description("Costs of the trip per currency: paid, still estimated, budget and what is left; then every expense with amount, currency, whether it is an estimate, who paid and what it belongs to, and booking prices. Amounts are never converted unless `in` names a currency: then totals are also given in it, using the exchange rates the app last downloaded (reference rates for orientation, with their date).")]
+    [Description("Costs of the trip per currency: paid, still estimated, budget and what is left; then every expense with amount, currency, whether it is an estimate, who paid, what it belongs to, how it is divided (everyone's part) and what is still open, and booking prices. `balances` says per person and currency what they are owed (positive) or owe (negative) over what is not paid back yet, and `settle_up` the fewest payments that settle it. Amounts are never converted unless `in` names a currency: then totals are also given in it, using the exchange rates the app last downloaded (reference rates for orientation, with their date).")]
     public Task<string> GetCosts([Description("Optional currency to also show totals in, for example EUR.")] string? @in = null, CancellationToken ct = default) => Run(async () =>
     {
         var trip = (await repository.ReadAsync(ct)).Trip;
@@ -552,15 +552,83 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
                 ["currency"] = money?.Currency,
                 ["estimated"] = e.Data["estimated"]?.DeepClone(),
                 ["paid_by"] = Names(trip, e.Data["paid_by"]),
-                ["belongs_to"] = new JsonArray(related.Select(t => (JsonNode)t).ToArray())
+                ["belongs_to"] = new JsonArray(related.Select(t => (JsonNode)t).ToArray()),
+                ["split"] = SplitJson(trip, Expenses.Split(trip, e))
             };
         }).ToArray();
-        var result = new JsonObject { ["totals"] = new JsonArray(totals), ["expenses"] = new JsonArray(expenses) };
+        string Name(Guid id) => trip.Find(id)?.Title ?? id.ToString();
+        var result = new JsonObject
+        {
+            ["totals"] = new JsonArray(totals),
+            ["expenses"] = new JsonArray(expenses),
+            ["balances"] = new JsonArray(Expenses.Balances(trip).Select(b => (JsonNode)new JsonObject { ["person"] = Name(b.Person), ["currency"] = b.Currency, ["net"] = b.Net }).ToArray()),
+            ["settle_up"] = new JsonArray(Expenses.SettleUp(trip).Select(t => (JsonNode)new JsonObject { ["from"] = Name(t.From), ["to"] = Name(t.To), ["currency"] = t.Currency, ["amount"] = t.Amount }).ToArray())
+        };
         var prices = trip.Entities.Values.Where(e => e.Type == "booking" && TripSummaries.Money(e.Data["price"]) is not null)
             .Select(b => (JsonNode)new JsonObject { ["booking"] = b.Title, ["price"] = b.Data["price"]!.DeepClone(), ["status"] = b.Data["status"]?.DeepClone() }).ToArray();
         if (prices.Length > 0) result["booking_prices"] = new JsonArray(prices);
         if (target is not null) result["rates"] = RatesNote(rates);
         return result;
+    });
+
+    private static JsonObject SplitJson(TripSnapshot trip, ExpenseSplit split)
+    {
+        string Name(Guid id) => trip.Find(id)?.Title ?? id.ToString();
+        var issues = Enum.GetValues<SplitIssues>().Where(i => i != SplitIssues.None && split.Issues.HasFlag(i)).Select(i => (JsonNode)i.ToString()).ToArray();
+        return new JsonObject
+        {
+            ["method"] = split.Method is { } m ? Expenses.Name(m) : split.Expense.Data["split"]?["method"]?.DeepClone(),
+            ["parts"] = new JsonArray(split.Shares.Select(x => (JsonNode)new JsonObject { ["person"] = Name(x.Person), ["amount"] = x.Amount, ["value"] = x.Value }).ToArray()),
+            ["debts"] = new JsonArray(split.Debts.Select(d => (JsonNode)new JsonObject { ["from"] = Name(d.From), ["to"] = Name(d.To), ["amount"] = d.Amount, ["paid"] = d.Settled, ["open"] = d.Open, ["paid_on"] = d.SettledOn?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) }).ToArray()),
+            ["open"] = split.Open,
+            ["issues"] = issues.Length > 0 ? new JsonArray(issues) : null
+        };
+    }
+
+    [McpServerTool(Name = "split_expense", Title = "Divide an expense", Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Sets how an expense is divided. Without a split, an expense is divided equally among all travellers. `method` is equal, amount, share or percent. `people` are ids or names; with equal they are the people who share it (empty: everyone), otherwise `values` gives each person's amount (adding up to the expense), weight (such as 2 for a couple) or percentage (adding up to 100) in the same order, as typed (\"12,50\" works). What was already paid back is kept; get_costs then shows what is still owed or owed back.")]
+    public Task<string> SplitExpense(
+        [Description("The expense's id.")] string expense,
+        [Description("equal, amount, share or percent.")] string method,
+        [Description("People who share it (ids or names).")] string[]? people = null,
+        [Description("For amount, share and percent: one value per person, in the same order.")] string[]? values = null,
+        CancellationToken ct = default) => Run(async () =>
+    {
+        SplitMethod how = method.Trim().ToLowerInvariant() switch { "equal" => SplitMethod.Equal, "amount" => SplitMethod.Amount, "share" => SplitMethod.Share, "percent" => SplitMethod.Percent, _ => throw new McpException("\"method\" is equal, amount, share or percent.") };
+        var saved = await Write(state =>
+        {
+            var target = Find(state.Trip, expense);
+            if (target.Type != "expense") throw new McpException(target.Title + " is not an expense.");
+            var who = (people ?? []).Select(p => Person(state.Trip, p).Id).ToArray();
+            if (how != SplitMethod.Equal && (values is null || values.Length != who.Length)) throw new McpException("Give one value per person for " + method + ".");
+            var parts = who.Select((p, i) => (p, how == SplitMethod.Equal ? (decimal?)null : ExchangeRates.Amount(values![i]) ?? throw new McpException("\"" + values[i] + "\" is not a number."))).ToArray();
+            var changed = Expenses.WithSplit(target, how, parts);
+            var issues = Expenses.Split(state.Trip, changed).Issues;
+            if (issues.HasFlag(SplitIssues.SumMismatch)) throw new McpException(how == SplitMethod.Percent ? "The percentages must add up to 100." : "The amounts must add up to the expense.");
+            return ([new EntityEdit(changed.Id, changed)], null);
+        }, ct);
+        return SplitJson(saved.Trip, Expenses.Split(saved.Trip, Find(saved.Trip, expense)));
+    });
+
+    [McpServerTool(Name = "mark_paid", Title = "Mark an expense as paid back", Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Marks what people owe for an expense as paid back, or with paid false takes the mark back. Without `person` it applies to everyone's part of the expense; with it only to what that person owes. Use get_costs to see what is open.")]
+    public Task<string> MarkPaid(
+        [Description("The expense's id.")] string expense,
+        [Description("Optional person whose part it is (id or name).")] string? person = null,
+        [Description("False takes the mark back.")] bool paid = true,
+        [Description("Optional day it was paid, such as 2027-05-03.")] string? date = null,
+        CancellationToken ct = default) => Run(async () =>
+    {
+        LocalDate? day = date is null ? null : NodaTime.Text.LocalDatePattern.Iso.Parse(date.Trim()) is { Success: true } parsed ? parsed.Value : throw new McpException("\"date\" must look like 2027-05-03.");
+        var saved = await Write(state =>
+        {
+            var target = Find(state.Trip, expense);
+            if (target.Type != "expense") throw new McpException(target.Title + " is not an expense.");
+            Guid? from = person is null ? null : Person(state.Trip, person).Id;
+            var changed = paid ? Expenses.Settle(state.Trip, target, from, day) : Expenses.Unsettle(target, from);
+            return ([new EntityEdit(changed.Id, changed)], null);
+        }, ct);
+        return SplitJson(saved.Trip, Expenses.Split(saved.Trip, Find(saved.Trip, expense)));
     });
 
     [McpServerTool(Name = "convert_currency", Title = "Convert an amount", ReadOnly = true, Idempotent = true, OpenWorld = false)]

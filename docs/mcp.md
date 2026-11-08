@@ -44,9 +44,11 @@ Each server serves exactly one trip folder. Add one entry per trip you want the 
 | `get_weather` | no | The weather the client last downloaded for the trip, from its local cache: per day, per item with the outdoor estimate and warnings, each with its age. Never fetches; says so when weather is off in the client. |
 | `list_connections` | no | Changes from one journey to the next, such as a layover: both journeys, the place and the time to change, across time zones. |
 | `get_bookings` | no | Bookings with provider, number, status, price, free cancellation, travellers, their plans and files. |
-| `get_costs` | no | Totals per currency with budgets, every expense with payers and what it belongs to, booking prices. With `in`, totals also in one currency, using the client's cached exchange rates. |
+| `get_costs` | no | Totals per currency with budgets, every expense with payers, what it belongs to, everyone's part and what is still open, booking prices, each person's balance and the fewest payments that settle up. With `in`, totals also in one currency, using the client's cached exchange rates. |
 | `convert_currency` | no | Converts an amount with the European Central Bank reference rates the client last downloaded. Never fetches; says so when rates are off in the client. |
 | `add_expense` | yes | Adds an expense from an amount as typed ("12,50"), a currency code, payers and what it belongs to. Nothing is converted. |
+| `split_expense` | yes | Divides an expense equally among some people, by amounts, by weights or by percentages. Without a split it is divided equally among all travellers. |
+| `mark_paid` | yes | Marks an expense, or one person's part of it, as paid back, optionally with the day, or takes the mark back. |
 | `link_booking` | yes | Sets which plans a booking is for; booking and plans point to each other, and plans leave a booking they belonged to before. |
 | `add_to_group`, `remove_from_group` | yes | Makes a plan a step of a group, such as a day tour, or takes it out again. A step belongs to one group. |
 | `list_reminders` | no | Cancellation deadlines, tasks due, late arrivals, nights without a stay and unconfirmed bookings that need attention now. |

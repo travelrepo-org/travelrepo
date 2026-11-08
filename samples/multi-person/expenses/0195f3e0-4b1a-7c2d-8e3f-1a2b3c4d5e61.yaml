@@ -1,0 +1,22 @@
+id: 0195f3e0-4b1a-7c2d-8e3f-1a2b3c4d5e61
+type: expense
+title: Boat hire
+amount:
+  value: "60.00"
+  currency: EUR
+estimated: false
+paid_by:
+- e3d0fc0e-ba9e-7bfd-9ca7-caf8d499913b
+split:
+  method: amount
+  parts:
+  - person: 28e21c9d-d75e-73e3-ab41-c25fc68f85f8
+    value: "40.00"
+  - person: e3d0fc0e-ba9e-7bfd-9ca7-caf8d499913b
+    value: "20.00"
+settled:
+- person: 28e21c9d-d75e-73e3-ab41-c25fc68f85f8
+  to: e3d0fc0e-ba9e-7bfd-9ca7-caf8d499913b
+  value: "40.00"
+  date: "2027-06-12"
+extensions: {}

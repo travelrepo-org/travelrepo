@@ -965,6 +965,49 @@ extensions: {}
 
 The schema should support multi-currency from the first version even if a reference client exposes only part of the functionality initially.
 
+### 34.1 Dividing expenses and paying back
+
+`paid_by` lists who paid. When several people paid, each paid an equal part.
+
+The optional `split` says who shares an expense and how. Without it, the expense is divided equally among the trip's travellers: the manifest's participants, or every person when the manifest lists none. Travellers who join later share such expenses too.
+
+```yaml
+split:
+  method: share
+  parts:
+    - person: 0195f36b-....   # a couple
+      value: "2"
+    - person: 0195f36c-....
+      value: "1"
+```
+
+`method` is one of:
+
+- `equal`: equal parts among the people in `parts`, or among every traveller when `parts` is missing or empty. Parts carry no `value`.
+- `amount`: each `value` is an amount in the expense's currency. The values add up to the expense.
+- `share`: each `value` is a non-negative weight.
+- `percent`: each `value` is a non-negative percentage. The values add up to 100.
+
+Values are decimal strings like amounts. Parts are rounded to the currency's smallest unit (ISO 4217: none for JPY, three decimals for KWD, otherwise two, or more when the amount itself has more). The units left over by rounding go, one each, to the parts that lost most in rounding, earlier parts first, so the parts always add up to the expense. A person listed twice holds both parts.
+
+A person whose part is smaller than what they paid is owed the difference. Everyone whose part is larger owes the difference, divided between those who are owed in proportion to what they are owed. Estimates, expenses without an amount or payer, and splits that do not add up create no debts. Splits that do not add up, and negative weights or percentages, are warnings. A method a client does not know is kept unchanged and only noted; the expense is then not divided by that client.
+
+`settled` records what has been paid back, one entry per debtor (`person`) and the person they paid (`to`), with the amount in the expense's currency and optionally the day:
+
+```yaml
+settled:
+  - person: 0195f36c-....
+    to: 0195f36b-....
+    value: "30.00"
+    date: 2027-05-03
+```
+
+What is still open is what is owed minus what is marked as paid. When the split changes after paying back, the difference shows: more is owed, or the person who received too much owes it back. Marking a debt as paid sets its entry to what is owed at that moment; paying back what was received too much removes the entry.
+
+Clients work out balances per person and currency from what is still open, and may suggest the payments that settle them. Each currency is settled on its own; amounts are never converted for this. A person may choose which open debts to settle now; what they owe each other person for the chosen debts is set off into one payment per person and currency.
+
+Lists in `split.parts` and `settled` are entries of people. They merge per person (and `to`), so people who pay back at the same time on different devices do not conflict. Deleting a person removes their entries.
+
 ## 35. Historical currency conversion
 
 When a converted monetary value is stored, the conversion metadata must remain historically stable.
