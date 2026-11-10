@@ -25,6 +25,8 @@ GitHub documentation consulted: [GitHub App user tokens and device flow](https:/
 
 `WeatherService` works out which places and dates a trip needs, asks the chosen service first and falls back to Open-Meteo for points the service does not cover, days beyond its reach, or when it fails. Open-Meteo answers for all points in one request. Beyond the forecasts it uses climate averages: the last ten complete years of the same calendar days, three days either side. Everything goes into `WeatherCache` on the device. Forecasts expire after two hours (MET Norway and the National Weather Service set their own expiry) and are not shown once they are more than a day old.
 
+When the person asks for fresh weather, `UpdateAsync(trip, refresh: true)` fetches forecasts again before they expire, except those fetched in the last five minutes. Services that set their own expiry (`IWeatherProvider.ServiceSetsExpiry`) are still not asked before then, as their terms require. A service that fails keeps its last forecasts, with the time they were fetched.
+
 `WeatherService.CacheOnly` reads the cache without being able to download: its services sit on an HTTP client that refuses every request, and `UpdateAsync` throws. The MCP server uses it, so assistants see only what the client already fetched.
 
 Each item gets an outlook per place: a forecast within seven days, a trend up to the forecast reach, climate beyond it. Each future trip day gets one at the place where most of its daytime is planned, or where that night is spent.

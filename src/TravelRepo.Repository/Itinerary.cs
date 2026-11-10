@@ -68,6 +68,8 @@ public sealed record ExportLabels
     public string NightOf { get; init; } = "night {0} of {1}";
     /// <summary>Names the time zone of all times, for example "Time zone: Tokyo (JST, UTC+9)".</summary>
     public string TimeZone { get; init; } = "Time zone: {0}";
+    /// <summary>The header when an export shows more than one zone; {0} lists them.</summary>
+    public string TimeZones { get; init; } = "Time zones: {0}";
     public string Comments { get; init; } = "Comments";
     /// <summary>The author of a comment whose person is not in the trip.</summary>
     public string Someone { get; init; } = "Someone";
@@ -87,7 +89,11 @@ public enum ItineraryRole { Item, CheckIn, CheckOut }
 /// One line of a day: a schedule item, or a stay's check-in or check-out (then <c>Item</c> is the stay). <c>Notes</c>
 /// holds the item's Markdown notes as plain text lines.
 /// </summary>
-public sealed record ItineraryEntry(Entity Item, ScheduleKind Kind, string Time, string? Where, IReadOnlyList<string> People, string? Status, string? BookingReference, string? Group, IReadOnlyList<string>? Notes = null, ItineraryRole Role = ItineraryRole.Item);
+public sealed record ItineraryEntry(Entity Item, ScheduleKind Kind, string Time, string? Where, IReadOnlyList<string> People, string? Status, string? BookingReference, string? Group, IReadOnlyList<string>? Notes = null, ItineraryRole Role = ItineraryRole.Item)
+{
+    /// <summary>The same time in each of the export's other time zones, such as "Berlin 09:00–10:30".</summary>
+    public IReadOnlyList<string> OtherTimes { get; init; } = [];
+}
 
 /// <summary>A night of a stay run: the run and which of its nights this is, starting at 1.</summary>
 public sealed record ItineraryNight(StayRun Run, int Number);
@@ -116,7 +122,13 @@ public static class TripItinerary
     {
         labels ??= new(); culture ??= CultureInfo.CurrentCulture; options ??= new();
         var filter = new ExportFilter(trip, options);
-        var zone = ScheduleQueries.TripZone(trip);
+        var zone = options.Zone(trip);
+        // With an explicit time zone, every time is shown in it, whichever zone it was planned in.
+        var fixedZone = options.TimeZone is not null;
+        var others = options.OtherZones(trip);
+        // A time in one of the other zones names its city, and its date when the day there is not the day it is listed on.
+        string Elsewhere(DateTimeZone z, Instant at, LocalDate? listedOn, string text) =>
+            ExportTimes.City(z) + " " + (at.InZone(z).Date is var date && date != listedOn ? date.ToString(DatePatterns.For("d MMM", culture), culture) + " " : "") + text;
         static string Clock(ZonedDateTime t) => t.TimeOfDay.ToString("HH:mm", CultureInfo.InvariantCulture);
         string Short(Instant i, DateTimeZone z) => Clock(i.InZone(z)) + " " + ExportTimes.Abbreviation(z, i);
         var parents = trip.Entities.Values.Where(e => e.Data["children"] is JsonArray { Count: > 0 }).ToArray();
@@ -127,8 +139,8 @@ public static class TripItinerary
         foreach (var item in trip.Entities.Values.Where(e => e.Type == "schedule_item" && e.Data["children"] is not JsonArray { Count: > 0 } && !inRuns.Contains(e.Id) && filter.Includes(e)))
         {
             var span = ScheduleQueries.Span(trip, item);
-            var startZone = span.StartZone is { } sz ? DateTimeZoneProviders.Tzdb.GetZoneOrNull(sz) ?? zone : zone;
-            var endZone = span.EndZone is { } ez ? DateTimeZoneProviders.Tzdb.GetZoneOrNull(ez) ?? startZone : startZone;
+            var startZone = !fixedZone && span.StartZone is { } sz ? DateTimeZoneProviders.Tzdb.GetZoneOrNull(sz) ?? zone : zone;
+            var endZone = !fixedZone && span.EndZone is { } ez ? DateTimeZoneProviders.Tzdb.GetZoneOrNull(ez) ?? startZone : startZone;
             // When either end is in another zone, both ends show their local time with its short name.
             var foreign = startZone.Id != zone.Id || endZone.Id != zone.Id;
             string At(Instant i, DateTimeZone z) => foreign ? Short(i, z) : Clock(i.InZone(zone));
@@ -139,7 +151,7 @@ public static class TripItinerary
                 TimePrecision.Window when span.IsPlaced => string.Format(culture, labels.Between, At(span.Start!.Value, startZone), At(span.End!.Value, endZone)),
                 TimePrecision.Approximate when span.IsPlaced => "~" + At(span.Start!.Value, startZone),
                 TimePrecision.Exact when span.IsPlaced => At(span.Start!.Value, startZone) + (foreign ? " – " : "–")
-                    + (span.End!.Value.InZone(endZone).Date != span.Start.Value.InZone(startZone).Date ? span.End.Value.InZone(endZone).Date.ToString("d MMM", culture) + " " : "") + At(span.End.Value, endZone),
+                    + (span.End!.Value.InZone(endZone).Date != span.Start.Value.InZone(startZone).Date ? span.End.Value.InZone(endZone).Date.ToString(DatePatterns.For("d MMM", culture), culture) + " " : "") + At(span.End.Value, endZone),
                 _ => ""
             };
             var route = ScheduleQueries.Route(trip, item);
@@ -153,6 +165,21 @@ public static class TripItinerary
                 status is null ? null : labels.Status(status), Reference(item), parent?.Title, ExportText.Notes(trip, item));
             // An item that starts before the range is listed on the range's first day.
             var day = filter.Days(item)?.First is { } first && options.From is { } from && first < from ? from : filter.Days(item)?.First;
+            if (others.Count > 0 && span.IsPlaced && span.Start is { } s0 && span.Precision is TimePrecision.Exact or TimePrecision.Window or TimePrecision.Approximate)
+            {
+                string In(DateTimeZone z)
+                {
+                    var e0 = span.End ?? s0; var from = s0.InZone(z); var until = e0.InZone(z);
+                    var text = span.Precision switch
+                    {
+                        TimePrecision.Approximate => "~" + Clock(from),
+                        TimePrecision.Window => string.Format(culture, labels.Between, Clock(from), Clock(until)),
+                        _ => Clock(from) + "–" + (until.Date != from.Date ? until.Date.ToString(DatePatterns.For("d MMM", culture), culture) + " " : "") + Clock(until)
+                    };
+                    return Elsewhere(z, s0, day, text);
+                }
+                entry = entry with { OtherTimes = [.. others.Select(In)] };
+            }
             entries.Add((span.IsPlaced ? span.Start : null, day, entry));
         }
 
@@ -161,18 +188,23 @@ public static class TripItinerary
         {
             var main = run.Main; var place = main.Place is { } p ? trip.Find(p) : null;
             var stayZone = DateTimeZoneProviders.Tzdb.GetZoneOrNull(main.Zone) ?? zone;
+            var shownZone = fixedZone ? zone : stayZone;
             void Add(ItineraryRole role, LocalDate day, Stay? source, LocalTime fallback)
             {
-                if (!filter.InRange(day, day)) return;
                 var value = role == ItineraryRole.CheckIn ? source?.CheckIn : source?.CheckOut;
                 var approximate = role == ItineraryRole.CheckIn ? source?.CheckInApproximate ?? true : source?.CheckOutApproximate ?? true;
                 Instant? at = null;
                 try { at = value?.ToInstant(); } catch (DomainException) { }
+                // In an explicit time zone an exact check-in or check-out is listed on its day there.
+                if (fixedZone && !approximate && at is { } moment) day = moment.InZone(zone).Date;
+                if (!filter.InRange(day, day)) return;
                 var sort = at ?? day.At(fallback).InZoneLeniently(stayZone).ToInstant();
-                var time = at is { } exact && !approximate ? (stayZone.Id == zone.Id ? Clock(exact.InZone(zone)) : Short(exact, stayZone)) : "";
+                var time = at is { } exact && !approximate ? (shownZone.Id == zone.Id ? Clock(exact.InZone(zone)) : Short(exact, shownZone)) : "";
+                IReadOnlyList<string> elsewhere = at is { } when && !approximate ? [.. others.Select(z => Elsewhere(z, when, day, Clock(when.InZone(z))))] : [];
                 var item = (source ?? main).Item;
                 entries.Add((sort, day, new ItineraryEntry(item, ScheduleKind.Accommodation, time, place?.Title != item.Title ? place?.Title : null, ScheduleQueries.Participants(trip, item).Select(x => x.Title).ToArray(),
-                    labels.Status(item.Data["status"]?.ToString()) is { Length: > 0 } st ? st : null, run.Stays.Select(x => Reference(x.Item)).FirstOrDefault(r => r is not null), null, null, role)));
+                    labels.Status(item.Data["status"]?.ToString()) is { Length: > 0 } st ? st : null, run.Stays.Select(x => Reference(x.Item)).FirstOrDefault(r => r is not null), null, null, role)
+                { OtherTimes = elsewhere }));
             }
             Add(ItineraryRole.CheckIn, run.FirstNight, run.CheckInStay, Stays.DefaultCheckIn);
             Add(ItineraryRole.CheckOut, run.DepartureDay, run.CheckOutStay, Stays.DefaultCheckOut);
@@ -181,6 +213,12 @@ public static class TripItinerary
         var (start, end) = TripQueries.EffectiveDates(trip);
         var nightDays = runs.SelectMany(r => Enumerable.Range(0, r.Nights).Select(r.FirstNight.PlusDays)).Where(d => filter.InRange(d, d));
         var allDays = entries.Where(e => e.Day is not null).Select(e => e.Day!.Value).Concat(nightDays).Distinct().Order().ToArray();
+        // In an explicit time zone the first or last plan can fall on a day outside the trip's own dates; the dates widen to include it.
+        if (fixedZone && allDays.Length > 0)
+        {
+            start = start is { } s && s < allDays[0] ? s : allDays[0];
+            end = end is { } e && e > allDays[^1] ? e : allDays[^1];
+        }
         var firstDay = start ?? allDays.DefaultIfEmpty(LocalDate.MinIsoValue).Min();
         var days = allDays.Select(date => new ItineraryDay(date, firstDay == LocalDate.MinIsoValue ? 0 : Period.Between(firstDay, date, PeriodUnits.Days).Days + 1,
             entries.Where(e => e.Day == date).OrderBy(e => e.Start).Select(e => e.Entry).ToArray())
@@ -216,6 +254,9 @@ public static class ExportTimes
         return "UTC" + sign + (minutes / 60).ToString(CultureInfo.InvariantCulture) + (minutes % 60 == 0 ? "" : ":" + (minutes % 60).ToString("00", CultureInfo.InvariantCulture));
     }
 
+    /// <summary>A zone's city for people to read, such as "New York" for America/New_York, or UTC.</summary>
+    public static string City(DateTimeZone zone) => zone.Id is "UTC" or "Etc/UTC" ? "UTC" : zone.Id.Split('/')[^1].Replace('_', ' ');
+
     /// <summary>
     /// The trip's zone for a page header, such as "Tokyo (JST, UTC+9)". Over a change to or from summer time both
     /// names and offsets appear, such as "Berlin (CET/CEST, UTC+1/+2)".
@@ -227,7 +268,7 @@ public static class ExportTimes
         var intervals = zone.GetZoneIntervals(from, to > from ? to : from + Duration.FromTicks(1)).DistinctBy(i => (i.Name, i.WallOffset)).ToArray();
         var names = intervals.Select(i => Abbreviation(zone, i.HasStart && i.Start > from ? i.Start : from)).Where(n => !n.StartsWith("UTC", StringComparison.Ordinal)).Distinct().ToArray();
         var offsets = intervals.Select(i => Offset(i.WallOffset)).Distinct().ToArray();
-        var city = zone.Id is "UTC" or "Etc/UTC" ? "UTC" : zone.Id.Split('/')[^1].Replace('_', ' ');
+        var city = City(zone);
         var offset = offsets[0] + string.Concat(offsets.Skip(1).Select(o => "/" + o[3..]));
         return city + " (" + (names.Length > 0 ? string.Join("/", names) + ", " : "") + offset + ")";
     }

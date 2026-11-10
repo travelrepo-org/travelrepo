@@ -152,6 +152,7 @@ public sealed class MetNorway(HttpClient http, string? userAgent = null, IClock?
     public WeatherAttribution Attribution { get; } = new("Weather data from MET Norway", "https://api.met.no/", "CC BY 4.0");
     public bool RequiresKey => false;
     public int HorizonDays => 9;
+    public bool ServiceSetsExpiry => true;
     public bool Covers(GeoPoint point) => true;
 
     public async Task<IReadOnlyList<WeatherForecast?>> ForecastAsync(IReadOnlyList<GeoPoint> points, CancellationToken ct = default)
@@ -197,6 +198,7 @@ public sealed class NationalWeatherService(HttpClient http, string? userAgent = 
     public WeatherAttribution Attribution { get; } = new("Forecast from the US National Weather Service", "https://www.weather.gov/", null);
     public bool RequiresKey => false;
     public int HorizonDays => 6;
+    public bool ServiceSetsExpiry => true;
 
     /// <summary>A rough box around the United States and its territories; the service itself has the final word.</summary>
     public bool Covers(GeoPoint p) => p.Latitude is >= 17 and <= 72 && (p.Longitude is >= -180 and <= -64 || p.Longitude >= 170) || p.Latitude is >= 13 and <= 21 && p.Longitude is >= 144 and <= 146.5;

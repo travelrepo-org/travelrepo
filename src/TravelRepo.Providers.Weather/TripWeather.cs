@@ -90,7 +90,7 @@ public sealed class WeatherService
         return new(providers, (OpenMeteo)providers[0], cache, preferred, clock) { IsCacheOnly = true };
     }
 
-    /// <summary>True for <see cref="CacheOnly"/> services; <see cref="UpdateAsync"/> then refuses to run.</summary>
+    /// <summary>True for <see cref="CacheOnly"/> services; <see cref="UpdateAsync(TripSnapshot, bool, CancellationToken)"/> then refuses to run.</summary>
     public bool IsCacheOnly { get; private init; }
 
     private sealed class RefuseRequests : HttpMessageHandler
@@ -114,7 +114,19 @@ public sealed class WeatherService
     public TripWeather Cached(TripSnapshot trip) => Build(trip, clock.GetCurrentInstant(), []);
 
     /// <summary>Updates what is missing or out of date, then returns the trip's weather. Failures become <see cref="TripWeather.Problems"/>.</summary>
-    public async Task<TripWeather> UpdateAsync(TripSnapshot trip, CancellationToken ct = default)
+    public Task<TripWeather> UpdateAsync(TripSnapshot trip, CancellationToken ct = default) => UpdateAsync(trip, refresh: false, ct);
+
+    /// <summary>A forecast fetched this recently is not fetched again, even when the person asks for fresh weather.</summary>
+    public static readonly Duration RefreshAfter = Duration.FromMinutes(5);
+
+    /// <summary>
+    /// Updates what is missing or out of date, then returns the trip's weather. With <paramref name="refresh"/>, as when
+    /// the person asks for fresh weather, forecasts that have not expired are fetched again too, except those fetched in
+    /// the last <see cref="RefreshAfter"/> and those whose service sets when they may be fetched again
+    /// (<see cref="IWeatherProvider.ServiceSetsExpiry"/>). Climate averages do not change and stay as they are. A
+    /// service that fails keeps its last forecasts; failures become <see cref="TripWeather.Problems"/>.
+    /// </summary>
+    public async Task<TripWeather> UpdateAsync(TripSnapshot trip, bool refresh, CancellationToken ct = default)
     {
         if (IsCacheOnly) throw new InvalidOperationException("This weather service only reads the cache.");
         var now = clock.GetCurrentInstant(); var problems = new List<WeatherProblem>();
@@ -126,12 +138,12 @@ public sealed class WeatherService
         var missing = new List<GeoPoint>(); var farther = new List<GeoPoint>();
         var asked = forecastCells.Select(c => c.Key).Where(p => primary.Covers(p) && !Cache.Uncovered(primary.Id, p, now)).ToArray();
         missing.AddRange(forecastCells.Select(c => c.Key).Except(asked));
-        try { missing.AddRange(await RefreshAsync(primary, asked, now, ct)); }
+        try { missing.AddRange(await RefreshAsync(primary, asked, now, refresh, ct)); }
         catch (DomainException ex) { problems.Add(new(primary.Id, ex.Code, ex.Message)); missing.AddRange(asked); }
         if (primary != fallback)
         {
             farther.AddRange(forecastCells.Where(c => c.Max(n => n.End) > now + Duration.FromDays(primary.HorizonDays - 1)).Select(c => c.Key));
-            try { await RefreshAsync(fallback, missing.Concat(farther).Distinct().ToArray(), now, ct); }
+            try { await RefreshAsync(fallback, missing.Concat(farther).Distinct().ToArray(), now, refresh, ct); }
             catch (DomainException ex) { problems.Add(new(fallback.Id, ex.Code, ex.Message)); }
         }
 
@@ -153,10 +165,14 @@ public sealed class WeatherService
         return Build(trip, now, problems);
     }
 
-    /// <summary>Fetches the points whose cached forecast expired. Returns the points the service does not cover.</summary>
-    private async Task<IReadOnlyList<GeoPoint>> RefreshAsync(IWeatherProvider provider, IReadOnlyList<GeoPoint> points, Instant now, CancellationToken ct)
+    /// <summary>
+    /// Fetches the points whose cached forecast expired, or with <paramref name="refresh"/> also those that may be
+    /// fetched again early. Returns the points the service does not cover.
+    /// </summary>
+    private async Task<IReadOnlyList<GeoPoint>> RefreshAsync(IWeatherProvider provider, IReadOnlyList<GeoPoint> points, Instant now, bool refresh, CancellationToken ct)
     {
-        var stale = points.Where(p => Cache.Forecast(provider.Id, p) is not { } f || f.Expires <= now).ToArray();
+        bool Due(WeatherForecast f) => f.Expires <= now || refresh && !provider.ServiceSetsExpiry && now - f.Fetched >= RefreshAfter;
+        var stale = points.Where(p => Cache.Forecast(provider.Id, p) is not { } f || Due(f)).ToArray();
         if (stale.Length == 0) return [];
         var uncovered = new List<GeoPoint>();
         // Small batches keep single requests short; services without batching still get one point at a time.

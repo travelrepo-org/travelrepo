@@ -53,7 +53,9 @@ try
                     Person = Person(state.Trip, Option("--person")),
                     Parts = Option("--parts") is { } parts ? ExportOptions.ParseParts(parts) : ExportParts.Standard,
                     Detail = args.Contains("--compact") ? ExportDetail.Compact : ExportDetail.Detailed,
-                    Comments = args.Contains("--comments")
+                    Comments = args.Contains("--comments"),
+                    TimeZone = ExportOptions.ParseZone(Option("--timezone")),
+                    OtherTimeZones = ExportOptions.ParseZones(Option("--also-timezones"))
                 };
                 var contents = Path.GetExtension(output).ToLowerInvariant() switch
                 {
