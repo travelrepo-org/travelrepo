@@ -571,9 +571,17 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         };
         result["budgets"] = new JsonArray(Budgets.All(trip, rates).Select(b => (JsonNode)new JsonObject
         {
-            ["id"] = b.Budget.Id.ToString(), ["title"] = b.Budget.Title, ["scope"] = b.Scope,
-            ["category"] = b.Filters.Category, ["person"] = b.Filters.Person is { } budgetPerson ? trip.Find(budgetPerson)?.Title : null, ["collection"] = b.Filters.Collection is { } budgetCollection ? trip.Find(budgetCollection)?.Title : null,
-            ["amount"] = b.Amount.Amount, ["currency"] = b.Amount.Currency, ["spent"] = b.Spent, ["planned"] = b.Planned, ["left"] = b.Left,
+            ["id"] = b.Budget.Id.ToString(),
+            ["title"] = b.Budget.Title,
+            ["scope"] = b.Scope,
+            ["category"] = b.Filters.Category,
+            ["person"] = b.Filters.Person is { } budgetPerson ? trip.Find(budgetPerson)?.Title : null,
+            ["collection"] = b.Filters.Collection is { } budgetCollection ? trip.Find(budgetCollection)?.Title : null,
+            ["amount"] = b.Amount.Amount,
+            ["currency"] = b.Amount.Currency,
+            ["spent"] = b.Spent,
+            ["planned"] = b.Planned,
+            ["left"] = b.Left,
             ["estimated"] = b.Approximate ? true : null,
             ["not_included"] = b.NotIncluded.Count > 0 ? new JsonArray(b.NotIncluded.Select(m => (JsonNode)new JsonObject { ["amount"] = m.Value, ["currency"] = m.Currency }).ToArray()) : null
         }).ToArray());
@@ -583,7 +591,11 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
             var paid = Expenses.Total(trip, target, rates);
             result["paid_in"] = new JsonObject
             {
-                ["currency"] = target, ["exact"] = paid.Exact, ["estimated"] = paid.Estimated, ["total"] = paid.Total, ["without_charged_amount"] = paid.WithoutCharge,
+                ["currency"] = target,
+                ["exact"] = paid.Exact,
+                ["estimated"] = paid.Estimated,
+                ["total"] = paid.Total,
+                ["without_charged_amount"] = paid.WithoutCharge,
                 ["not_converted"] = new JsonArray(paid.NotConverted.Select(m => (JsonNode)new JsonObject { ["amount"] = m.Value, ["currency"] = m.Currency }).ToArray())
             };
         }
