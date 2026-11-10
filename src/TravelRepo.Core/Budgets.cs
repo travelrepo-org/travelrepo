@@ -9,9 +9,21 @@ namespace TravelRepo.Core;
 /// </summary>
 public sealed record BudgetStatus(Entity Budget, string Scope, string? Target, Money Amount, decimal Spent, decimal Planned, bool Approximate, IReadOnlyList<Money> NotIncluded)
 {
+    /// <summary>Everything the budget is limited to; all of it applies together.</summary>
+    public BudgetFilters Filters { get; init; } = BudgetFilters.None;
     public decimal Used => Spent + Planned;
     /// <summary>What is left of the budget; negative when it is exceeded.</summary>
     public decimal Left => Amount.Amount - Used;
+}
+
+/// <summary>
+/// What a budget is limited to: an expense category, a person's part, a collection, or several of them together, such
+/// as one person's food. Null means not limited by that.
+/// </summary>
+public sealed record BudgetFilters(string? Category, Guid? Person, Guid? Collection)
+{
+    public static readonly BudgetFilters None = new(null, null, null);
+    public bool IsWholeTrip => Category is null && Person is null && Collection is null;
 }
 
 /// <summary>
@@ -37,6 +49,33 @@ public static class Budgets
         Collection => budget.Data["collection"]?.ToString(),
         _ => null
     };
+
+    /// <summary>
+    /// What a budget is limited to. Its <c>category</c>, <c>person</c> and <c>collection</c> apply together; a budget
+    /// whose <c>scope</c> names one of them without a value covers nothing.
+    /// </summary>
+    public static BudgetFilters FiltersOf(Entity budget) => new(
+        budget.Data["category"]?.ToString() is { Length: > 0 } c ? c : null,
+        Guid.TryParse(budget.Data["person"]?.ToString(), out var p) ? p : null,
+        Guid.TryParse(budget.Data["collection"]?.ToString(), out var k) ? k : null);
+
+    /// <summary>
+    /// A copy of the budget limited to everything given together, such as one person's food. The <c>scope</c> names
+    /// the narrowest filter for clients that know only one at a time: the person, then the category, then the
+    /// collection, or the whole trip. Unknown fields are kept.
+    /// </summary>
+    public static Entity WithFilters(TripSnapshot trip, Entity budget, BudgetFilters filters)
+    {
+        if (filters.Person is { } person && trip.Find(person) is not { Type: "person" }) throw new DomainException("budget.person", "Choose a person of the trip.");
+        if (filters.Collection is { } collection && trip.Find(collection) is not { Type: "collection" }) throw new DomainException("budget.collection", "Choose a collection of the trip.");
+        var copy = budget.Copy();
+        foreach (var key in new[] { "category", "person", "collection" }) copy.Data.Remove(key);
+        if (filters.Category is { Length: > 0 } category) copy.Data["category"] = ExpenseCategories.Stored(ExpenseCategories.With(trip, Entity.Create("expense", ""), category));
+        if (filters.Person is { } p) copy.Data["person"] = p.ToString();
+        if (filters.Collection is { } c) copy.Data["collection"] = c.ToString();
+        copy.Data["scope"] = filters.Person is not null ? Participant : filters.Category is not null ? Category : filters.Collection is not null ? Collection : Trip;
+        return copy;
+    }
 
     /// <summary>
     /// A copy of the budget for <paramref name="scope"/>: the whole trip, a category (a standard one or the
@@ -78,21 +117,19 @@ public static class Budgets
     public static BudgetStatus? Status(TripSnapshot trip, Entity budget, ExchangeRates? rates = null)
     {
         if (TripSummaries.Money(budget.Data["amount"]) is not { } amount) return null;
-        var scope = ScopeOf(budget); var target = TargetOf(budget);
+        var scope = ScopeOf(budget); var target = TargetOf(budget); var filters = FiltersOf(budget);
+        // A scope that names a filter without its value covers nothing, as before filters could be combined.
+        var empty = scope == Category && filters.Category is null || scope == Participant && filters.Person is null || scope == Collection && filters.Collection is null;
         decimal spent = 0, planned = 0; var approximate = false; var missing = new List<Money>();
-        var inCollection = scope == Collection && Guid.TryParse(target, out var collectionId) && trip.Find(collectionId) is { Type: "collection" } collection
+        var inCollection = filters.Collection is { } collectionId && trip.Find(collectionId) is { Type: "collection" } collection
             ? (collection.Data["items"] as JsonArray ?? []).Select(n => Guid.TryParse(n?.ToString(), out var id) ? id : (Guid?)null).OfType<Guid>().ToHashSet() : [];
         foreach (var expense in trip.Entities.Values.Where(e => e.Type == "expense"))
         {
-            if (TripSummaries.Money(expense.Data["amount"]) is not { } money) continue;
-            decimal? part = scope switch
-            {
-                Trip => money.Amount,
-                Category => target is not null && string.Equals(ExpenseCategories.Of(trip, expense), target, StringComparison.CurrentCultureIgnoreCase) ? money.Amount : null,
-                Participant => Guid.TryParse(target, out var person) && Expenses.Split(trip, expense) is var split && split.People.Contains(person) ? split.ShareOf(person) : null,
-                Collection => inCollection.Contains(expense.Id) || Related(trip, expense).Any(inCollection.Contains) ? money.Amount : null,
-                _ => null
-            };
+            if (empty || TripSummaries.Money(expense.Data["amount"]) is not { } money) continue;
+            if (filters.Category is { } wanted && !string.Equals(ExpenseCategories.Of(trip, expense), wanted, StringComparison.CurrentCultureIgnoreCase)) continue;
+            if (filters.Collection is not null && !(inCollection.Contains(expense.Id) || Related(trip, expense).Any(inCollection.Contains))) continue;
+            decimal? part = money.Amount;
+            if (filters.Person is { } person) part = Expenses.Split(trip, expense) is var split && split.People.Contains(person) ? split.ShareOf(person) : null;
             if (part is not { } value || value == 0) continue;
             var (converted, code, how) = Expenses.Convert(expense, value, money.Currency, amount.Currency, rates);
             if (code != amount.Currency) { missing.Add(new Money(Expenses.Format(value, money.Currency), money.Currency)); continue; }
@@ -101,7 +138,7 @@ public static class Budgets
         }
         var notIncluded = missing.GroupBy(m => m.Currency, StringComparer.Ordinal).OrderBy(g => g.Key, StringComparer.Ordinal)
             .Select(g => new Money(Expenses.Format(g.Sum(m => m.Amount), g.Key), g.Key)).ToArray();
-        return new(budget, scope, target, amount, spent, planned, approximate, notIncluded);
+        return new(budget, scope, target, amount, spent, planned, approximate, notIncluded) { Filters = filters };
     }
 
     /// <summary>

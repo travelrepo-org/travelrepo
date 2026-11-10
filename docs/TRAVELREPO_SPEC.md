@@ -1047,7 +1047,9 @@ Budgets may exist for:
 
 Budget support is part of the format direction. A reference client may ship only a basic implementation in v1.
 
-A budget has an `amount` and a `scope`: `trip` (also without a scope or with one a client does not know), `category` with the expense `category` it covers (section 34.2), `participant` with the `person` whose part of each expense it covers (section 34.1), or `collection` with the `collection` whose plans, bookings, places and expenses it covers, including expenses for the bookings of those plans.
+A budget has an `amount` and may be limited by an expense `category` (section 34.2), a `person` whose part of each expense it covers (section 34.1), and a `collection` whose plans, bookings, places and expenses it covers, including expenses for the bookings of those plans. All limits that are given apply together: a budget with `category: food` and a `person` covers that person's part of food. Without any limit it covers the whole trip.
+
+`scope` names the narrowest limit for clients that know only one at a time: `participant` when there is a person, otherwise `category`, otherwise `collection`, otherwise `trip` (also without a scope or with one a client does not know). A scope that names a limit without its value covers nothing.
 
 ```yaml
 type: budget
