@@ -51,6 +51,7 @@ Each server serves exactly one trip folder. Add one entry per trip you want the 
 | `record_payment` | yes | Marks a payment that was still to pay, such as the rest of a booking paid on site, as paid, optionally with who paid and the amount on the bill. |
 | `set_trip_currency` | yes | Sets the currency the travellers count in: the budget, totals and who owes whom are shown in it. |
 | `set_budget` | yes | Creates or changes a budget in the trip's currency: part of the trip's one budget, or limited to a category, a person and a collection together. |
+| `export_costs` | no | The costs as CSV (one row per payment with category, amounts, charged amount, who paid, what is open and each person's part; comma, semicolon, tab or pipe) or as text, for everyone or the parts of some people. |
 | `set_charged` | yes | Records what a card actually charged for an expense in another currency, such as euros for NZD; the rate is kept with the day. |
 | `mark_paid` | yes | Marks an expense, or one person's part of it, as paid back, optionally with the day, or takes the mark back. |
 | `link_booking` | yes | Sets which plans a booking is for; booking and plans point to each other, and plans leave a booking they belonged to before. |

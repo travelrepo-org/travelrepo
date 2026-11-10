@@ -31,7 +31,9 @@ public enum ReminderKind
     /// The trip has people, but the client does not know which of them is the local user. Clients create this from
     /// their local state; <see cref="TripReminders.For"/> never returns it.
     /// </summary>
-    WhoAmI
+    WhoAmI,
+    /// <summary>A payment still to pay, such as the rest of a deposit, is due within a week or overdue.</summary>
+    PaymentDue
 }
 
 /// <summary>
@@ -48,6 +50,8 @@ public static class TripReminders
     public static readonly Duration CancellationLead = Duration.FromDays(14);
     /// <summary>How long before the trip or the booked item an unconfirmed booking is mentioned.</summary>
     public static readonly Duration ConfirmationLead = Duration.FromDays(14);
+    /// <summary>How many days before its due day a payment still to pay is mentioned.</summary>
+    public const int PaymentLeadDays = 7;
 
     public static IReadOnlyList<Reminder> For(TripSnapshot trip, Instant now)
     {
@@ -71,6 +75,13 @@ public static class TripReminders
         {
             if (task.Data["due"]?["date"]?.ToString() is not { } text || !LocalDatePattern.Iso.Parse(text).TryGetValue(default, out var due) || due > today.PlusDays(1)) continue;
             result.Add(new("task:" + task.Id + ":" + text, ReminderKind.TaskDue, task.Id, task.Title, zone.AtStartOfDay(due).ToInstant(), due <= today, [due]));
+        }
+
+        // Payments still to pay that are due within a week or overdue.
+        foreach (var expense in trip.Entities.Values.Where(e => e.Type == "expense" && Expenses.IsPlanned(e)))
+        {
+            if (Expenses.DueOf(expense) is not { } due || due > today.PlusDays(PaymentLeadDays)) continue;
+            result.Add(new("payment:" + expense.Id + ":" + LocalDatePattern.Iso.Format(due), ReminderKind.PaymentDue, expense.Id, expense.Title, zone.AtStartOfDay(due).ToInstant(), due <= today.PlusDays(2), [due]));
         }
 
         // Arrivals after the accommodation's check-in hours: the planned check-in, or the last journey that ends on the arrival day.

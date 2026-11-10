@@ -38,6 +38,18 @@
     "estimated": {
       "type": "boolean"
     },
+    "due": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "date"
+      ],
+      "additionalProperties": true
+    },
     "category": {
       "type": "string"
     },

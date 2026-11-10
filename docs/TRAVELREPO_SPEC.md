@@ -709,7 +709,7 @@ Door codes, key box codes and similar access secrets must not be stored in the r
 
 ### 24.4 Planning help
 
-Clients may remind travellers of free cancellation deadlines, of arrivals after the check-in window (from the planned check-in or a journey ending that day), of tasks due and of bookings not confirmed shortly before they start. Reminders are derived from the data and never stored in the repository.
+Clients may remind travellers of free cancellation deadlines, of arrivals after the check-in window (from the planned check-in or a journey ending that day), of tasks due, of payments still to pay that are due within a week, and of bookings not confirmed shortly before they start. Reminders are derived from the data and never stored in the repository.
 
 Clients may report nights between the trip's first and last day that have no stay and no other item running through most of the night (22:00 to 06:00 in the trip's or the item's timezone), and may offer to merge stays at the same place whose nights follow each other or overlap. These are hints derived from the data; they never make a repository invalid.
 
@@ -971,7 +971,7 @@ extensions: {}
 
 The schema should support multi-currency from the first version even if a reference client exposes only part of the functionality initially.
 
-An expense is a payment: `amount` is what the bill says, in the currency it was paid in. `estimated: true` marks one that is not paid yet: an estimate, or an amount that is booked but still to pay, such as the rest of a hotel paid on site. Such a planned expense counts as planned in totals and budgets and creates no debts until it is marked as paid (`estimated: false`).
+An expense is a payment: `amount` is what the bill says, in the currency it was paid in. `estimated: true` marks one that is not paid yet: an estimate, or an amount that is booked but still to pay, such as the rest of a hotel paid on site. Such a planned expense counts as planned in totals and budgets and creates no debts until it is marked as paid (`estimated: false`). It may have a day it is due, `due: { date: 2027-04-01 }`, such as the balance of a deposit; clients remind the travellers shortly before, and marking it as paid removes `due`.
 
 ### 34.1 Dividing expenses and paying back
 
@@ -1019,6 +1019,8 @@ Lists in `split.parts` and `settled` are entries of people. They merge per perso
 ### 34.2 Expense categories
 
 An expense may have a `category`. The standard values are `transport`, `accommodation`, `food`, `activity`, `souvenirs` and `other`; clients translate them. Any other value is a category the travellers created, stored as they named it and shown as is. Clients offer the names already used in the trip, so both travellers share them, and treat names that differ only in case as the same.
+
+Totals per category may count every expense in full, or only the parts of some people (section 34.1), such as one traveller or a couple.
 
 Without a category, an expense takes one from the plans it belongs to, directly or through a booking: a journey is `transport`, a stay `accommodation`, food `food`, shopping `souvenirs`, and activities, sights, culture, nature, nightlife and free time `activity`. Otherwise it is `other`.
 
@@ -1144,6 +1146,8 @@ Once a version is created, deletion becomes a normal Git deletion.
 
 The format does not require permanent soft-delete tombstones for v1.
 
+A budget limited only to a deleted person or collection would cover the whole trip without that limit; clients offer to delete it with them, like places and files nobody uses any more.
+
 ## 40. Secrets
 
 The repository must never contain:
@@ -1254,6 +1258,12 @@ An export can also name more time zones to show beside each time, for example ho
 Attached documents are numbered A1, A2 and so on in order of first use, and every entry that uses one refers to its number. Renderers that cannot embed files list them by name.
 
 Packing list exports show, for everyone, who brings each item and whether it is done; for one person, the items that person brings and whether that person has packed them. An export can also show only the items nobody brings yet. A batch export writes one file per person who brings at least one item. CSV uses the separator that spreadsheets expect for the reader's language and prefixes cells that would start a formula with an apostrophe.
+
+### 45.2 Cost exports
+
+A cost export lists every payment, or with chosen people the payments they paid, share, owe or are owed money for: day (of the plan it belongs to), title, category, what it belongs to, the amount and currency as on the bill, the amount charged, the amount in the export's currency (the trip's by default; exactly where paid or charged in it, otherwise estimated with reference rates, otherwise left empty), who paid, whether it is still to pay, settled or how much is open, the due day, and each person's part. With chosen people, their parts are added up in the export's currency.
+
+As a CSV file, the separator is chosen (comma, semicolon, tab or pipe); amounts are plain numbers with the language's decimal separator, or a point where that is the column separator, and cells a spreadsheet would read as a formula are prefixed with an apostrophe. As a document (PDF or text), it begins with an overview (paid and still to pay, the trip's budget, or the chosen people's parts and their budgets), then totals by category, who owes whom with the payments that settle it, and every payment with its parts and what is open.
 
 ## 46. Validation
 

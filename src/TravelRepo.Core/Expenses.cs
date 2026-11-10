@@ -586,6 +586,21 @@ public static class Expenses
         return Create(trip, booking.Title, amount ?? throw new DomainException("expense.amount", "A payment needs an amount."), payers ?? [], booking.Id, planned);
     }
 
+    /// <summary>The day a payment still to pay is due, such as the rest of a deposit, or null.</summary>
+    public static NodaTime.LocalDate? DueOf(Entity expense) =>
+        expense.Data["due"]?["date"] is JsonValue d && LocalDatePattern.Iso.Parse(d.ToString()).TryGetValue(default, out var day) ? day : null;
+
+    /// <summary>A copy of the expense due on <paramref name="day"/>, or without a due day. Other fields of <c>due</c> are kept.</summary>
+    public static Entity WithDue(Entity expense, NodaTime.LocalDate? day)
+    {
+        var copy = expense.Copy();
+        if (day is not { } d) { copy.Data.Remove("due"); return copy; }
+        var due = copy.Data["due"] as JsonObject ?? new JsonObject();
+        due["date"] = LocalDatePattern.Iso.Format(d);
+        copy.Data["due"] = due;
+        return copy;
+    }
+
     /// <summary>Whether an expense is still to pay: an estimate, or an amount that is booked but not paid yet.</summary>
     public static bool IsPlanned(Entity expense) => expense.Data["estimated"] is JsonValue flag && flag.TryGetValue<bool>(out var planned) && planned;
 
@@ -646,6 +661,8 @@ public static class Expenses
     {
         var copy = expense.Copy();
         copy.Data["estimated"] = false;
+        // Paid now, so it is no longer due.
+        copy.Data.Remove("due");
         if ((copy.Data["paid_by"] as JsonArray ?? []).Count == 0 && payers?.Distinct().ToArray() is { Length: > 0 } who) copy.Data["paid_by"] = new JsonArray(who.Select(p => (JsonNode)p.ToString()).ToArray());
         return copy;
     }
@@ -683,6 +700,7 @@ public static class Expenses
         foreach (var expense in trip.Entities.Values.Where(e => e.Type == "expense"))
         {
             var path = expense.Id.ToString();
+            if (expense.Data["due"]?["date"] is JsonValue dueDate && !LocalDatePattern.Iso.Parse(dueDate.ToString()).Success) yield return new("date.invalid", Severity.Error, path + "/due", "Invalid calendar date.");
             foreach (var (field, key) in new[] { ("split/parts", "person"), ("settled", "person"), ("settled", "to") })
             {
                 var list = field == "settled" ? expense.Data["settled"] : expense.Data["split"]?["parts"];

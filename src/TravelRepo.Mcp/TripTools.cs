@@ -544,7 +544,9 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
 
     [McpServerTool(Name = "get_costs", Title = "Read the costs", ReadOnly = true, Idempotent = true, OpenWorld = false)]
     [Description("Costs of the trip. `currency` is the trip's currency, which the travellers count in: the budget, `paid_in`, balances and settle-up are in it, exactly where an amount was paid or charged in it (`charged`, see set_charged), otherwise estimated with the app's exchange rates and marked `estimated`; what cannot be converted stays in its own currency. `totals` are per currency paid in: paid and still to pay (`estimated`, planned payments). Then every expense with amount, currency, whether it is still to pay, who paid, what it belongs to, how it is divided (everyone's part) and what is still open. `balances` says per person what they are owed (positive) or owe (negative) over what is not paid back yet, and `settle_up` the fewest payments that settle it. `needs_attention` lists paid expenses left out of balances because their split does not add up. `budget` is the trip's one budget; `budgets` are budgets limited to a category, a person or a collection. `in` shows the costs in another currency instead.")]
-    public Task<string> GetCosts([Description("Optional currency to show costs in instead of the trip's currency, for example EUR.")] string? @in = null, CancellationToken ct = default) => Run(async () =>
+    public Task<string> GetCosts([Description("Optional currency to show costs in instead of the trip's currency, for example EUR.")] string? @in = null,
+        [Description("Optional people (ids or names): by_category then counts only their parts, such as one traveller's or a couple's.")] string[]? @for = null,
+        CancellationToken ct = default) => Run(async () =>
     {
         var trip = (await repository.ReadAsync(ct)).Trip;
         var target = @in is null ? TripCurrency.Of(trip) : ExchangeRates.Code(@in) ?? throw new McpException("\"in\" must be a currency code with three letters, such as EUR.");
@@ -572,6 +574,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
                 ["paid_by"] = Names(trip, e.Data["paid_by"]),
                 ["belongs_to"] = new JsonArray(related.Select(t => (JsonNode)t).ToArray()),
                 ["category"] = ExpenseCategories.Of(trip, e),
+                ["due"] = Expenses.DueOf(e)?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 ["split"] = SplitJson(trip, Expenses.Split(trip, e)),
                 ["charged"] = Expenses.ChargeOf(e) is { } charge ? new JsonObject { ["amount"] = charge.Value, ["currency"] = charge.Currency, ["rate"] = charge.Rate, ["date"] = charge.Date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) } : null
             };
@@ -612,7 +615,8 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
             ["estimated"] = b.Approximate ? true : null,
             ["not_included"] = b.NotIncluded.Count > 0 ? new JsonArray(b.NotIncluded.Select(m => (JsonNode)new JsonObject { ["amount"] = m.Value, ["currency"] = m.Currency }).ToArray()) : null
         }).ToArray());
-        result["by_category"] = new JsonArray(ExpenseCategories.Totals(trip, target, rates).Select(t => (JsonNode)new JsonObject { ["category"] = t.Category, ["currency"] = t.Currency, ["amount"] = t.Amount, ["estimated"] = t.Estimated ? true : null }).ToArray());
+        var forPeople = (@for ?? []).Select(p => Person(trip, p).Id).ToArray();
+        result["by_category"] = new JsonArray(ExpenseCategories.Totals(trip, target, rates, forPeople.Length > 0 ? forPeople : null).Select(t => (JsonNode)new JsonObject { ["category"] = t.Category, ["currency"] = t.Currency, ["amount"] = t.Amount, ["estimated"] = t.Estimated ? true : null }).ToArray());
         if (target is not null)
         {
             var paid = Expenses.Total(trip, target, rates);
@@ -759,6 +763,21 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         return new JsonObject { ["id"] = expense, ["entity"] = Find(saved.Trip, expense).Data.DeepClone() };
     });
 
+    [McpServerTool(Name = "export_costs", Title = "Export the costs", ReadOnly = true, Idempotent = true, OpenWorld = false)]
+    [Description("The trip's costs as a CSV table (one row per payment with category, amounts, what was charged, who paid, what is open and each person's part) or as text (overview, by category, who owes whom and every payment), for everyone or the parts of some people, in the trip's currency.")]
+    public Task<string> ExportCosts(
+        [Description("csv or text.")] string format = "csv",
+        [Description("Optional people (ids or names) whose parts to export; empty for everyone.")] string[]? people = null,
+        [Description("For csv: comma, semicolon, tab or pipe.")] string separator = "comma",
+        CancellationToken ct = default) => Run(async () =>
+    {
+        var trip = (await repository.ReadAsync(ct)).Trip;
+        var options = new CostExportOptions { People = (people ?? []).Select(p => Person(trip, p).Id).ToArray(), Rates = Rates() };
+        if (format.Trim().ToLowerInvariant() == "text") return new JsonObject { ["text"] = TripExport.Text(CostExport.Document(trip, options, culture: CultureInfo.InvariantCulture)) };
+        var sep = CostExport.Separators.GetValueOrDefault(separator.Trim().ToLowerInvariant()) ?? throw new McpException("\"separator\" is comma, semicolon, tab or pipe.");
+        return new JsonObject { ["csv"] = CostExport.Csv(trip, options, culture: CultureInfo.InvariantCulture, separator: sep) };
+    });
+
     [McpServerTool(Name = "mark_paid", Title = "Mark an expense as paid back", Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Marks what people owe for an expense as paid back, or with paid false takes the mark back. Without `person` it applies to everyone's part of the expense; with it only to what that person owes. Use get_costs to see what is open.")]
     public Task<string> MarkPaid(
@@ -817,9 +836,11 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         [Description("Optional id of the plan or booking it belongs to.")] string? belongs_to = null,
         [Description("True when it is not paid yet: an estimate or an amount still to pay.")] bool estimated = false,
         [Description("Optional category: transport, accommodation, food, activity, souvenirs, other, or a name of the travellers' own. Without one, the plan or booking it belongs to suggests it.")] string? category = null,
+        [Description("Optional day a payment still to pay is due, such as 2027-04-01; the app reminds the travellers a week before.")] string? due = null,
         CancellationToken ct = default) => Run(async () =>
     {
         if (string.IsNullOrWhiteSpace(title)) throw new McpException("An expense needs a title.");
+        NodaTime.LocalDate? dueDay = due is null ? null : NodaTime.Text.LocalDatePattern.Iso.Parse(due.Trim()) is { Success: true } parsedDue ? parsedDue.Value : throw new McpException("\"due\" must look like 2027-04-01.");
         var value = ExchangeRates.Amount(amount) ?? throw new McpException("\"amount\" must be a number such as 48.50.");
         var code = ExchangeRates.Code(currency) ?? throw new McpException("\"currency\" must be a code with three letters, such as EUR or NZD.");
         Guid id = default;
@@ -828,6 +849,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
             var payers = (paid_by ?? []).Select(p => Person(state.Trip, p).Id).ToArray();
             Guid? related = belongs_to is null ? null : Find(state.Trip, belongs_to).Id;
             var e = Expenses.Create(state.Trip, title, new Money(Expenses.Format(value, code), code), payers, related, estimated, category);
+            if (dueDay is not null && estimated) e = Expenses.WithDue(e, dueDay);
             id = e.Id;
             return ([new EntityEdit(e.Id, e)], null);
         }, ct);

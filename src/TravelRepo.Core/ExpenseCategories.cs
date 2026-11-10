@@ -76,15 +76,23 @@ public static class ExpenseCategories
     /// <summary>
     /// What the paid expenses come to per category, largest first. With <paramref name="currency"/>, amounts are
     /// converted as in <see cref="Expenses.Convert"/>; what cannot be converted stays in its own currency. Estimates
-    /// are left out.
+    /// are left out. With <paramref name="people"/>, only their parts count, such as one traveller's or a couple's
+    /// (section 34.1); otherwise every expense counts in full.
     /// </summary>
-    public static IReadOnlyList<CategoryTotal> Totals(TripSnapshot trip, string? currency = null, ExchangeRates? rates = null)
+    public static IReadOnlyList<CategoryTotal> Totals(TripSnapshot trip, string? currency = null, ExchangeRates? rates = null, IReadOnlyCollection<Guid>? people = null)
     {
         var sums = new Dictionary<(string Category, string Currency), (decimal Amount, bool Estimated)>();
         foreach (var expense in trip.Entities.Values.Where(e => e.Type == "expense"))
         {
             if (TripSummaries.Money(expense.Data["amount"]) is not { } money || expense.Data["estimated"] is JsonValue flag && flag.TryGetValue<bool>(out var guess) && guess) continue;
-            var (amount, code, how) = currency is null ? (money.Amount, money.Currency, Conversion.Same) : Expenses.Convert(expense, money.Amount, money.Currency, currency, rates);
+            var value = money.Amount;
+            if (people is { Count: > 0 })
+            {
+                var split = Expenses.Split(trip, expense);
+                value = people.Distinct().Sum(split.ShareOf);
+                if (value == 0) continue;
+            }
+            var (amount, code, how) = currency is null ? (value, money.Currency, Conversion.Same) : Expenses.Convert(expense, value, money.Currency, currency, rates);
             var key = (Of(trip, expense), code);
             var sum = sums.GetValueOrDefault(key);
             sums[key] = (sum.Amount + amount, sum.Estimated || how == Conversion.Reference);
