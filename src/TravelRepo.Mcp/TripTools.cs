@@ -200,6 +200,8 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         [Description("Optional last day, yyyy-mm-dd (plan only).")] string? to = null,
         [Description("Optional parts for the plan, comma-separated: schedule, stays, bookings, contacts, costs, tasks, notes, packing. Default: schedule, stays, bookings, contacts, costs.")] string? parts = null,
         [Description("True for times, titles, places and booking references only.")] bool compact = false,
+        [Description("Optional time zone such as Pacific/Auckland or UTC (plan only): every time and day is shown in it. Default: the trip's time zone, with times planned elsewhere in their own zone.")] string? timezone = null,
+        [Description("Optional more time zones, comma-separated, such as Europe/Berlin,UTC (plan only): each time also appears in these, with the city's name.")] string? also_timezones = null,
         CancellationToken ct = default) => Run(async () =>
     {
         var trip = (await repository.ReadAsync(ct)).Trip; var who = person is null ? (Guid?)null : Person(trip, person).Id;
@@ -208,7 +210,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
             var text = kind switch
             {
                 "packing" => PackingExport.Text(trip, new PackingExportOptions { Person = who }),
-                "plan" => TripExport.Text(TripExport.Document(trip, new ExportOptions { Person = who, From = ExportOptions.ParseDate(from), To = ExportOptions.ParseDate(to), Parts = parts is null ? ExportParts.Standard : ExportOptions.ParseParts(parts) & ~(ExportParts.Map | ExportParts.Attachments), Detail = compact ? ExportDetail.Compact : ExportDetail.Detailed })),
+                "plan" => TripExport.Text(TripExport.Document(trip, new ExportOptions { Person = who, From = ExportOptions.ParseDate(from), To = ExportOptions.ParseDate(to), Parts = parts is null ? ExportParts.Standard : ExportOptions.ParseParts(parts) & ~(ExportParts.Map | ExportParts.Attachments), Detail = compact ? ExportDetail.Compact : ExportDetail.Detailed, TimeZone = ExportOptions.ParseZone(timezone), OtherTimeZones = ExportOptions.ParseZones(also_timezones) })),
                 _ => throw new McpException("Use kind \"plan\" or \"packing\".")
             };
             return new JsonObject { ["text"] = text };
