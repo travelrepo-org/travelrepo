@@ -2,6 +2,18 @@
 
 All notable changes to TravelRepo. Generated from `docs/releases` by `python eng/changelog.py`; do not edit by hand.
 
+## 0.8.0 – 2026-11-10
+
+### Changes
+
+- Exports can show every time in one chosen time zone, for example to read a plan from home: ExportOptions.TimeZone, --timezone in the CLI and timezone in the MCP tool export_text. Exact times, the days the schedule is grouped by, the date range, the time line and the days of comments follow that zone. All-day and day-part plans and approximate check-in and check-out times keep their planned day, and calendar files are unaffected (specification section 45.1).
+- Exports can also show each time in more time zones below it, named by city and with the date when the day there is another: ExportOptions.OtherTimeZones, --also-timezones in the CLI and also_timezones in export_text.
+- WeatherService.UpdateAsync(trip, refresh: true) fetches forecasts again before they expire, for when someone asks for fresh weather. Forecasts fetched in the last five minutes are left as they are, and so are those of services that set their own expiry, as MET Norway and the National Weather Service do (IWeatherProvider.ServiceSetsExpiry).
+
+### Fixes
+
+- German exports write the full stop after the day, such as "4. Juni 2027", "Freitag, 4. Juni" and "Fr, 4. Jun".
+
 ## 0.7.0 – 2026-11-05
 
 ### Changes
