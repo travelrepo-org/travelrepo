@@ -478,7 +478,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
     };
 
     [McpServerTool(Name = "get_bookings", Title = "Read the bookings", ReadOnly = true, Idempotent = true, OpenWorld = false)]
-    [Description("The trip's bookings with provider, booking number, status, price, free cancellation deadline, travellers, the plans they are for (with their times), attached files and the expenses recorded for them; `missing_expense` marks a booking with a price but no expense yet (add one with add_expense and belongs_to).")]
+    [Description("The trip's bookings with provider, booking number, status, free cancellation deadline, travellers, the plans they are for (with their times), attached files and their payments: expenses that belong to the booking, paid or still to pay (`planned`). A booking has no price of its own; what it costs is its payments, added up in the trip's currency as `paid` and `to_pay`. `legacy_price` is a price an older app stored; the app turns it into payments when the travellers upgrade the trip.")]
     public Task<string> GetBookings(CancellationToken ct = default) => Run(async () =>
     {
         var trip = (await repository.ReadAsync(ct)).Trip;
@@ -497,15 +497,32 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
             ["provider"] = booking.Data["provider"] is JsonObject provider ? provider["name"]?.DeepClone() : booking.Data["provider"]?.DeepClone(),
             ["reference"] = booking.Data["reference"]?.DeepClone(),
             ["status"] = booking.Data["status"]?.DeepClone(),
-            ["price"] = booking.Data["price"]?.DeepClone(),
+            ["legacy_price"] = booking.Data["price"]?.DeepClone(),
             ["free_cancellation_until"] = booking.Data["cancellation"]?["free_until"]?.DeepClone(),
             ["travelers"] = Names(trip, booking.Data["travelers"]),
             ["plans"] = new JsonArray(plans.Select(e => (JsonNode)Summary(trip, e)).ToArray()),
             ["files"] = new JsonArray(TripCommands.AttachedDocuments(trip, booking).Select(d => (JsonNode)new JsonObject { ["id"] = d.Id.ToString(), ["name"] = d.Title }).ToArray()),
-            ["expenses"] = new JsonArray(Expenses.ForBooking(trip, booking.Id).Select(e => (JsonNode)new JsonObject { ["id"] = e.Id.ToString(), ["title"] = e.Title }).ToArray()),
-            ["recorded"] = Expenses.Payment(trip, booking) is { Coverage: not BookingCoverage.NoPrice } payment ? new JsonObject { ["coverage"] = payment.Coverage.ToString().ToLowerInvariant(), ["amount"] = payment.Recorded, ["open"] = payment.Coverage == BookingCoverage.Partial ? payment.Rest : null } : null,
-            ["missing_expense"] = Expenses.WithoutExpense(trip).Any(b => b.Id == booking.Id) ? true : null
+            ["payments"] = new JsonArray(Expenses.ForBooking(trip, booking.Id).Select(e => (JsonNode)new JsonObject
+            {
+                ["id"] = e.Id.ToString(),
+                ["title"] = e.Title,
+                ["amount"] = TripSummaries.Money(e.Data["amount"])?.Value,
+                ["currency"] = TripSummaries.Money(e.Data["amount"])?.Currency,
+                ["planned"] = Expenses.IsPlanned(e) ? true : null,
+                ["paid_by"] = Names(trip, e.Data["paid_by"]),
+                ["charged"] = Expenses.ChargeOf(e) is { } charge ? new JsonObject { ["amount"] = charge.Value, ["currency"] = charge.Currency } : null
+            }).ToArray()),
+            ["paid"] = BookingTotal(trip, booking, planned: false),
+            ["to_pay"] = BookingTotal(trip, booking, planned: true)
         };
+    }
+
+    private static JsonObject? BookingTotal(TripSnapshot trip, Entity booking, bool planned)
+    {
+        var expenses = Expenses.ForBooking(trip, booking.Id).Where(e => Expenses.IsPlanned(e) == planned).ToArray();
+        if (expenses.Length == 0 || (TripCurrency.Of(trip) ?? TripSummaries.Money(expenses[0].Data["amount"])?.Currency) is not { } currency) return null;
+        var total = Expenses.Total(expenses, currency, null, planned);
+        return new JsonObject { ["amount"] = total.Total, ["currency"] = currency, ["not_converted"] = total.NotConverted.Count > 0 ? new JsonArray(total.NotConverted.Select(m => (JsonNode)new JsonObject { ["amount"] = m.Value, ["currency"] = m.Currency }).ToArray()) : null };
     }
 
     private static JsonArray Names(TripSnapshot trip, JsonNode? ids) =>
@@ -526,11 +543,11 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
     });
 
     [McpServerTool(Name = "get_costs", Title = "Read the costs", ReadOnly = true, Idempotent = true, OpenWorld = false)]
-    [Description("Costs of the trip per currency: paid, still estimated, budget and what is left; then every expense with amount, currency, whether it is an estimate, who paid, what it belongs to, how it is divided (everyone's part) and what is still open, and booking prices. `balances` says per person and currency what they are owed (positive) or owe (negative) over what is not paid back yet, and `settle_up` the fewest payments that settle it. With `in`, balances and settle-up are in that currency where possible: exactly with the amount a card actually charged (`charged`, see set_charged), otherwise estimated with the app's rates and marked `estimated`; `paid_in` totals the paid expenses that way. Amounts are never converted unless `in` names a currency: then totals are also given in it, using the exchange rates the app last downloaded (reference rates for orientation, with their date).")]
-    public Task<string> GetCosts([Description("Optional currency to also show totals in, for example EUR.")] string? @in = null, CancellationToken ct = default) => Run(async () =>
+    [Description("Costs of the trip. `currency` is the trip's currency, which the travellers count in: the budget, `paid_in`, balances and settle-up are in it, exactly where an amount was paid or charged in it (`charged`, see set_charged), otherwise estimated with the app's exchange rates and marked `estimated`; what cannot be converted stays in its own currency. `totals` are per currency paid in: paid and still to pay (`estimated`, planned payments). Then every expense with amount, currency, whether it is still to pay, who paid, what it belongs to, how it is divided (everyone's part) and what is still open. `balances` says per person what they are owed (positive) or owe (negative) over what is not paid back yet, and `settle_up` the fewest payments that settle it. `needs_attention` lists paid expenses left out of balances because their split does not add up. `budget` is the trip's one budget; `budgets` are budgets limited to a category, a person or a collection. `in` shows the costs in another currency instead.")]
+    public Task<string> GetCosts([Description("Optional currency to show costs in instead of the trip's currency, for example EUR.")] string? @in = null, CancellationToken ct = default) => Run(async () =>
     {
         var trip = (await repository.ReadAsync(ct)).Trip;
-        var target = @in is null ? null : ExchangeRates.Code(@in) ?? throw new McpException("\"in\" must be a currency code with three letters, such as EUR.");
+        var target = @in is null ? TripCurrency.Of(trip) : ExchangeRates.Code(@in) ?? throw new McpException("\"in\" must be a currency code with three letters, such as EUR.");
         var rates = target is null ? null : Rates();
         decimal? Converted(decimal amount, string currency) => rates?.Convert(amount, currency, target!) is { } v ? Math.Round(v, 2) : null;
         var totals = TripSummaries.Costs(trip).Select(t => (JsonNode)new JsonObject
@@ -539,8 +556,6 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
             ["paid"] = t.Paid,
             ["estimated"] = t.Estimated,
             ["total"] = t.Total,
-            ["budget"] = t.Budget > 0 ? t.Budget : null,
-            ["left"] = t.Budget > 0 ? t.Budget - t.Total : null,
             ["total_in"] = target is null ? null : Converted(t.Total, t.Currency)
         }).ToArray();
         var expenses = trip.Entities.Values.Where(e => e.Type == "expense").OrderBy(e => e.Title, StringComparer.Ordinal).Select(e =>
@@ -564,16 +579,28 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         string Name(Guid id) => trip.Find(id)?.Title ?? id.ToString();
         var result = new JsonObject
         {
+            ["currency"] = target,
             ["totals"] = new JsonArray(totals),
             ["expenses"] = new JsonArray(expenses),
             ["balances"] = new JsonArray(Expenses.Balances(trip, target, rates).Select(b => (JsonNode)new JsonObject { ["person"] = Name(b.Person), ["currency"] = b.Currency, ["net"] = b.Net, ["estimated"] = b.Estimated ? true : null }).ToArray()),
             ["settle_up"] = new JsonArray(Expenses.SettleUp(trip, target, rates).Select(t => (JsonNode)new JsonObject { ["from"] = Name(t.From), ["to"] = Name(t.To), ["currency"] = t.Currency, ["amount"] = t.Amount, ["estimated"] = t.Estimated ? true : null }).ToArray())
         };
-        result["budgets"] = new JsonArray(Budgets.All(trip, rates).Select(b => (JsonNode)new JsonObject
+        result["needs_attention"] = new JsonArray(Expenses.Problems(trip).Select(p => (JsonNode)new JsonObject { ["id"] = p.Expense.Id.ToString(), ["title"] = p.Expense.Title, ["issues"] = p.Issues.ToString() }).ToArray());
+        if (Budgets.ForTrip(trip, rates) is { } tripBudget)
+            result["budget"] = new JsonObject
+            {
+                ["amount"] = tripBudget.Amount,
+                ["currency"] = tripBudget.Currency,
+                ["spent"] = tripBudget.Paid.Total,
+                ["planned"] = tripBudget.Planned.Total,
+                ["left"] = tripBudget.Left,
+                ["estimated"] = tripBudget.Approximate ? true : null,
+                ["from"] = new JsonArray(tripBudget.Budgets.Select(b => (JsonNode)new JsonObject { ["id"] = b.Id.ToString(), ["title"] = b.Title, ["amount"] = TripSummaries.Money(b.Data["amount"])?.Value, ["currency"] = TripSummaries.Money(b.Data["amount"])?.Currency }).ToArray())
+            };
+        result["budgets"] = new JsonArray(Budgets.Limited(trip, rates).Select(b => (JsonNode)new JsonObject
         {
             ["id"] = b.Budget.Id.ToString(),
             ["title"] = b.Budget.Title,
-            ["scope"] = b.Scope,
             ["category"] = b.Filters.Category,
             ["person"] = b.Filters.Person is { } budgetPerson ? trip.Find(budgetPerson)?.Title : null,
             ["collection"] = b.Filters.Collection is { } budgetCollection ? trip.Find(budgetCollection)?.Title : null,
@@ -601,7 +628,8 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         }
         var prices = trip.Entities.Values.Where(e => e.Type == "booking" && TripSummaries.Money(e.Data["price"]) is not null)
             .Select(b => (JsonNode)new JsonObject { ["booking"] = b.Title, ["price"] = b.Data["price"]!.DeepClone(), ["status"] = b.Data["status"]?.DeepClone() }).ToArray();
-        if (prices.Length > 0) result["booking_prices"] = new JsonArray(prices);
+        // Prices older apps stored on bookings; they are not counted until the travellers upgrade the trip in the app.
+        if (prices.Length > 0) result["legacy_booking_prices"] = new JsonArray(prices);
         if (target is not null) result["rates"] = RatesNote(rates);
         return result;
     });
@@ -621,7 +649,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
     }
 
     [McpServerTool(Name = "split_expense", Title = "Divide an expense", Destructive = false, Idempotent = true, OpenWorld = false)]
-    [Description("Sets how an expense is divided. Without a split, an expense is divided equally among all travellers. `method` is equal, amount, share or percent. `people` are ids or names; with equal they are the people who share it (empty: everyone), otherwise `values` gives each person's amount (adding up to the expense), weight (such as 2 for a couple) or percentage (adding up to 100) in the same order, as typed (\"12,50\" works). What was already paid back is kept; get_costs then shows what is still owed or owed back.")]
+    [Description("Sets how an expense is divided. `method` is equal, amount, share or percent. `people` are ids or names; with equal they are the people who share it (empty: every traveller of now), otherwise `values` gives each person's amount (adding up to the expense), weight (such as 2 for a couple) or percentage (adding up to 100) in the same order, as typed (\"12,50\" works). What was already paid back is kept; get_costs then shows what is still owed or owed back.")]
     public Task<string> SplitExpense(
         [Description("The expense's id.")] string expense,
         [Description("equal, amount, share or percent.")] string method,
@@ -635,6 +663,8 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
             var target = Find(state.Trip, expense);
             if (target.Type != "expense") throw new McpException(target.Title + " is not an expense.");
             var who = (people ?? []).Select(p => Person(state.Trip, p).Id).ToArray();
+            // The people are always named, so a traveller added later does not join it by accident.
+            if (who.Length == 0 && how == SplitMethod.Equal) who = TripPeople.Travelers(state.Trip).Select(p => p.Id).ToArray();
             if (how != SplitMethod.Equal && (values is null || values.Length != who.Length)) throw new McpException("Give one value per person for " + method + ".");
             var parts = who.Select((p, i) => (p, how == SplitMethod.Equal ? (decimal?)null : ExchangeRates.Amount(values![i]) ?? throw new McpException("\"" + values[i] + "\" is not a number."))).ToArray();
             var changed = Expenses.WithSplit(target, how, parts);
@@ -668,6 +698,65 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         }, ct);
         var result = Find(saved.Trip, expense);
         return new JsonObject { ["id"] = result.Id.ToString(), ["converted"] = result.Data["converted"]?.DeepClone() };
+    });
+
+    [McpServerTool(Name = "set_trip_currency", Title = "Set the trip's currency", Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Sets the currency the travellers count in, such as EUR: the budget, totals and who owes whom are shown in it, and amounts charged on cards are entered in it. Amounts of expenses stay in the currency they were paid in.")]
+    public Task<string> SetTripCurrency([Description("A three-letter code such as EUR.")] string currency, CancellationToken ct = default) => Run(async () =>
+    {
+        var code = ExchangeRates.Code(currency) ?? throw new McpException("\"currency\" must be a code with three letters, such as EUR.");
+        var saved = await Write(state => ([new EntityEdit(state.Trip.Manifest.Id, TripCurrency.With(state.Trip.Manifest, code))], null), ct);
+        return new JsonObject { ["currency"] = TripCurrency.Of(saved.Trip) };
+    });
+
+    [McpServerTool(Name = "set_budget", Title = "Set a budget", Destructive = false, OpenWorld = false)]
+    [Description("Creates or changes a budget in the trip's currency. Without limits it is part of the trip's one budget; with `category`, `person` and `collection` (all optional, applying together) it covers only that, for example one person's food. get_costs shows where it stands.")]
+    public Task<string> SetBudget(
+        [Description("The budget's title, for example \"Eating out\".")] string title,
+        [Description("The amount, for example 600.")] string amount,
+        [Description("Optional id of an existing budget to change.")] string? id = null,
+        [Description("Optional category: transport, accommodation, food, activity, souvenirs, other, or the travellers' own.")] string? category = null,
+        [Description("Optional person (id or name) whose part of the expenses it covers.")] string? person = null,
+        [Description("Optional collection id whose plans and bookings it covers.")] string? collection = null,
+        CancellationToken ct = default) => Run(async () =>
+    {
+        var value = ExchangeRates.Amount(amount) ?? throw new McpException("\"amount\" must be a number such as 600.");
+        Guid target = default;
+        var saved = await Write(state =>
+        {
+            var currency = TripCurrency.Of(state.Trip) ?? throw new McpException("The trip has no currency yet; set one with set_trip_currency.");
+            var budget = id is null ? Entity.Create("budget", title.Trim()) : Find(state.Trip, id).Copy();
+            if (budget.Type != "budget") throw new McpException(budget.Title + " is not a budget.");
+            budget.Data["title"] = title.Trim();
+            budget.Data["amount"] = new JsonObject { ["value"] = Expenses.Format(value, currency), ["currency"] = currency };
+            Guid? who = person is null ? null : Person(state.Trip, person).Id;
+            Guid? group = collection is null ? null : Find(state.Trip, collection).Id;
+            try { budget = Budgets.WithFilters(state.Trip, budget, new BudgetFilters(category, who, group)); }
+            catch (DomainException ex) { throw new McpException(ex.Message); }
+            target = budget.Id;
+            return ([new EntityEdit(budget.Id, budget)], null);
+        }, ct);
+        return new JsonObject { ["id"] = target.ToString(), ["entity"] = saved.Trip.Find(target)!.Data.DeepClone() };
+    });
+
+    [McpServerTool(Name = "record_payment", Title = "Record that a planned payment was paid", Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Marks an expense that was still to pay (`estimated`), such as the rest of a booking paid on site, as paid, optionally by whom and with a different amount as on the bill. Who owes whom counts it from then on.")]
+    public Task<string> RecordPayment(
+        [Description("The expense's id.")] string expense,
+        [Description("Optional people who paid it (ids or names), when it names nobody yet.")] string[]? paid_by = null,
+        [Description("Optional amount as on the bill, when it differs from the planned one.")] string? amount = null,
+        CancellationToken ct = default) => Run(async () =>
+    {
+        decimal? value = amount is null ? null : ExchangeRates.Amount(amount) ?? throw new McpException("\"amount\" must be a number such as 48.50.");
+        var saved = await Write(state =>
+        {
+            var target = Find(state.Trip, expense);
+            if (target.Type != "expense") throw new McpException(target.Title + " is not an expense.");
+            var paid = Expenses.MarkPaid(target, (paid_by ?? []).Select(p => Person(state.Trip, p).Id));
+            if (value is { } v && TripSummaries.Money(paid.Data["amount"]) is { } money) paid.Data["amount"] = new JsonObject { ["value"] = Expenses.Format(v, money.Currency), ["currency"] = money.Currency };
+            return ([new EntityEdit(paid.Id, paid)], null);
+        }, ct);
+        return new JsonObject { ["id"] = expense, ["entity"] = Find(saved.Trip, expense).Data.DeepClone() };
     });
 
     [McpServerTool(Name = "mark_paid", Title = "Mark an expense as paid back", Destructive = false, Idempotent = true, OpenWorld = false)]
@@ -719,31 +808,30 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
     }
 
     [McpServerTool(Name = "add_expense", Title = "Add an expense", Destructive = false, OpenWorld = false)]
-    [Description("Adds an expense with its amount and currency as the travellers typed it (\"12,50\" and \"12.50\" both work; the currency is a three-letter code such as NZD), who paid it (ids or names, several allowed), and optionally the plan or booking it belongs to and whether it is only an estimate. Amounts stay in their currency; nothing is converted.")]
+    [Description("Adds an expense (a payment) with its amount and currency as on the bill (\"12,50\" and \"12.50\" both work; the currency is a three-letter code such as NZD), who paid it (ids or names, several allowed), and optionally the plan or booking it belongs to, whether it is still to pay (`estimated`, for example the rest of a booking paid on site) and a category. It is shared equally by the booking's travellers, otherwise the plan's people, otherwise all travellers; use split_expense to change that. Amounts stay in their currency; nothing is converted. Record what a card charged with set_charged.")]
     public Task<string> AddExpense(
         [Description("What it was for, for example \"Ferry tickets\".")] string title,
         [Description("The amount, for example 48.50.")] string amount,
         [Description("The currency, for example NZD.")] string currency,
         [Description("Optional people who paid it (ids or names).")] string[]? paid_by = null,
         [Description("Optional id of the plan or booking it belongs to.")] string? belongs_to = null,
-        [Description("True when it is only an estimate so far.")] bool estimated = false,
+        [Description("True when it is not paid yet: an estimate or an amount still to pay.")] bool estimated = false,
         [Description("Optional category: transport, accommodation, food, activity, souvenirs, other, or a name of the travellers' own. Without one, the plan or booking it belongs to suggests it.")] string? category = null,
         CancellationToken ct = default) => Run(async () =>
     {
         if (string.IsNullOrWhiteSpace(title)) throw new McpException("An expense needs a title.");
         var value = ExchangeRates.Amount(amount) ?? throw new McpException("\"amount\" must be a number such as 48.50.");
         var code = ExchangeRates.Code(currency) ?? throw new McpException("\"currency\" must be a code with three letters, such as EUR or NZD.");
-        var expense = Entity.Create("expense", title.Trim());
+        Guid id = default;
         var saved = await Write(state =>
         {
-            var e = expense.Copy();
-            e.Data["amount"] = new JsonObject { ["value"] = value.ToString("0.00", CultureInfo.InvariantCulture), ["currency"] = code };
-            e.Data["estimated"] = estimated;
-            if (paid_by is { Length: > 0 }) e.Data["paid_by"] = new JsonArray(paid_by.Select(p => (JsonNode)Person(state.Trip, p).Id.ToString()).ToArray());
-            if (belongs_to is not null && Find(state.Trip, belongs_to) is var target) e.Data["related"] = new JsonArray(new JsonObject { ["id"] = target.Id.ToString(), ["type"] = target.Type });
-            if (category is not null) e = ExpenseCategories.With(state.Trip, e, category);
+            var payers = (paid_by ?? []).Select(p => Person(state.Trip, p).Id).ToArray();
+            Guid? related = belongs_to is null ? null : Find(state.Trip, belongs_to).Id;
+            var e = Expenses.Create(state.Trip, title, new Money(Expenses.Format(value, code), code), payers, related, estimated, category);
+            id = e.Id;
             return ([new EntityEdit(e.Id, e)], null);
         }, ct);
+        var expense = saved.Trip.Find(id)!;
         return new JsonObject { ["id"] = expense.Id.ToString(), ["entity"] = saved.Trip.Find(expense.Id)!.Data.DeepClone() };
     });
 
@@ -822,8 +910,21 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         var saved = await Write(state =>
         {
             var edits = new List<EntityEdit> { new(entity.Id, entity) };
+            // An expense names who shares it, so a traveller added later does not join it by accident.
+            if (type == "expense" && Expenses.SharesWithEveryone(entity) && Expenses.PeopleFor(state.Trip, Guid.TryParse(entity.Data["related"]?[0]?["id"]?.ToString(), out var rel) ? rel : null) is { Count: > 0 } people)
+                edits[0] = new(entity.Id, Expenses.WithSplit(entity, SplitMethod.Equal, people.Select(p => (p, (decimal?)null))));
+            // A booking has no price of its own; a price given becomes a payment still to pay.
+            if (type == "booking" && TripSummaries.Money(entity.Data["price"]) is { } price)
+            {
+                var booking = entity.Copy(); booking.Data.Remove("price"); edits[0] = new(booking.Id, booking);
+                var withBooking = state.Trip with { Entities = state.Trip.Entities.Values.Append(booking).ToDictionary(e => e.Id) };
+                var payment = Expenses.FromBooking(withBooking, booking, price, planned: true);
+                edits.Add(new(payment.Id, payment));
+            }
             if (type == "person")
             {
+                // Expenses that named nobody were shared by the travellers so far; they keep that.
+                edits.AddRange(Expenses.FixShares(state.Trip).Select(e => new EntityEdit(e.Id, e)));
                 var manifest = state.Trip.Manifest.Copy(); var participants = manifest.Data["participants"] as JsonArray ?? [];
                 manifest.Data["participants"] = participants; participants.Add(entity.Id.ToString()); edits.Add(new(manifest.Id, manifest));
             }

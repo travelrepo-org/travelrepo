@@ -360,4 +360,45 @@ public sealed class McpServerTests : IDisposable
         Assert.Equal(33.60m + 60m, inEuros["paid_in"]!["exact"]!.GetValue<decimal>());
         Assert.DoesNotContain((await repo.ReadAsync()).Diagnostics, d => d.Severity == Severity.Error);
     }
+
+    [Fact]
+    public async Task AssistantsRecordBookingPaymentsBudgetsAndTheTripCurrency()
+    {
+        var (repo, _) = await Trip();
+        var client = await Connect(repo.Root);
+        var ana = Entity.Create("person", "Ana"); var ben = Entity.Create("person", "Ben"); var cleo = Entity.Create("person", "Cleo");
+        var state = await repo.ReadAsync();
+        var manifest = state.Trip.Manifest.Copy(); manifest.Data["participants"] = new JsonArray(ana.Id.ToString(), ben.Id.ToString(), cleo.Id.ToString());
+        await repo.ApplyAsync(state, [new(ana.Id, ana), new(ben.Id, ben), new(cleo.Id, cleo), new(manifest.Id, manifest)]);
+        Assert.Equal("EUR", (await Call(client, "set_trip_currency", """{"currency":"eur"}"""))["currency"]!.ToString());
+
+        // A booking created with a price gets a payment still to pay instead, shared by its travellers.
+        var booking = (await Call(client, "create_entity", "{\"type\":\"booking\",\"data\":{\"title\":\"Lodge\",\"status\":\"confirmed\",\"travelers\":[\"" + ana.Id + "\",\"" + ben.Id + "\"],\"price\":{\"value\":\"300.00\",\"currency\":\"EUR\"}}}"))["id"]!.ToString();
+        var bookings = await Call(client, "get_bookings", "{}");
+        var lodge = bookings["bookings"]![0]!;
+        Assert.Null(lodge["legacy_price"]);
+        Assert.Equal(300m, lodge["to_pay"]!["amount"]!.GetValue<decimal>());
+        var payment = lodge["payments"]![0]!["id"]!.ToString();
+        var paid = await Call(client, "record_payment", "{\"expense\":\"" + payment + "\",\"paid_by\":[\"Ana\"],\"amount\":\"310\"}");
+        Assert.False(paid["entity"]!["estimated"]!.GetValue<bool>());
+        var costs = await Call(client, "get_costs", "{}");
+        Assert.Equal("EUR", costs["currency"]!.ToString());
+        Assert.Equal(("Ben", "Ana", 155m), (costs["settle_up"]![0]!["from"]!.ToString(), costs["settle_up"]![0]!["to"]!.ToString(), costs["settle_up"]![0]!["amount"]!.GetValue<decimal>()));
+
+        // A new traveller does not join what was shared before.
+        var dinner = (await Call(client, "add_expense", """{"title":"Dinner","amount":"90","currency":"EUR","paid_by":["Cleo"]}"""))["id"]!.ToString();
+        await Call(client, "create_entity", """{"type":"person","data":{"display_name":"Dana"}}""");
+        costs = await Call(client, "get_costs", "{}");
+        Assert.Equal(3, costs["expenses"]!.AsArray().Single(e => e!["id"]!.ToString() == dinner)!["split"]!["parts"]!.AsArray().Count);
+
+        // One trip budget and one for Ben's food, both in the trip's currency.
+        await Call(client, "set_budget", """{"title":"Trip","amount":"2000"}""");
+        await Call(client, "set_budget", """{"title":"Ben's food","amount":"100","category":"food","person":"Ben"}""");
+        costs = await Call(client, "get_costs", "{}");
+        Assert.Equal((2000m, 400m), (costs["budget"]!["amount"]!.GetValue<decimal>(), costs["budget"]!["spent"]!.GetValue<decimal>()));
+        Assert.Equal("Ben's food", costs["budgets"]![0]!["title"]!.ToString());
+        Assert.Empty(costs["needs_attention"]!.AsArray());
+        Assert.Equal(booking, bookings["bookings"]![0]!["id"]!.ToString());
+        Assert.DoesNotContain((await repo.ReadAsync()).Diagnostics, d => d.Severity == Severity.Error);
+    }
 }

@@ -366,12 +366,14 @@ public class ExpenseSplitTests
         Assert.Equal(100m, Expenses.Split(With(trip, byPercent), byPercent).Assigned);
         var byShare = Expenses.ChangeMethod(trip, byPercent, SplitMethod.Share);
         Assert.Equal(["1", "1", "1"], ((JsonArray)byShare.Data["split"]!["parts"]!).Select(p => p!["value"]!.ToString()));
-        Assert.Null(Expenses.ChangeMethod(With(trip, byShare), byShare, SplitMethod.Equal).Data["split"]);
+        // Back to equal, the three stay named, so a traveller added later does not join.
+        var equal = Expenses.ChangeMethod(With(trip, byShare), byShare, SplitMethod.Equal);
+        Assert.Equal(("equal", 3), (equal.Data["split"]!["method"]!.ToString(), ((JsonArray)equal.Data["split"]!["parts"]!).Count));
 
         // Leaving someone out, then giving an amount: the parts tell how much is still to divide.
         var twoOnly = Expenses.WithPerson(trip, hotel, Cleo.Id, false);
         Assert.Equal([Ana.Id, Ben.Id], Expenses.Split(With(trip, twoOnly), twoOnly).People);
-        Assert.Null(Expenses.WithPerson(With(trip, twoOnly), twoOnly, Cleo.Id, true).Data["split"]);
+        Assert.Equal([Ana.Id, Ben.Id, Cleo.Id], Expenses.Split(trip, Expenses.WithPerson(With(trip, twoOnly), twoOnly, Cleo.Id, true)).People);
         var amounts = Expenses.ChangeMethod(With(trip, twoOnly), twoOnly, SplitMethod.Amount);
         var changed = Expenses.WithValue(With(trip, amounts), amounts, Ana.Id, 70m);
         var split = Expenses.Split(With(trip, changed), changed);
@@ -426,30 +428,79 @@ public class ExpenseSplitTests
         Assert.Equal("Visa", Expenses.WithCharge(extended, 191m, "EUR").Data["converted"]!["org.example.card"]!.ToString());
     }
     [Fact]
-    public void BookingsWithAPriceButNoExpenseAreFoundAndBecomeExpenses()
+    public void ABookingsPaymentsSayWhatItCostsAndWhoSharesThem()
     {
-        Entity Booking(string title, string? price, string status = "confirmed")
-        {
-            var b = Entity.Create("booking", title); b.Data["status"] = status;
-            if (price is not null) b.Data["price"] = new JsonObject { ["value"] = price, ["currency"] = "NZD" };
-            return b;
-        }
-        var teAnau = Booking("Te Anau Lakeview", "347.60"); var hobbiton = Booking("Hobbiton", "340.00");
-        var cancelled = Booking("Old motel", "120.00", "cancelled"); var noPrice = Booking("Ferry", null); var idea = Booking("Maybe a lodge", "200.00", "idea");
-        var paid = Expense("Hobbiton (2 people)", "340.00", "NZD", Ana);
-        paid.Data["related"] = new JsonArray(new JsonObject { ["type"] = "booking", ["id"] = hobbiton.Id.ToString() });
-        var trip = Trip(teAnau, hobbiton, cancelled, noPrice, idea, paid);
-        Assert.Equal([teAnau.Id], Expenses.WithoutExpense(trip).Select(b => b.Id));
-        Assert.Equal([paid.Id], Expenses.ForBooking(trip, hobbiton.Id).Select(e => e.Id));
+        var hotel = Entity.Create("booking", "Lakeside lodge"); hotel.Data["status"] = "confirmed";
+        hotel.Data["travelers"] = new JsonArray(Ana.Id.ToString(), Ben.Id.ToString());
+        var trip = Trip(hotel);
+        Assert.Equal(BookingCoverage.None, Expenses.Payment(trip, hotel).Coverage);
 
-        var expense = Expenses.FromBooking(teAnau);
-        Assert.Empty(SchemaValidation.Validate(expense));
-        Assert.Equal(("Te Anau Lakeview", "347.60", "NZD"), (expense.Title, expense.Data["amount"]!["value"]!.ToString(), expense.Data["amount"]!["currency"]!.ToString()));
-        trip = With(trip, expense);
-        Assert.Empty(Expenses.WithoutExpense(trip));
-        Assert.DoesNotContain(SemanticValidation.Validate(trip), d => d.Severity == Severity.Error);
-        Assert.Throws<DomainException>(() => Expenses.FromBooking(noPrice));
+        // A deposit is paid now, the rest is still to pay on site; both are shared by the booking's travellers only.
+        var deposit = Expenses.FromBooking(trip, hotel, new Money("100.00", "NZD"), payers: [Ana.Id]);
+        var rest = Expenses.FromBooking(trip, hotel, new Money("220.00", "NZD"), planned: true);
+        Assert.Empty(SchemaValidation.Validate(deposit)); Assert.Empty(SchemaValidation.Validate(rest));
+        trip = With(trip, deposit, rest);
+        Assert.Equal([Ana.Id, Ben.Id], Expenses.Split(trip, deposit).People);
+        Assert.Equal([(Ben.Id, Ana.Id, 50m)], Expenses.Split(trip, deposit).Debts.Select(d => (d.From, d.To, d.Amount)));
+        var payment = Expenses.Payment(trip, hotel);
+        Assert.Equal((BookingCoverage.Planned, 1, 1), (payment.Coverage, payment.Paid.Count, payment.Planned.Count));
+        // What is still to pay is planned: no debts yet, and the costs list it apart from what is paid.
+        Assert.Empty(Expenses.Split(trip, rest).Debts);
+        Assert.Equal((100m, 220.00m), (TripSummaries.Costs(trip).Single().Paid, TripSummaries.Costs(trip).Single().Estimated));
+
+        trip = With(trip, Expenses.MarkPaid(rest, [Ben.Id]));
+        Assert.Equal(BookingCoverage.Paid, Expenses.Payment(trip, hotel).Coverage);
+        Assert.Equal([Ben.Id], Expenses.Split(trip, trip.Find(rest.Id)!).Payers);
+        Assert.Throws<DomainException>(() => Expenses.FromBooking(trip, hotel));
     }
+
+    [Fact]
+    public void ANewExpenseNamesItsPeopleSoALaterTravellerDoesNotJoinIt()
+    {
+        var walk = Entity.Create("schedule_item", "Glow worm walk"); walk.Data["participants"] = new JsonArray(Ben.Id.ToString(), Cleo.Id.ToString());
+        var trip = Trip(walk);
+        var guide = Expenses.Create(trip, "Guide", new Money("60.00", "NZD"), [Ben.Id], walk.Id);
+        var dinner = Expenses.Create(trip, "Dinner", new Money("90.00", "NZD"), [Ana.Id]);
+        Assert.Equal([Ben.Id, Cleo.Id], Expenses.Split(Trip(walk, guide), guide).People);
+        Assert.Equal([Ana.Id, Ben.Id, Cleo.Id], Expenses.Split(Trip(dinner), dinner).People);
+        Assert.False(Expenses.SharesWithEveryone(dinner));
+        // A JPY amount has no decimals, also when it is created from a number with them.
+        Assert.Equal("1000", Expenses.Create(trip, "Ramen", new Money("1000.00", "JPY"), [Ana.Id]).Data["amount"]!["value"]!.ToString());
+
+        // An expense from an older client names nobody; before Dana joins it is fixed to the three, so what Ben and
+        // Cleo paid back stays exactly what they owed.
+        var old = Expense("Day 1 dinner", "90.00", "EUR", Ana);
+        trip = Trip(old, dinner); old = Expenses.SettleAll(trip).Single(e => e.Id == old.Id); trip = With(trip, old);
+        var named = Expenses.FixShares(trip);
+        Assert.Equal([old.Id], named.Select(e => e.Id));
+        var dana = Entity.Create("person", "Dana");
+        var manifest = trip.Manifest.Copy(); ((JsonArray)manifest.Data["participants"]!).Add(dana.Id.ToString());
+        var later = new TripSnapshot(manifest, trip.Entities.Values.Where(e => e.Id != old.Id).Concat(named).Append(dana).ToDictionary(e => e.Id));
+        Assert.True(Expenses.Split(later, later.Find(old.Id)!).IsSettled);
+        Assert.DoesNotContain(Expenses.Open(later), d => d.Expense == old.Id || d.From == dana.Id);
+        Assert.Empty(Expenses.FixShares(later));
+
+        // Changing the method or who shares it keeps the people named; the last one cannot leave.
+        var two = Expenses.WithPerson(later, later.Find(dinner.Id)!, Cleo.Id, false);
+        Assert.Equal([Ana.Id, Ben.Id], Expenses.Split(later, two).People);
+        Assert.Equal([Ana.Id, Ben.Id], Expenses.Split(later, Expenses.ChangeMethod(later, Expenses.ChangeMethod(later, two, SplitMethod.Share), SplitMethod.Equal)).People);
+        var alone = Expenses.WithPerson(later, two, Ben.Id, false);
+        Assert.Throws<DomainException>(() => Expenses.WithPerson(later, alone, Ana.Id, false));
+    }
+
+    [Fact]
+    public void ExpensesWhoseSplitNeedsAttentionAreNamed()
+    {
+        var boat = Expenses.WithSplit(Expense("Boat", "60.00", "EUR", Ana), SplitMethod.Amount, [(Ana.Id, 20m), (Ben.Id, 20m), (Cleo.Id, 20m)]);
+        var trip = Trip(boat);
+        Assert.Empty(Expenses.Problems(trip));
+        var corrected = boat.Copy(); corrected.Data["amount"]!["value"] = "75.00";
+        Assert.Equal([boat.Id], Expenses.Problems(With(trip, corrected)).Select(p => p.Expense.Id));
+        // A planned one is not divided yet, so it is no problem yet.
+        corrected.Data["estimated"] = true;
+        Assert.Empty(Expenses.Problems(With(trip, corrected)));
+    }
+
     [Fact]
     public void ExpensesHaveStandardOrOwnCategoriesOrFollowTheirPlans()
     {
@@ -481,38 +532,6 @@ public class ExpenseSplitTests
     }
 
     [Fact]
-    public void ABookingsPriceIsComparedWithItsExpensesAndNeverCountedItself()
-    {
-        var hotel = Entity.Create("booking", "Park Hotel Ruapehu"); hotel.Data["status"] = "confirmed";
-        hotel.Data["price"] = new JsonObject { ["value"] = "348.50", ["currency"] = "NZD" };
-        var trip = Trip(hotel);
-        Assert.Equal(BookingCoverage.None, Expenses.Payment(trip, hotel).Coverage);
-        Assert.Empty(TripSummaries.Costs(trip));
-
-        // A deposit now, the rest on site: the rest is open, and a new expense from the booking takes just the rest.
-        var deposit = Expenses.FromBooking(trip, hotel); deposit.Data["amount"]!["value"] = "100.00";
-        trip = With(trip, deposit);
-        var payment = Expenses.Payment(trip, hotel);
-        Assert.Equal((BookingCoverage.Partial, 100m, 248.50m), (payment.Coverage, payment.Recorded, payment.Rest));
-        Assert.Empty(Expenses.WithoutExpense(trip));
-        var rest = Expenses.FromBooking(trip, hotel);
-        Assert.Equal("248.50", rest.Data["amount"]!["value"]!.ToString());
-        trip = With(trip, rest);
-        Assert.Equal(BookingCoverage.Complete, Expenses.Payment(trip, hotel).Coverage);
-        Assert.Equal(348.50m, TripSummaries.Costs(trip).Single().Paid);
-
-        // A fee on top is more than the price; an expense in euros counts only with an amount charged in NZD.
-        var fee = Expenses.FromBooking(Trip(hotel), hotel); fee.Data["amount"]!["value"] = "5.00";
-        Assert.Equal(BookingCoverage.More, Expenses.Payment(With(trip, fee), hotel).Coverage);
-        var inEuros = Expenses.FromBooking(Trip(hotel), hotel); inEuros.Data["amount"] = new JsonObject { ["value"] = "190.00", ["currency"] = "EUR" };
-        Assert.Equal(BookingCoverage.OtherCurrency, Expenses.Payment(Trip(hotel, inEuros), hotel).Coverage);
-        Assert.Equal(BookingCoverage.Complete, Expenses.Payment(Trip(hotel, Expenses.WithCharge(inEuros, 348.50m, "NZD")), hotel).Coverage);
-
-        // Cancelled bookings and ideas are left alone.
-        var cancelled = hotel.Copy(); cancelled.Data["status"] = "cancelled";
-        Assert.Equal(BookingCoverage.NoPrice, Expenses.Payment(Trip(cancelled), cancelled).Coverage);
-    }
-    [Fact]
     public void BudgetsCoverTheTripACategoryAPersonOrACollection()
     {
         Entity Budget(string title, string value, string currency) { var b = Entity.Create("budget", title); b.Data["amount"] = new JsonObject { ["value"] = value, ["currency"] = currency }; return b; }
@@ -523,12 +542,13 @@ public class ExpenseSplitTests
         var whole = Budget("Trip", "1000.00", "EUR"); var food = Budget("Eating out", "100.00", "EUR"); var ana = Budget("Ana's money", "100.00", "EUR"); var day = Budget("Day trip", "150.00", "EUR");
         var collection = Entity.Create("collection", "Day trip"); collection.Data["items"] = new JsonArray(ferry.Id.ToString());
         var trip = Trip(dinner, ferry, snacks, whole, food, ana, day, collection);
-        food = Budgets.WithScope(trip, food, Budgets.Category, "FOOD");
-        ana = Budgets.WithScope(trip, ana, Budgets.Participant, Ana.Id.ToString());
-        day = Budgets.WithScope(trip, day, Budgets.Collection, collection.Id.ToString());
+        food = Budgets.WithFilters(trip, food, new BudgetFilters("FOOD", null, null));
+        ana = Budgets.WithFilters(trip, ana, new BudgetFilters(null, Ana.Id, null));
+        day = Budgets.WithFilters(trip, day, new BudgetFilters(null, null, collection.Id));
         trip = With(trip, food, ana, day);
         Assert.All(new[] { food, ana, day }, b => Assert.Empty(SchemaValidation.Validate(b)));
-        Assert.Equal(("category", "food"), (food.Data["scope"]!.ToString(), food.Data["category"]!.ToString()));
+        Assert.Equal(("category", "food"), (Budgets.ScopeOf(food), food.Data["category"]!.ToString()));
+        Assert.Null(food.Data["scope"]);
 
         // Without rates the snacks in NZD cannot count in euros and are named; the ferry counts as charged.
         var status = Budgets.All(trip).ToDictionary(b => b.Budget.Title);
@@ -544,10 +564,13 @@ public class ExpenseSplitTests
         var withRates = Budgets.Status(trip, food, rates)!;
         Assert.Equal((90m, 15m, true, -5m), (withRates.Spent, withRates.Planned, withRates.Approximate, withRates.Left));
 
-        // Only the trip budget adds up into the trip's budget per currency.
-        Assert.Equal(1000m, TripSummaries.Costs(trip).Single(c => c.Currency == "EUR").Budget);
-        Assert.Throws<DomainException>(() => Budgets.WithScope(trip, ana, Budgets.Participant, collection.Id.ToString()));
-        // Deleting Ana leaves her budget without a person; it then covers nothing.
+        // The trip's one budget is the budget without limits, in the trip's currency; limited ones are listed apart.
+        var tripBudget = Budgets.ForTrip(trip)!;
+        Assert.Equal(("EUR", 1000m, 202m, 1), (tripBudget.Currency, tripBudget.Amount, tripBudget.Paid.Total, tripBudget.Budgets.Count));
+        Assert.Equal(["Ana's money", "Day trip", "Eating out"], Budgets.Limited(trip).Select(b => b.Budget.Title).Order());
+        Assert.All(TripSummaries.Costs(trip), c => Assert.Equal(0m, c.Budget));
+        Assert.Throws<DomainException>(() => Budgets.WithFilters(trip, ana, new BudgetFilters(null, collection.Id, null)));
+        // Deleting Ana leaves her budget without a person; it then covers the whole trip.
         var deletion = TripDeletion.Plan(trip, [Ana.Id]);
         var orphan = deletion.Updated.Single(e => e.Id == ana.Id);
         Assert.Null(orphan.Data["person"]);
@@ -563,8 +586,9 @@ public class ExpenseSplitTests
         var trip = Trip(budget, dinner, lunch, taxi);
         var both = Budgets.WithFilters(trip, budget, new BudgetFilters("food", Ben.Id, null));
         Assert.Empty(SchemaValidation.Validate(both));
-        // Older clients see the narrowest limit, the person.
-        Assert.Equal(("participant", "food", Ben.Id.ToString()), (both.Data["scope"]!.ToString(), both.Data["category"]!.ToString(), both.Data["person"]!.ToString()));
+        // The limits say it all; no scope repeats them.
+        Assert.Equal(("participant", "food", Ben.Id.ToString()), (Budgets.ScopeOf(both), both.Data["category"]!.ToString(), both.Data["person"]!.ToString()));
+        Assert.Null(both.Data["scope"]);
         trip = With(trip, both);
         // Ben's third of the dinner; not the lunch he paid but does not share, not the taxi.
         var status = Budgets.Status(trip, both)!;
@@ -573,11 +597,11 @@ public class ExpenseSplitTests
 
         // Removing the person leaves the category alone; removing both is the whole trip again.
         var food = Budgets.WithFilters(trip, both, Budgets.FiltersOf(both) with { Person = null });
-        Assert.Equal(("category", 130m), (food.Data["scope"]!.ToString(), Budgets.Status(With(trip, food), food)!.Spent));
+        Assert.Equal(("category", 130m), (Budgets.ScopeOf(food), Budgets.Status(With(trip, food), food)!.Spent));
         var whole = Budgets.WithFilters(trip, both, BudgetFilters.None);
-        Assert.Equal("trip", whole.Data["scope"]!.ToString());
-        Assert.Equal(50m, TripSummaries.Costs(With(trip, whole)).Single().Budget);
-        Assert.Equal(0m, TripSummaries.Costs(trip).Single().Budget);
+        Assert.Equal("trip", Budgets.ScopeOf(whole));
+        Assert.Equal(50m, Budgets.ForTrip(With(trip, whole))!.Amount);
+        Assert.Null(Budgets.ForTrip(trip));
         Assert.Throws<DomainException>(() => Budgets.WithFilters(trip, budget, new BudgetFilters(null, dinner.Id, null)));
     }
 }

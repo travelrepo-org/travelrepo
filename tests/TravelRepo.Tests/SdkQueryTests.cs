@@ -123,7 +123,7 @@ public sealed class SdkQueryTests : IDisposable
         Assert.Equal("Alex", Assert.Single(ScheduleQueries.Participants(trip, train)).Title);
         Assert.Equal(hotel.Id, ScheduleQueries.PrimaryPlace(trip, stay)!.Id);
         var eur = TripSummaries.Costs(trip).Single(c => c.Currency == "EUR");
-        Assert.Equal(100.50m, eur.Paid); Assert.Equal(20m, eur.Estimated); Assert.Equal(500m, eur.Budget);
+        Assert.Equal(100.50m, eur.Paid); Assert.Equal(20m, eur.Estimated); Assert.Equal(0m, eur.Budget); Assert.Equal(500m, Budgets.ForTrip(trip)!.Amount);
         Assert.Contains(TripSummaries.Costs(trip), c => c.Currency == "JPY" && c.Paid == 12000m);
         Assert.Contains(TripSummaries.ReferencesTo(trip, station.Id), e => e.Id == train.Id);
     }

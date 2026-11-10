@@ -17,6 +17,20 @@ public sealed record BudgetStatus(Entity Budget, string Scope, string? Target, M
 }
 
 /// <summary>
+/// The trip's budget in the trip's currency: <see cref="Amount"/> from every budget without limits (approximate where
+/// one is in another currency, <see cref="AmountNotConverted"/> where it cannot be converted), and the paid and planned
+/// expenses converted the same way.
+/// </summary>
+public sealed record TripBudgetStatus(string Currency, decimal Amount, bool AmountApproximate, IReadOnlyList<Money> AmountNotConverted, IReadOnlyList<Entity> Budgets, ConvertedTotal Paid, ConvertedTotal Planned)
+{
+    public decimal Used => Paid.Total + Planned.Total;
+    /// <summary>What is left; negative when the budget is exceeded.</summary>
+    public decimal Left => Amount - Used;
+    /// <summary>Whether reference rates were used anywhere, so the numbers are estimates.</summary>
+    public bool Approximate => AmountApproximate || Paid.Estimated != 0 || Planned.Estimated != 0;
+}
+
+/// <summary>
 /// What a budget is limited to: an expense category, a person's part, a collection, or several of them together, such
 /// as one person's food. Null means not limited by that.
 /// </summary>
@@ -38,21 +52,30 @@ public static class Budgets
     /// <summary>The scopes in the order clients offer them.</summary>
     public static readonly IReadOnlyList<string> Scopes = [Trip, Category, Participant, Collection];
 
-    /// <summary>A budget's scope; a budget without one, or with one this version does not know, is for the whole trip.</summary>
-    public static string ScopeOf(Entity budget) => budget.Data["scope"]?.ToString() is { } scope && Scopes.Contains(scope) ? scope : Trip;
-
-    /// <summary>What a scoped budget is for: the category, or the person's or collection's id; null for the whole trip.</summary>
-    public static string? TargetOf(Entity budget) => ScopeOf(budget) switch
+    /// <summary>
+    /// The narrowest limit of a budget, for an icon or a heading: a person, otherwise a category, otherwise a
+    /// collection, otherwise the whole trip. A stored <c>scope</c> only repeated the limits and is ignored.
+    /// </summary>
+    public static string ScopeOf(Entity budget) => FiltersOf(budget) switch
     {
-        Category => budget.Data["category"]?.ToString() is { Length: > 0 } c ? c : null,
-        Participant => budget.Data["person"]?.ToString(),
-        Collection => budget.Data["collection"]?.ToString(),
+        { Person: not null } => Participant,
+        { Category: not null } => Category,
+        { Collection: not null } => Collection,
+        _ => Trip
+    };
+
+    /// <summary>What a limited budget is for: the person's or collection's id, or the category; null for the whole trip.</summary>
+    public static string? TargetOf(Entity budget) => FiltersOf(budget) switch
+    {
+        { Person: { } p } => p.ToString(),
+        { Category: { } c } => c,
+        { Collection: { } k } => k.ToString(),
         _ => null
     };
 
     /// <summary>
-    /// What a budget is limited to. Its <c>category</c>, <c>person</c> and <c>collection</c> apply together; a budget
-    /// whose <c>scope</c> names one of them without a value covers nothing.
+    /// What a budget is limited to. Its <c>category</c>, <c>person</c> and <c>collection</c> apply together; without
+    /// any of them it covers the whole trip.
     /// </summary>
     public static BudgetFilters FiltersOf(Entity budget) => new(
         budget.Data["category"]?.ToString() is { Length: > 0 } c ? c : null,
@@ -60,49 +83,49 @@ public static class Budgets
         Guid.TryParse(budget.Data["collection"]?.ToString(), out var k) ? k : null);
 
     /// <summary>
-    /// A copy of the budget limited to everything given together, such as one person's food. The <c>scope</c> names
-    /// the narrowest filter for clients that know only one at a time: the person, then the category, then the
-    /// collection, or the whole trip. Unknown fields are kept.
+    /// A copy of the budget limited to everything given together, such as one person's food; no limits is the whole
+    /// trip. A <c>scope</c> left by older clients is removed, since the limits say it all. Unknown fields are kept.
     /// </summary>
     public static Entity WithFilters(TripSnapshot trip, Entity budget, BudgetFilters filters)
     {
         if (filters.Person is { } person && trip.Find(person) is not { Type: "person" }) throw new DomainException("budget.person", "Choose a person of the trip.");
         if (filters.Collection is { } collection && trip.Find(collection) is not { Type: "collection" }) throw new DomainException("budget.collection", "Choose a collection of the trip.");
         var copy = budget.Copy();
-        foreach (var key in new[] { "category", "person", "collection" }) copy.Data.Remove(key);
+        foreach (var key in new[] { "category", "person", "collection", "scope" }) copy.Data.Remove(key);
         if (filters.Category is { Length: > 0 } category) copy.Data["category"] = ExpenseCategories.Stored(ExpenseCategories.With(trip, Entity.Create("expense", ""), category));
         if (filters.Person is { } p) copy.Data["person"] = p.ToString();
         if (filters.Collection is { } c) copy.Data["collection"] = c.ToString();
-        copy.Data["scope"] = filters.Person is not null ? Participant : filters.Category is not null ? Category : filters.Collection is not null ? Collection : Trip;
         return copy;
     }
 
+    /// <summary>The budgets for the whole trip, which together make the trip's budget (see <see cref="ForTrip"/>).</summary>
+    public static IReadOnlyList<Entity> TripBudgets(TripSnapshot trip) => trip.Entities.Values
+        .Where(e => e.Type == "budget" && FiltersOf(e).IsWholeTrip && TripSummaries.Money(e.Data["amount"]) is not null).OrderBy(e => e.Title, StringComparer.Ordinal).ToArray();
+
     /// <summary>
-    /// A copy of the budget for <paramref name="scope"/>: the whole trip, a category (a standard one or the
-    /// travellers' own), a person's id or a collection's id. Fields of other scopes are removed; unknown fields are kept.
+    /// The trip's one budget, in the trip's currency (see <see cref="TripCurrency"/>): every budget without limits
+    /// added up, compared with every expense. Amounts in other currencies convert exactly where charged in it,
+    /// otherwise with <paramref name="rates"/> as an estimate. Null without a budget for the whole trip.
     /// </summary>
-    public static Entity WithScope(TripSnapshot trip, Entity budget, string scope, string? target = null)
+    public static TripBudgetStatus? ForTrip(TripSnapshot trip, ExchangeRates? rates = null)
     {
-        if (!Scopes.Contains(scope)) throw new DomainException("budget.scope", "A budget is for the trip, a category, a person or a collection.");
-        var copy = budget.Copy();
-        copy.Data["scope"] = scope;
-        foreach (var key in new[] { "category", "person", "collection" }) copy.Data.Remove(key);
-        switch (scope)
+        var budgets = TripBudgets(trip);
+        if (budgets.Count == 0) return null;
+        var currency = TripCurrency.Of(trip) ?? TripSummaries.Money(budgets[0].Data["amount"])!.Currency;
+        decimal amount = 0; var approximate = false; var missing = new List<Money>();
+        foreach (var budget in budgets)
         {
-            case Category when target is { Length: > 0 }:
-                copy.Data["category"] = ExpenseCategories.Stored(ExpenseCategories.With(trip, Entity.Create("expense", ""), target));
-                break;
-            case Participant when Guid.TryParse(target, out var person):
-                if (trip.Find(person) is not { Type: "person" }) throw new DomainException("budget.person", "Choose a person of the trip.");
-                copy.Data["person"] = person.ToString();
-                break;
-            case Collection when Guid.TryParse(target, out var collection):
-                if (trip.Find(collection) is not { Type: "collection" }) throw new DomainException("budget.collection", "Choose a collection of the trip.");
-                copy.Data["collection"] = collection.ToString();
-                break;
+            var money = TripSummaries.Money(budget.Data["amount"])!;
+            var (value, code, how) = Expenses.Convert(budget, money.Amount, money.Currency, currency, rates);
+            if (code != currency) { missing.Add(money); continue; }
+            amount += value; approximate |= how == Conversion.Reference;
         }
-        return copy;
+        var expenses = trip.Entities.Values.Where(e => e.Type == "expense").ToArray();
+        return new(currency, amount, approximate, missing, budgets, Expenses.Total(expenses, currency, rates), Expenses.Total(expenses, currency, rates, planned: true));
     }
+
+    /// <summary>Budgets with a limit, such as a category or a person, with where they stand, in order of title.</summary>
+    public static IReadOnlyList<BudgetStatus> Limited(TripSnapshot trip, ExchangeRates? rates = null) => All(trip, rates).Where(b => !b.Filters.IsWholeTrip).ToArray();
 
     /// <summary>Every budget of the trip with where it stands, whole-trip budgets first, then in order of title.</summary>
     public static IReadOnlyList<BudgetStatus> All(TripSnapshot trip, ExchangeRates? rates = null) => trip.Entities.Values.Where(e => e.Type == "budget")
@@ -112,20 +135,18 @@ public static class Budgets
     /// <summary>
     /// What the expenses a budget covers come to, or null when the budget has no amount. A person's budget counts
     /// that person's part of each expense; a collection's budget the expenses for its plans, bookings and places,
-    /// and expenses in the collection themselves. A scoped budget without a target covers nothing.
+    /// and expenses in the collection themselves.
     /// </summary>
     public static BudgetStatus? Status(TripSnapshot trip, Entity budget, ExchangeRates? rates = null)
     {
         if (TripSummaries.Money(budget.Data["amount"]) is not { } amount) return null;
         var scope = ScopeOf(budget); var target = TargetOf(budget); var filters = FiltersOf(budget);
-        // A scope that names a filter without its value covers nothing, as before filters could be combined.
-        var empty = scope == Category && filters.Category is null || scope == Participant && filters.Person is null || scope == Collection && filters.Collection is null;
         decimal spent = 0, planned = 0; var approximate = false; var missing = new List<Money>();
         var inCollection = filters.Collection is { } collectionId && trip.Find(collectionId) is { Type: "collection" } collection
             ? (collection.Data["items"] as JsonArray ?? []).Select(n => Guid.TryParse(n?.ToString(), out var id) ? id : (Guid?)null).OfType<Guid>().ToHashSet() : [];
         foreach (var expense in trip.Entities.Values.Where(e => e.Type == "expense"))
         {
-            if (empty || TripSummaries.Money(expense.Data["amount"]) is not { } money) continue;
+            if (TripSummaries.Money(expense.Data["amount"]) is not { } money) continue;
             if (filters.Category is { } wanted && !string.Equals(ExpenseCategories.Of(trip, expense), wanted, StringComparison.CurrentCultureIgnoreCase)) continue;
             if (filters.Collection is not null && !(inCollection.Contains(expense.Id) || Related(trip, expense).Any(inCollection.Contains))) continue;
             decimal? part = money.Amount;

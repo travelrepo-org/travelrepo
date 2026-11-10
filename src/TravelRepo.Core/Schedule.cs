@@ -236,20 +236,21 @@ public static class TripSummaries
         return ordered.Select(p => p.Title).Where(t => t.Length > 0).Distinct(StringComparer.CurrentCultureIgnoreCase).Take(max).ToArray();
     }
 
+    /// <summary>
+    /// What the expenses come to per currency they were paid in: paid and still to pay. The budget is the trip's one
+    /// budget in the trip's currency (see <see cref="Budgets.ForTrip"/>), so <see cref="CurrencyTotal.Budget"/> is always zero.
+    /// </summary>
     public static IReadOnlyList<CurrencyTotal> Costs(TripSnapshot trip)
     {
-        var totals = new Dictionary<string, (decimal Paid, decimal Estimated, decimal Budget)>(StringComparer.Ordinal);
-        foreach (var e in trip.Entities.Values.Where(e => e.Type is "expense" or "budget"))
+        var totals = new Dictionary<string, (decimal Paid, decimal Estimated)>(StringComparer.Ordinal);
+        foreach (var e in trip.Entities.Values.Where(e => e.Type == "expense"))
         {
             if (Money(e.Data["amount"]) is not { } money) continue;
             var current = totals.GetValueOrDefault(money.Currency);
-            // Budgets for a category, a person or a collection have their own status; see Budgets.
-            if (e.Type == "budget") { if (Budgets.ScopeOf(e) == Budgets.Trip && Budgets.FiltersOf(e).IsWholeTrip) current.Budget += money.Amount; else continue; }
-            else if (e.Data["estimated"] is JsonValue flag && flag.TryGetValue<bool>(out var estimated) && estimated) current.Estimated += money.Amount;
-            else current.Paid += money.Amount;
+            if (Expenses.IsPlanned(e)) current.Estimated += money.Amount; else current.Paid += money.Amount;
             totals[money.Currency] = current;
         }
-        return totals.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => new CurrencyTotal(p.Key, p.Value.Paid, p.Value.Estimated, p.Value.Budget)).ToArray();
+        return totals.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => new CurrencyTotal(p.Key, p.Value.Paid, p.Value.Estimated, 0)).ToArray();
     }
 
     public static Money? Money(JsonNode? node)

@@ -51,6 +51,10 @@ public sealed record ExportLabels
     public string With { get; init; } = "with {0}";
     public string PackedBy { get; init; } = "packed by {0}";
     public string PaidBy { get; init; } = "paid by {0}";
+    /// <summary>After an amount that is booked but not paid yet, for example "358.00 NZD to pay".</summary>
+    public string ToPay { get; init; } = "to pay";
+    /// <summary>The trip's budget, for example "1,200.00 EUR of 3,000.00 EUR".</summary>
+    public string BudgetUsed { get; init; } = "{0} of {1}";
     /// <summary>In one person's export, what the totals are: that person's part of the expenses.</summary>
     public string Share { get; init; } = "share";
     /// <summary>One person's part of an expense, for example "share 30.00 EUR".</summary>

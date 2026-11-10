@@ -86,6 +86,8 @@ dates:
 
 default_timezone: Asia/Tokyo
 
+currency: EUR
+
 cover:
   document: 0195f37a-51ab-76c8-a919-cfd5940fc777
 
@@ -117,6 +119,12 @@ A trip has one primary content language. Schema field names, enum values, identi
 ### 4.3 Default timezone
 
 A trip may define an optional default IANA timezone. It is a convenience only. Individual time-bearing entities may use other timezones.
+
+### 4.3.1 Trip currency
+
+`currency` is the ISO 4217 code the travellers count in, such as `EUR`. It is optional and shared by everyone who works on the trip. The trip's budget (section 36), its totals and who owes whom (section 34.1) are shown in it, and amounts charged on cards (section 35) are entered in it. Expenses keep the currency they were paid in; nothing is converted when saving.
+
+A trip without a currency counts in the one most amounts were charged in, otherwise the one most expenses are in. Clients may store that once the travellers agree.
 
 ### 4.4 Cover
 
@@ -872,14 +880,12 @@ items:
 documents:
   - 0195f3b2-2352-7a8e-9ef3-5a6e92000444
 
-price:
-  value: "1499.90"
-  currency: EUR
-
 extensions: {}
 ```
 
 A single booking may represent multiple flights, rooms, tickets, or other planned items.
+
+A booking has no amount of its own. What it costs is its payments: the expenses that name it in `related` (section 34.3). Older clients stored a `price` on bookings; readers keep it and show it, but do not count it. Clients offer to turn it into payments (section 34.4).
 
 ## 32. Tasks
 
@@ -965,11 +971,13 @@ extensions: {}
 
 The schema should support multi-currency from the first version even if a reference client exposes only part of the functionality initially.
 
+An expense is a payment: `amount` is what the bill says, in the currency it was paid in. `estimated: true` marks one that is not paid yet: an estimate, or an amount that is booked but still to pay, such as the rest of a hotel paid on site. Such a planned expense counts as planned in totals and budgets and creates no debts until it is marked as paid (`estimated: false`).
+
 ### 34.1 Dividing expenses and paying back
 
 `paid_by` lists who paid. When several people paid, each paid an equal part.
 
-The optional `split` says who shares an expense and how. Without it, the expense is divided equally among the trip's travellers: the manifest's participants, or every person when the manifest lists none. Travellers who join later share such expenses too.
+`split` says who shares an expense and how. Writers always name the people: a new expense is shared equally by the travellers of the booking it belongs to, otherwise by the people of the plan it belongs to, otherwise by the trip's travellers. An expense without `split`, or with an `equal` split that lists nobody, was written by an older client and is divided among every traveller: the manifest's participants, or every person when the manifest lists none. Before a client adds a traveller, it names the current travellers on such expenses, so that a new traveller does not share, or change what was paid back for, earlier expenses unless someone chooses so.
 
 ```yaml
 split:
@@ -983,7 +991,7 @@ split:
 
 `method` is one of:
 
-- `equal`: equal parts among the people in `parts`, or among every traveller when `parts` is missing or empty. Parts carry no `value`.
+- `equal`: equal parts among the people in `parts`. Parts carry no `value`. A missing or empty `parts` means every traveller, as written by older clients.
 - `amount`: each `value` is an amount in the expense's currency. The values add up to the expense.
 - `share`: each `value` is a non-negative weight.
 - `percent`: each `value` is a non-negative percentage. The values add up to 100.
@@ -1004,7 +1012,7 @@ settled:
 
 What is still open is what is owed minus what is marked as paid. When the split changes after paying back, the difference shows: more is owed, or the person who received too much owes it back. Marking a debt as paid sets its entry to what is owed at that moment; paying back what was received too much removes the entry.
 
-Clients work out balances per person and currency from what is still open, and may suggest the payments that settle them. Each currency is settled on its own; amounts are never converted for this. A person may choose which open debts to settle now; what they owe each other person for the chosen debts is set off into one payment per person and currency.
+Clients work out balances per person from what is still open, in the trip's currency (section 4.3.1): a debt converts exactly where its expense was paid or charged in that currency (section 35), otherwise with reference rates as an estimate that clients mark as such; a debt that cannot be converted stays in its own currency. Clients may suggest the fewest payments that settle the balances. Expenses whose split does not add up create no debts; clients name them next to who owes whom, so they are fixed before anyone settles up. A person may choose which open debts to settle now; what they owe each other person for the chosen debts is set off into one payment per person and currency.
 
 Lists in `split.parts` and `settled` are entries of people. They merge per person (and `to`), so people who pay back at the same time on different devices do not conflict. Deleting a person removes their entries.
 
@@ -1014,9 +1022,20 @@ An expense may have a `category`. The standard values are `transport`, `accommod
 
 Without a category, an expense takes one from the plans it belongs to, directly or through a booking: a journey is `transport`, a stay `accommodation`, food `food`, shopping `souvenirs`, and activities, sights, culture, nature, nightlife and free time `activity`. Otherwise it is `other`.
 
-### 34.3 Bookings and expenses
+### 34.3 Bookings and their payments
 
-A booking's `price` says what the booking costs. It is never counted as an expense, so nothing is counted twice. What was paid is recorded as expenses that name the booking in `related`; there may be several, such as a deposit and the rest paid on site. Clients compare their sum with the price, in the price's currency (an expense in another currency counts with its amount charged in that currency): none recorded, part recorded with the rest still open, all recorded, or more than the price. They may offer to record what is still open from the booking's title and price. Changing the price does not change its expenses, and changing an expense does not change the price.
+What a booking costs is recorded only as expenses that name the booking in `related`, so nothing is stored twice. There may be several, such as a deposit paid now and the rest still to pay on site (a planned expense, section 34). A booking is paid when all of its expenses are paid; one without expenses is free or not recorded yet. Clients show a booking's payments with the booking.
+
+### 34.4 Upgrading costs from older clients
+
+Clients that find costs in the shape older clients wrote offer, once, to bring them into the current shape without changing what they mean, and save the result as one version:
+
+- a trip without `currency` gets the one it counts in (section 4.3.1);
+- expenses that name nobody name the current travellers (section 34.1), which they were divided among already;
+- a booking's `price` that its expenses cover is removed; what they do not cover becomes a planned expense for the rest, and a price without any expense becomes a planned expense for all of it, shared by the booking's travellers; a price that cannot be compared, because the expenses are in another currency without an amount charged in the price's currency, stays for the travellers to decide; prices of ideas and cancelled bookings stay, since they were never paid;
+- a budget's `scope`, which only repeated its limits, is removed.
+
+Planning the upgrade again on the result finds nothing more to do.
 
 ## 35. Historical currency conversion
 
@@ -1035,7 +1054,7 @@ converted:
 
 Clients must not silently rewrite historical conversions using current rates.
 
-For an expense, `converted` with `source: card` records what was actually charged in another currency, for example the euros a card statement shows for a payment in NZD. `rate` is units of the converted currency per unit of the expense's currency, worked out from both amounts; `rate_date` is the day of the charge. Clients use it to show costs and to settle debts in that currency: a share of the expense converts exactly at that rate. Where no amount was charged in the wanted currency, a client may convert with reference rates, but must present the result as an estimate and must not store it as `converted`. Debts stay recorded in the expense's own currency; paying back in another currency marks the debt as paid in full.
+For an expense, `converted` with `source: card` records what was actually charged in another currency, for example the euros a card statement shows for a payment in NZD. `rate` is units of the converted currency per unit of the expense's currency, worked out from both amounts; `rate_date` is the day of the charge. It is the amount booked from the account, next to the amount on the bill. Clients use it to show costs and to settle debts in that currency: a share of the expense converts exactly at that rate. Where no amount was charged in the wanted currency, a client may convert with reference rates, but must present the result as an estimate and must not store it as `converted`. Debts stay recorded in the expense's own currency; paying back in another currency marks the debt as paid in full.
 
 ## 36. Budgets
 
@@ -1047,9 +1066,9 @@ Budgets may exist for:
 
 Budget support is part of the format direction. A reference client may ship only a basic implementation in v1.
 
-A budget has an `amount` and may be limited by an expense `category` (section 34.2), a `person` whose part of each expense it covers (section 34.1), and a `collection` whose plans, bookings, places and expenses it covers, including expenses for the bookings of those plans. All limits that are given apply together: a budget with `category: food` and a `person` covers that person's part of food. Without any limit it covers the whole trip.
+A trip has one budget, in the trip's currency (section 4.3.1). It is the sum of the budgets without limits; there is normally one. A budget may also be limited by an expense `category` (section 34.2), a `person` whose part of each expense it covers (section 34.1), and a `collection` whose plans, bookings, places and expenses it covers, including expenses for the bookings of those plans. All limits that are given apply together: a budget with `category: food` and a `person` covers that person's part of food. Such a budget is shown on its own and is not part of the trip's budget.
 
-`scope` names the narrowest limit for clients that know only one at a time: `participant` when there is a person, otherwise `category`, otherwise `collection`, otherwise `trip` (also without a scope or with one a client does not know). A scope that names a limit without its value covers nothing.
+`scope` was written by older clients and only repeated the limits; readers ignore it and writers remove it.
 
 ```yaml
 type: budget
@@ -1057,11 +1076,10 @@ title: Eating out
 amount:
   value: "600.00"
   currency: EUR
-scope: category
 category: food
 ```
 
-A budget counts what the expenses it covers come to in its own currency: exactly where an amount is in that currency or was charged in it (section 35), otherwise with reference rates as an estimate, which clients mark as such. Amounts that cannot be converted are named separately instead of being left out silently. Estimated expenses count as planned, apart from what was spent. Only `trip` budgets add up into a trip's budget per currency; the others are reported one by one.
+A budget counts what the expenses it covers come to in its currency: exactly where an amount is in that currency or was charged in it (section 35), otherwise with reference rates as an estimate, which clients mark as such. A budget without limits in another currency than the trip's converts the same way. Amounts that cannot be converted are named separately instead of being left out silently. Planned expenses count as planned, apart from what was spent.
 
 ## 37. Collections
 

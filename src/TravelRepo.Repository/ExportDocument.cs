@@ -251,11 +251,15 @@ public static partial class TripExport
         if (options.Includes(ExportParts.Bookings) && it.Bookings.Count > 0)
             sections.Add(new(ExportParts.Bookings, labels.Bookings, it.Bookings.Select(booking =>
             {
-                var price = TripSummaries.Money(booking.Data["price"]);
+                // What the booking costs is its payments, per currency as paid; a price only older apps stored is shown when there are none.
+                var payments = Expenses.ForBooking(trip, booking.Id).Select(e => (Money: TripSummaries.Money(e.Data["amount"]), Planned: Expenses.IsPlanned(e))).Where(x => x.Money is not null)
+                    .GroupBy(x => (x.Money!.Currency, x.Planned)).OrderBy(g => g.Key.Planned).ThenBy(g => g.Key.Currency, StringComparer.Ordinal)
+                    .Select(g => g.Sum(x => x.Money!.Amount).ToString("N2", culture) + " " + g.Key.Currency + (g.Key.Planned ? " " + labels.ToPay : "")).ToArray();
+                var price = payments.Length > 0 ? string.Join(" + ", payments) : TripSummaries.Money(booking.Data["price"]) is { } legacy ? legacy.Amount.ToString("N2", culture) + " " + legacy.Currency : null;
                 var free = Stays.Zoned(booking.Data["cancellation"]?["free_until"]);
                 var details = compact ? null : new[] { free is null ? null : string.Format(culture, labels.FreeCancellation, Clock(free, false)), Contact(ContactDetails.Read(booking.Data["provider"]?["contact"] ?? booking.Data["provider"])) }.OfType<string>().ToArray();
                 return new ExportRow(booking.Title, booking.Data["reference"]?.ToString() ?? "",
-                    Join([booking.Data["provider"]?["name"]?.ToString(), price is null ? null : price.Amount.ToString("N2", culture) + " " + price.Currency, compact ? null : labels.Status(booking.Data["status"]?.ToString())]), details, Attachments: Attach(booking, booking.Title))
+                    Join([booking.Data["provider"]?["name"]?.ToString(), price, compact ? null : labels.Status(booking.Data["status"]?.ToString())]), details, Attachments: Attach(booking, booking.Title))
                 { Comments = Comments([booking]) };
             }).ToArray()));
 
@@ -312,6 +316,9 @@ public static partial class TripExport
                     var state = who is null && split.Debts.Count > 0 ? split.IsSettled ? labels.Settled : string.Format(culture, labels.OpenAmount, Amount(split.Open, money.Currency)) : null;
                     rows.Add(new(expense.Title, money.Amount.ToString("N2", culture) + " " + money.Currency, Join([payers.Length > 0 ? string.Format(culture, labels.PaidBy, string.Join(", ", payers)) : null, share, estimated ? labels.Estimated : null, state]), who is null ? null : debts, Attachments: Attach(expense, expense.Title)) { Comments = Comments([expense]) });
                 }
+            // The trip's one budget, in the trip's currency; one person's export is about their part, so it has none.
+            if (who is null && Budgets.ForTrip(trip) is { } budget)
+                rows.Add(new(labels.Budget, string.Format(culture, labels.BudgetUsed, (budget.Approximate ? "≈ " : "") + Amount(budget.Used, budget.Currency), Amount(budget.Amount, budget.Currency))));
             // The fewest payments that settle everything; one person's export keeps those they make or receive.
             var transfers = Expenses.SettleUp(trip).Where(t => who is not { } p || t.From == p || t.To == p).ToArray();
             if (transfers.Length > 0)

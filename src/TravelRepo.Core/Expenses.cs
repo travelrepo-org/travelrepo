@@ -99,28 +99,27 @@ public sealed record Transfer(Guid From, Guid To, string Currency, decimal Amoun
 /// </summary>
 public sealed record Charge(decimal Value, string Currency, decimal Rate, LocalDate? Date, string? Source);
 
-/// <summary>How far a booking's price is recorded as expenses.</summary>
+/// <summary>Where a booking stands with its payments (specification section 34.3).</summary>
 public enum BookingCoverage
 {
-    /// <summary>The booking has no price, or it is cancelled or only an idea.</summary>
-    NoPrice,
-    /// <summary>No expense belongs to it yet.</summary>
+    /// <summary>No payment belongs to it: it is free, or nothing is recorded yet.</summary>
     None,
-    /// <summary>Expenses cover part of the price, for example a deposit; the rest is still to pay.</summary>
-    Partial,
-    /// <summary>Expenses add up to the price.</summary>
-    Complete,
-    /// <summary>Expenses add up to more than the price, for example with fees or extras.</summary>
-    More,
-    /// <summary>Expenses are in another currency without an amount charged in the price's currency, so they cannot be compared.</summary>
-    OtherCurrency
+    /// <summary>At least one payment is still to pay, such as the rest paid on site.</summary>
+    Planned,
+    /// <summary>Every payment that belongs to it is paid.</summary>
+    Paid
 }
 
-/// <summary>A booking's price next to the expenses recorded for it, in the price's currency.</summary>
-public sealed record BookingPayment(Entity Booking, Money? Price, IReadOnlyList<Entity> Expenses, decimal Recorded, BookingCoverage Coverage)
+/// <summary>
+/// The payments that belong to a booking: what is paid and what is still to pay. <see cref="LegacyPrice"/> is a
+/// <c>price</c> stored by older clients, which <see cref="CostUpgrade"/> turns into payments.
+/// </summary>
+public sealed record BookingPayment(Entity Booking, IReadOnlyList<Entity> Expenses, BookingCoverage Coverage)
 {
-    /// <summary>What is not recorded yet; negative when more was recorded than the price.</summary>
-    public decimal Rest => (Price?.Amount ?? 0) - Recorded;
+    public IReadOnlyList<Entity> Paid => Expenses.Where(e => !TravelRepo.Core.Expenses.IsPlanned(e)).ToArray();
+    public IReadOnlyList<Entity> Planned => Expenses.Where(TravelRepo.Core.Expenses.IsPlanned).ToArray();
+    /// <summary>The price an older client stored on the booking, or null.</summary>
+    public Money? LegacyPrice => TripSummaries.Money(Booking.Data["price"]);
 }
 
 /// <summary>How an amount came to be in the requested currency.</summary>
@@ -328,12 +327,19 @@ public static class Expenses
     /// What the paid expenses come to in <paramref name="currency"/>: exactly where an amount is in it or was charged
     /// in it, otherwise estimated with <paramref name="rates"/>. Estimates and budgets are left out.
     /// </summary>
-    public static ConvertedTotal Total(TripSnapshot trip, string currency, ExchangeRates? rates = null)
+    public static ConvertedTotal Total(TripSnapshot trip, string currency, ExchangeRates? rates = null) =>
+        Total(trip.Entities.Values.Where(e => e.Type == "expense"), currency, rates);
+
+    /// <summary>
+    /// What <paramref name="expenses"/> come to in <paramref name="currency"/>, as <see cref="Total(TripSnapshot, string, ExchangeRates?)"/>:
+    /// the paid ones, or with <paramref name="planned"/> the ones still to pay.
+    /// </summary>
+    public static ConvertedTotal Total(IEnumerable<Entity> expenses, string currency, ExchangeRates? rates = null, bool planned = false)
     {
         decimal exact = 0, estimated = 0; var withoutCharge = 0; var missing = new List<Money>();
-        foreach (var expense in trip.Entities.Values.Where(e => e.Type == "expense"))
+        foreach (var expense in expenses)
         {
-            if (TripSummaries.Money(expense.Data["amount"]) is not { } money || expense.Data["estimated"] is JsonValue flag && flag.TryGetValue<bool>(out var guess) && guess) continue;
+            if (TripSummaries.Money(expense.Data["amount"]) is not { } money || IsPlanned(expense) != planned) continue;
             var (value, _, how) = Convert(expense, money.Amount, money.Currency, currency, rates);
             if (how is Conversion.Reference or Conversion.None) withoutCharge++;
             if (how == Conversion.None) missing.Add(money);
@@ -487,8 +493,7 @@ public static class Expenses
 
     /// <summary>
     /// A copy of the expense divided by another method, keeping the current division as far as the method allows:
-    /// amounts and percentages start from everyone's current part, weights from 1 each. An equal split among exactly
-    /// the travellers becomes the default, without a split.
+    /// amounts and percentages start from everyone's current part, weights from 1 each. The people stay named.
     /// </summary>
     public static Entity ChangeMethod(TripSnapshot trip, Entity expense, SplitMethod method)
     {
@@ -500,8 +505,8 @@ public static class Expenses
         switch (method)
         {
             case SplitMethod.Equal:
-                var travellers = TripPeople.Travelers(trip).Select(p => p.Id).ToArray();
-                return travellers.Order().SequenceEqual(people.Order()) ? WithSplit(expense, SplitMethod.Equal) : WithSplit(expense, SplitMethod.Equal, people.Select(p => (p, (decimal?)null)));
+                // The people stay named, so a traveller added later does not join this expense by accident.
+                return WithSplit(expense, SplitMethod.Equal, people.Select(p => (p, (decimal?)null)));
             case SplitMethod.Amount:
                 return WithSplit(expense, method, people.Select((p, i) => (p, (decimal?)(i < amounts.Length ? amounts[i] : 0))));
             case SplitMethod.Share:
@@ -515,7 +520,7 @@ public static class Expenses
 
     /// <summary>
     /// A copy of the expense with <paramref name="person"/> sharing it or not. Someone who joins an amount or a
-    /// percentage split starts at zero, and a weight split at 1. Leaving an equal split names everyone else.
+    /// percentage split starts at zero, and a weight split at 1. The last person cannot leave.
     /// </summary>
     public static Entity WithPerson(TripSnapshot trip, Entity expense, Guid person, bool shares)
     {
@@ -524,11 +529,9 @@ public static class Expenses
         var people = split.People.ToList();
         if (shares == people.Contains(person)) return expense.Copy();
         if (shares) people.Add(person); else people.Remove(person);
-        if (method == SplitMethod.Equal)
-        {
-            var travellers = TripPeople.Travelers(trip).Select(p => p.Id).ToArray();
-            return travellers.Order().SequenceEqual(people.Order()) ? WithSplit(expense, SplitMethod.Equal) : WithSplit(expense, SplitMethod.Equal, people.Select(p => (p, (decimal?)null)));
-        }
+        // Nobody sharing it would read as "every traveller" in older data, so the last person stays.
+        if (people.Count == 0) throw new DomainException("expense.split_people", "At least one person shares an expense.");
+        if (method == SplitMethod.Equal) return WithSplit(expense, SplitMethod.Equal, people.Select(p => (p, (decimal?)null)));
         var values = ValuesOf(trip, expense);
         return WithSplit(expense, method, people.Select(p => (p, (decimal?)(values.TryGetValue(p, out var v) ? v : method == SplitMethod.Share ? 1m : 0m))));
     }
@@ -551,30 +554,21 @@ public static class Expenses
         .Where(e => e.Type == "expense" && (e.Data["related"] as JsonArray ?? []).Any(r => Id(r?["id"]) == booking)).OrderBy(e => e.Title, StringComparer.Ordinal).ToArray();
 
     /// <summary>
-    /// Bookings with a price but no expense yet: what is booked but not recorded as paid, so it is missing from the
-    /// costs and from who owes whom. Cancelled bookings and ideas are left out. In order of title.
+    /// Bookings that still carry a <c>price</c> from an older client and have no payment that covers it, so the price
+    /// is not counted anywhere yet. Cancelled bookings and ideas are left out. In order of title.
     /// </summary>
-    public static IReadOnlyList<Entity> WithoutExpense(TripSnapshot trip) => Payments(trip).Where(p => p.Coverage == BookingCoverage.None).Select(p => p.Booking).ToArray();
+    public static IReadOnlyList<Entity> WithoutExpense(TripSnapshot trip) => Payments(trip)
+        .Where(p => p.LegacyPrice is { Amount: not 0 } && p.Expenses.Count == 0 && p.Booking.Data["status"]?.ToString() is not ("cancelled" or "idea")).Select(p => p.Booking).ToArray();
 
     /// <summary>
-    /// A booking's price next to its expenses. The price is what the booking costs and never counts as an expense
-    /// itself; expenses count. An expense in another currency counts with the amount charged in the price's currency.
+    /// A booking's payments: the expenses that name it in <c>related</c>, paid or still to pay. What a booking costs is
+    /// what its payments add up to; a booking has no amount of its own (specification section 34.3).
     /// </summary>
     public static BookingPayment Payment(TripSnapshot trip, Entity booking)
     {
         var expenses = ForBooking(trip, booking.Id);
-        var price = TripSummaries.Money(booking.Data["price"]);
-        if (price is not { Amount: not 0 } || booking.Data["status"]?.ToString() is "cancelled" or "idea") return new(booking, price, expenses, 0, BookingCoverage.NoPrice);
-        if (expenses.Count == 0) return new(booking, price, expenses, 0, BookingCoverage.None);
-        decimal recorded = 0;
-        foreach (var expense in expenses)
-        {
-            if (TripSummaries.Money(expense.Data["amount"]) is not { } money) continue;
-            var (amount, code, _) = Convert(expense, money.Amount, money.Currency, price.Currency);
-            if (code != price.Currency) return new(booking, price, expenses, recorded, BookingCoverage.OtherCurrency);
-            recorded += amount;
-        }
-        return new(booking, price, expenses, recorded, recorded == price.Amount ? BookingCoverage.Complete : recorded < price.Amount ? BookingCoverage.Partial : BookingCoverage.More);
+        var coverage = expenses.Count == 0 ? BookingCoverage.None : expenses.Any(IsPlanned) ? BookingCoverage.Planned : BookingCoverage.Paid;
+        return new(booking, expenses, coverage);
     }
 
     /// <summary>Every booking's <see cref="Payment"/>, in order of title.</summary>
@@ -582,28 +576,110 @@ public static class Expenses
         .OrderBy(b => b.Title, StringComparer.Ordinal).ThenBy(b => b.Id).Select(b => Payment(trip, b)).ToArray();
 
     /// <summary>
-    /// A new expense for a booking: its title, its price as the amount, or what is still open of it when part is
-    /// recorded already, and a link back to it, not an estimate. Its category follows the booking's plans. Who paid
-    /// and how it is divided are left to the caller; without a split it is divided equally among all travellers.
+    /// A new payment for a booking with its title and a link back to it, shared by the booking's travellers (see
+    /// <see cref="PeopleFor"/>). Without <paramref name="amount"/> it takes a legacy price, or what of it is not paid yet.
     /// </summary>
-    public static Entity FromBooking(Entity booking) => FromBooking(null, booking);
-
-    /// <inheritdoc cref="FromBooking(Entity)"/>
-    public static Entity FromBooking(TripSnapshot? trip, Entity booking)
+    public static Entity FromBooking(TripSnapshot trip, Entity booking, Money? amount = null, bool planned = false, IEnumerable<Guid>? payers = null)
     {
-        if (booking.Type != "booking") throw new DomainException("expense.booking", "Only a booking can become an expense.");
-        var price = TripSummaries.Money(booking.Data["price"]) ?? throw new DomainException("expense.amount", "The booking has no price.");
-        var amount = trip is not null && Payment(trip, booking) is { Coverage: BookingCoverage.Partial } partial ? partial.Rest : price.Amount;
-        var expense = Entity.Create("expense", booking.Title);
-        expense.Data["amount"] = new JsonObject { ["value"] = Format(amount, price.Currency), ["currency"] = price.Currency };
-        expense.Data["estimated"] = false;
-        expense.Data["related"] = new JsonArray(new JsonObject { ["type"] = "booking", ["id"] = booking.Id.ToString() });
+        if (booking.Type != "booking") throw new DomainException("expense.booking", "Only a booking can have payments.");
+        amount ??= TripSummaries.Money(booking.Data["price"]) is { } price ? (CostUpgrade.Rest(trip, booking, price) is { Amount: > 0 } rest ? rest : price) : null;
+        return Create(trip, booking.Title, amount ?? throw new DomainException("expense.amount", "A payment needs an amount."), payers ?? [], booking.Id, planned);
+    }
+
+    /// <summary>Whether an expense is still to pay: an estimate, or an amount that is booked but not paid yet.</summary>
+    public static bool IsPlanned(Entity expense) => expense.Data["estimated"] is JsonValue flag && flag.TryGetValue<bool>(out var planned) && planned;
+
+    /// <summary>
+    /// A new expense that always names who shares it: the people of what it belongs to (see <see cref="PeopleFor"/>),
+    /// divided equally. A planned one is still to pay and creates no debts until it is paid.
+    /// </summary>
+    public static Entity Create(TripSnapshot trip, string title, Money amount, IEnumerable<Guid> payers, Guid? related = null, bool planned = false, string? category = null)
+    {
+        var expense = Entity.Create("expense", title.Trim());
+        var code = ExchangeRates.Code(amount.Currency) ?? throw new DomainException("expense.currency", "A currency is a code with three letters, such as EUR.");
+        expense.Data["amount"] = new JsonObject { ["value"] = Format(amount.Amount, code), ["currency"] = code };
+        expense.Data["estimated"] = planned;
+        var who = payers.Distinct().ToArray();
+        if (who.Length > 0) expense.Data["paid_by"] = new JsonArray(who.Select(p => (JsonNode)p.ToString()).ToArray());
+        if (related is { } id && trip.Find(id) is { } target) expense.Data["related"] = new JsonArray(new JsonObject { ["type"] = target.Type, ["id"] = target.Id.ToString() });
+        var people = PeopleFor(trip, related);
+        if (people.Count > 0) expense = WithSplit(expense, SplitMethod.Equal, people.Select(p => (p, (decimal?)null)));
+        if (category is { Length: > 0 }) expense = ExpenseCategories.With(trip, expense, category);
         return expense;
     }
+
+    /// <summary>
+    /// Who shares an expense by default: a booking's travellers, otherwise the people of the plans it belongs to,
+    /// otherwise the trip's travellers.
+    /// </summary>
+    public static IReadOnlyList<Guid> PeopleFor(TripSnapshot trip, Guid? related)
+    {
+        if (related is { } id && trip.Find(id) is { } target)
+        {
+            var plans = target.Type == "booking" ? TripCommands.BookedItems(trip, id).Select(trip.Find).OfType<Entity>().ToArray() : target.Type == "schedule_item" ? [target] : [];
+            if (target.Type == "booking" && PersonIds(trip, target.Data["travelers"]).Distinct().ToArray() is { Length: > 0 } travelers) return travelers;
+            var people = plans.SelectMany(p => ScheduleQueries.Participants(trip, p)).Select(p => p.Id).Distinct().ToArray();
+            if (people.Length > 0) return people;
+        }
+        return TripPeople.Travelers(trip).Select(p => p.Id).ToArray();
+    }
+
+    /// <summary>
+    /// Expenses that are divided among "every traveller" because they name nobody (written by older clients), each
+    /// fixed to the people who travel now. Clients apply this before they add a traveller, so a new traveller never
+    /// shares, or changes what was paid back for, earlier expenses by accident.
+    /// </summary>
+    public static IReadOnlyList<Entity> FixShares(TripSnapshot trip)
+    {
+        var travellers = TripPeople.Travelers(trip).Select(p => p.Id).ToArray();
+        if (travellers.Length == 0) return [];
+        return trip.Entities.Values.Where(e => e.Type == "expense" && SharesWithEveryone(e)).OrderBy(e => e.Title, StringComparer.Ordinal)
+            .Select(e => WithSplit(e, SplitMethod.Equal, travellers.Select(p => (p, (decimal?)null)))).ToArray();
+    }
+
+    /// <summary>Whether an expense names nobody and so is shared by every traveller, including travellers added later.</summary>
+    public static bool SharesWithEveryone(Entity expense) =>
+        expense.Data["split"] is not JsonObject split || (split["method"]?.ToString() ?? "equal") == "equal" && (split["parts"] as JsonArray ?? []).Count == 0;
+
+    /// <summary>A copy of a planned expense marked as paid, by <paramref name="payers"/> when it names nobody yet.</summary>
+    public static Entity MarkPaid(Entity expense, IEnumerable<Guid>? payers = null)
+    {
+        var copy = expense.Copy();
+        copy.Data["estimated"] = false;
+        if ((copy.Data["paid_by"] as JsonArray ?? []).Count == 0 && payers?.Distinct().ToArray() is { Length: > 0 } who) copy.Data["paid_by"] = new JsonArray(who.Select(p => (JsonNode)p.ToString()).ToArray());
+        return copy;
+    }
+
+    /// <summary>
+    /// The day an expense happened as far as the trip knows it: the first day of the plan it belongs to, directly or
+    /// through a booking. Clients use it as the default day of an amount charged.
+    /// </summary>
+    public static NodaTime.LocalDate? DayOf(TripSnapshot trip, Entity expense)
+    {
+        foreach (var id in (expense.Data["related"] as JsonArray ?? []).Select(r => Id(r?["id"])).OfType<Guid>())
+        {
+            if (trip.Find(id) is not { } target) continue;
+            var plans = target.Type == "booking" ? TripCommands.BookedItems(trip, id).Select(trip.Find).OfType<Entity>() : target.Type == "schedule_item" ? [target] : [];
+            var days = plans.Select(p => ScheduleQueries.Span(trip, p)).Select(span => span.Start is { } start
+                ? start.InZone(NodaTime.DateTimeZoneProviders.Tzdb.GetZoneOrNull(span.StartZone ?? "") ?? ScheduleQueries.TripZone(trip)).Date : span.Date).OfType<NodaTime.LocalDate>().Order().ToArray();
+            if (days.Length > 0) return days[0];
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Expenses that are paid and should be divided but are not, because their split needs attention: parts that do
+    /// not add up, values that are not numbers, nobody who shares it, or a method this version does not know. They are
+    /// left out of who owes whom until they are fixed, so clients name them there.
+    /// </summary>
+    public static IReadOnlyList<ExpenseSplit> Problems(TripSnapshot trip) => All(trip)
+        .Where(s => (s.Issues & (SplitIssues.SumMismatch | SplitIssues.InvalidValue | SplitIssues.NoPeople | SplitIssues.UnknownMethod)) != 0 && (s.Issues & (SplitIssues.Estimated | SplitIssues.NoAmount)) == 0).ToArray();
 
     /// <summary>Semantic checks for splits and paid marks; references to missing people are reported by <see cref="SemanticValidation"/>.</summary>
     public static IEnumerable<Diagnostic> Validate(TripSnapshot trip)
     {
+        foreach (var booking in trip.Entities.Values.Where(e => e.Type == "booking" && e.Data["price"] is not null))
+            yield return new("booking.price", Severity.Info, booking.Id + "/price", "A booking's price is from an older version; its payments say what it costs. Upgrading the trip's costs turns it into payments.");
         foreach (var expense in trip.Entities.Values.Where(e => e.Type == "expense"))
         {
             var path = expense.Id.ToString();
