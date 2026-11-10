@@ -91,7 +91,7 @@ public class CostExportTests
         var csv = CostExport.Csv(trip, new(), labels, CultureInfo.InvariantCulture, ",").Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
         Assert.Equal("Date,Payment,Category,Belongs to,Amount,Currency,Charged,Charged currency,In EUR,Paid by,State,Open,Due,Part Ana,Part Ben,Part Cleo", csv[0]);
         // A title with the separator is quoted; a title that looks like a formula gets an apostrophe; amounts are plain.
-        Assert.Contains(csv, l => l.StartsWith(",\"Dinner, lake view\",Essen,,90.00,EUR,,,90.00,Ana,60.00 open,60.00,,30.00,30.00,30.00", StringComparison.Ordinal));
+        Assert.Contains(csv, l => l.StartsWith(",\"Dinner, lake view\",Essen,,90.00,EUR,,,90.00,Ana,60.00 EUR open,60.00,,30.00,30.00,30.00", StringComparison.Ordinal));
         Assert.Contains(csv, l => l.StartsWith(",Ferry,transport,,60.00,NZD,33.00,EUR,33.00,Ben,", StringComparison.Ordinal));
         Assert.Contains(csv, l => l.StartsWith(",'-Refund,", StringComparison.Ordinal));
 
@@ -118,7 +118,8 @@ public class CostExportTests
         var trip = Trip(dinner, lodge, budget);
         var document = CostExport.Document(trip, culture: CultureInfo.InvariantCulture);
         Assert.Equal(["Overview", "By category", "Who owes whom", "Payments"], document.Sections.Select(s => s.Title));
-        Assert.Equal([("Paid", "90.00 EUR"), ("Still to pay", "300.00 EUR"), ("Budget", "390.00 EUR of 1,000.00 EUR, 610.00 EUR left")], document.Sections[0].Rows.Select(r => (r.Title, r.Lead)));
+        Assert.Equal([("Paid", "90.00 EUR"), ("Still to pay", "300.00 EUR"), ("Budget", "1,000.00 EUR")], document.Sections[0].Rows.Select(r => (r.Title, r.Lead)));
+        Assert.Equal("390.00 EUR of 1,000.00 EUR, 610.00 EUR left", document.Sections[0].Rows[2].Summary);
         Assert.Equal(["Ben pays Ana", "Cleo pays Ana"], document.Sections[2].Rows.Select(r => r.Title).Order());
         Assert.Contains("to pay · due 04/01/2027", document.Sections[3].Rows.Single(r => r.Title == "Lodge balance").Summary, StringComparison.Ordinal);
         var text = TripExport.Text(document);

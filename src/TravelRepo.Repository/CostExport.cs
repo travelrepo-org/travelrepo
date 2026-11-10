@@ -138,7 +138,7 @@ public static class CostExport
         foreach (var r in Rows(trip, options))
         {
             var code = r.Amount.Currency;
-            var state = r.Planned ? labels.StateToPay : r.Split.Debts.Count == 0 ? "" : r.Split.IsSettled ? labels.StateSettled : string.Format(culture, labels.StateOpen, Expenses.Format(r.Split.Open, code));
+            var state = r.Planned ? labels.StateToPay : r.Split.Debts.Count == 0 ? "" : r.Split.IsSettled ? labels.StateSettled : string.Format(culture, labels.StateOpen, Number(r.Split.Open, code) + " " + code);
             var cells = new List<string>
             {
                 Text(r.Day.Value?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)), Text(r.Expense.Title), Text(labels.CategoryName(r.Category)), Text(r.BelongsTo),
@@ -180,21 +180,23 @@ public static class CostExport
             var inCurrency = list.Where(x => x.How != Conversion.None).ToArray();
             approximate |= inCurrency.Any(x => x.How == Conversion.Reference);
             var apart = list.Where(x => x.How == Conversion.None).GroupBy(x => x.Original.Currency).Select(g => M(g.Sum(x => x.Original.Amount), g.Key));
-            return string.Join(" + ", new[] { (inCurrency.Any(x => x.How == Conversion.Reference) ? "≈ " : "") + M(inCurrency.Sum(x => x.Amount), currency) }.Concat(apart));
+            // No zero in front of what could not be converted: "156,000 JPY", not "0.00 EUR + 156,000 JPY".
+            var converted = inCurrency.Length > 0 && (inCurrency.Sum(x => x.Amount) != 0 || !apart.Any()) ? (inCurrency.Any(x => x.How == Conversion.Reference) ? "≈ " : "") + M(inCurrency.Sum(x => x.Amount), currency) : null;
+            return string.Join(" + ", new[] { converted }.OfType<string>().Concat(apart));
         }
         if (chosen.Length == 0)
         {
             overview.Add(new(labels.Paid, Sum(rows.Where(r => !r.Planned).Select(r => (r.InCurrency.Amount, r.InCurrency.How, r.Amount)))));
             if (rows.Any(r => r.Planned)) overview.Add(new(labels.ToPay, Sum(rows.Where(r => r.Planned).Select(r => (r.InCurrency.Amount, r.InCurrency.How, r.Amount)))));
             if (Budgets.ForTrip(trip, options.Rates) is { } budget)
-                overview.Add(new(labels.Budget, string.Format(culture, labels.BudgetUsed, (budget.Approximate ? "≈ " : "") + M(budget.Used, budget.Currency), M(budget.Amount, budget.Currency), M(budget.Left, budget.Currency))));
+                overview.Add(new(labels.Budget, M(budget.Amount, budget.Currency), string.Format(culture, labels.BudgetUsed, (budget.Approximate ? "≈ " : "") + M(budget.Used, budget.Currency), M(budget.Amount, budget.Currency), M(budget.Left, budget.Currency))));
         }
         else
         {
             overview.Add(new(labels.Share + " · " + labels.Paid, Sum(rows.Where(r => !r.Planned && r.ChosenParts != 0).Select(r => (r.ChosenPartsInCurrency.Amount, r.ChosenPartsInCurrency.How, new Money(Expenses.Format(r.ChosenParts, r.Amount.Currency), r.Amount.Currency))))));
             if (rows.Any(r => r.Planned && r.ChosenParts != 0)) overview.Add(new(labels.Share + " · " + labels.ToPay, Sum(rows.Where(r => r.Planned && r.ChosenParts != 0).Select(r => (r.ChosenPartsInCurrency.Amount, r.ChosenPartsInCurrency.How, new Money(Expenses.Format(r.ChosenParts, r.Amount.Currency), r.Amount.Currency))))));
             foreach (var b in Budgets.Limited(trip, options.Rates).Where(b => b.Filters.Person is { } p && chosen.Contains(p)))
-                overview.Add(new(b.Budget.Title, string.Format(culture, labels.BudgetUsed, (b.Approximate ? "≈ " : "") + M(b.Used, b.Amount.Currency), M(b.Amount.Amount, b.Amount.Currency), M(b.Left, b.Amount.Currency))));
+                overview.Add(new(b.Budget.Title, M(b.Amount.Amount, b.Amount.Currency), string.Format(culture, labels.BudgetUsed, (b.Approximate ? "≈ " : "") + M(b.Used, b.Amount.Currency), M(b.Amount.Amount, b.Amount.Currency), M(b.Left, b.Amount.Currency))));
         }
         sections.Add(new(ExportParts.Costs, labels.Overview, overview));
 
