@@ -75,6 +75,12 @@ public interface IWeatherProvider
     /// <summary>Whether the service forecasts for this point at all, for example only within one country.</summary>
     bool Covers(GeoPoint point);
     /// <summary>
+    /// Whether the service itself says when a forecast may be fetched again, as MET Norway and the US National Weather
+    /// Service do with their Expires header. Their forecasts are not fetched before then, even when the person asks
+    /// for fresh weather (<see cref="WeatherService.UpdateAsync(TripSnapshot, bool, CancellationToken)"/>).
+    /// </summary>
+    bool ServiceSetsExpiry => false;
+    /// <summary>
     /// Forecasts for the points, in the same order. An entry is null when the service does not cover that point.
     /// Throws <see cref="DomainException"/> with code <c>weather.key</c> when a key is missing or rejected, and
     /// <c>weather.unavailable</c> when the service cannot be reached or answers with an error.
