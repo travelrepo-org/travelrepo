@@ -553,4 +553,31 @@ public class ExpenseSplitTests
         Assert.Null(orphan.Data["person"]);
         Assert.Contains(SemanticValidation.Validate(trip with { Entities = trip.Entities.Values.Where(e => e.Id != Ana.Id).ToDictionary(e => e.Id) }), d => d.Code == "reference.missing" && d.Path == ana.Id + "/person");
     }
+    [Fact]
+    public void ABudgetCanCombineACategoryAndAPerson()
+    {
+        var budget = Entity.Create("budget", "Ben's food"); budget.Data["amount"] = new JsonObject { ["value"] = "50.00", ["currency"] = "EUR" };
+        var dinner = ExpenseCategories.With(Trip(), Expense("Dinner", "90.00", "EUR", Ana), "food");
+        var lunch = Expenses.WithSplit(ExpenseCategories.With(Trip(), Expense("Lunch", "40.00", "EUR", Ben), "food"), SplitMethod.Equal, [(Ana.Id, null), (Cleo.Id, null)]);
+        var taxi = ExpenseCategories.With(Trip(), Expense("Taxi", "30.00", "EUR", Ben), "transport");
+        var trip = Trip(budget, dinner, lunch, taxi);
+        var both = Budgets.WithFilters(trip, budget, new BudgetFilters("food", Ben.Id, null));
+        Assert.Empty(SchemaValidation.Validate(both));
+        // Older clients see the narrowest limit, the person.
+        Assert.Equal(("participant", "food", Ben.Id.ToString()), (both.Data["scope"]!.ToString(), both.Data["category"]!.ToString(), both.Data["person"]!.ToString()));
+        trip = With(trip, both);
+        // Ben's third of the dinner; not the lunch he paid but does not share, not the taxi.
+        var status = Budgets.Status(trip, both)!;
+        Assert.Equal((30m, 20m), (status.Spent, status.Left));
+        Assert.Equal(new BudgetFilters("food", Ben.Id, null), status.Filters);
+
+        // Removing the person leaves the category alone; removing both is the whole trip again.
+        var food = Budgets.WithFilters(trip, both, Budgets.FiltersOf(both) with { Person = null });
+        Assert.Equal(("category", 130m), (food.Data["scope"]!.ToString(), Budgets.Status(With(trip, food), food)!.Spent));
+        var whole = Budgets.WithFilters(trip, both, BudgetFilters.None);
+        Assert.Equal("trip", whole.Data["scope"]!.ToString());
+        Assert.Equal(50m, TripSummaries.Costs(With(trip, whole)).Single().Budget);
+        Assert.Equal(0m, TripSummaries.Costs(trip).Single().Budget);
+        Assert.Throws<DomainException>(() => Budgets.WithFilters(trip, budget, new BudgetFilters(null, dinner.Id, null)));
+    }
 }
