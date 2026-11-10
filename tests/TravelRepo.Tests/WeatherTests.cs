@@ -270,12 +270,14 @@ public sealed class WeatherTests : IDisposable
         public IClock Clock { get; set; } = new Clock(Now);
         public string Id => id; public string Name => id; public WeatherAttribution Attribution => new(id + " data", "https://example.invalid/" + id, null);
         public bool RequiresKey => false; public int HorizonDays => horizon;
+        public bool ServiceSetsExpiry { get; init; }
+        public Duration Lifetime { get; init; } = Duration.FromHours(2);
         public bool Covers(GeoPoint point) => covers?.Invoke(point) ?? true;
         public Task<IReadOnlyList<WeatherForecast?>> ForecastAsync(IReadOnlyList<GeoPoint> points, CancellationToken ct = default)
         {
             Calls++; if (Failure is not null) throw Failure;
             var now = Clock.GetCurrentInstant(); var start = Instant.FromUnixTimeSeconds(now.ToUnixTimeSeconds() / 86400 * 86400) - Duration.FromHours(12);
-            return Task.FromResult<IReadOnlyList<WeatherForecast?>>(points.Select(p => covers?.Invoke(p) == false ? null : new WeatherForecast(id, p, now, now + Duration.FromHours(2), Hours(p, start))).ToArray());
+            return Task.FromResult<IReadOnlyList<WeatherForecast?>>(points.Select(p => covers?.Invoke(p) == false ? null : new WeatherForecast(id, p, now, now + Lifetime, Hours(p, start))).ToArray());
         }
     }
     private sealed class FakeClimate : IClimateSource
@@ -354,6 +356,47 @@ public sealed class WeatherTests : IDisposable
         weather = await service.UpdateAsync(Trip(tokyo, honolulu, walk, beach, tenDays));
         Assert.Equal("weather.unavailable", Assert.Single(weather.Problems).Code);
         Assert.Equal("open-meteo", weather.Items[beach.Id].Outlooks[0].Provider);
+    }
+
+    [Fact]
+    public async Task FreshWeatherOnRequestKeepsTheLastForecastWhenItFails()
+    {
+        var tokyo = Place("Tokyo", 35.68, 139.77); var walk = Item("Park walk", "2026-11-11T09:00:00", "2026-11-11T11:00:00", tokyo, "nature");
+        var clock = new Clock(Now); var openMeteo = new FakeService("open-meteo", 16) { Clock = clock };
+        var service = new WeatherService([openMeteo], null, new WeatherCache(cacheRoot), clock: clock);
+        var trip = Trip(tokyo, walk);
+        Instant? Fetched(TripWeather weather) => weather.Items[walk.Id].Outlooks[0].Fetched;
+        await service.UpdateAsync(trip); Assert.Equal(1, openMeteo.Calls);
+
+        // Asked for again straight away: fetched a moment ago, so nothing happens.
+        await service.UpdateAsync(trip, refresh: true); Assert.Equal(1, openMeteo.Calls);
+        // Twenty minutes later the forecast has not expired: only a request fetches it again.
+        clock.Now = Now + Duration.FromMinutes(20);
+        await service.UpdateAsync(trip); Assert.Equal(1, openMeteo.Calls);
+        var weather = await service.UpdateAsync(trip, refresh: true);
+        Assert.Equal(2, openMeteo.Calls); Assert.Equal(clock.Now, Fetched(weather));
+
+        // Offline: the forecast and its time stay, and the problem is reported.
+        var before = clock.Now; clock.Now += Duration.FromMinutes(20); openMeteo.Failure = new DomainException("weather.unavailable", "offline");
+        weather = await service.UpdateAsync(trip, refresh: true);
+        Assert.Equal(3, openMeteo.Calls); Assert.Single(weather.Problems); Assert.Equal(before, Fetched(weather));
+    }
+
+    [Fact]
+    public async Task FreshWeatherOnRequestWaitsWhenTheServiceSetsTheTime()
+    {
+        var oslo = Place("Oslo", 59.91, 10.75); var walk = Item("Fjord walk", "2026-11-11T09:00:00", "2026-11-11T11:00:00", oslo, "nature");
+        var clock = new Clock(Now);
+        var openMeteo = new FakeService("open-meteo", 16) { Clock = clock };
+        var met = new FakeService("met-norway", 9) { Clock = clock, ServiceSetsExpiry = true, Lifetime = Duration.FromMinutes(45) };
+        var service = new WeatherService([openMeteo, met], null, new WeatherCache(cacheRoot), "met-norway", clock);
+        var trip = Trip(oslo, walk);
+        await service.UpdateAsync(trip); Assert.Equal(1, met.Calls);
+        // Before the time the service gave, even a request does not ask it again.
+        clock.Now = Now + Duration.FromMinutes(30);
+        await service.UpdateAsync(trip, refresh: true); Assert.Equal(1, met.Calls);
+        clock.Now = Now + Duration.FromMinutes(45);
+        await service.UpdateAsync(trip, refresh: true); Assert.Equal(2, met.Calls);
     }
 
     [Fact]

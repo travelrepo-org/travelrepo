@@ -123,6 +123,8 @@ public sealed class ExportFilter(TripSnapshot trip, ExportOptions options)
     {
         var span = ScheduleQueries.Span(trip, item);
         if (!span.IsPlaced || span.Start is not { } start) return null;
+        // All-day and day-part plans belong to a calendar day, not to a moment that could move to another day.
+        if (options.TimeZone is not null && span.Precision is TimePrecision.AllDay or TimePrecision.DayPart && span.Date is { } planned) return (planned, planned);
         var first = start.InZone(zone).Date;
         var last = span.End is { } end && end > start ? end.Minus(Duration.FromTicks(1)).InZone(zone).Date : first;
         return (first, last < first ? first : last);

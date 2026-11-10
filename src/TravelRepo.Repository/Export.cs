@@ -131,7 +131,8 @@ public static partial class TripExport
     /// <summary>The scheduled items as an iCalendar file. <paramref name="options"/> limits the date range and person.</summary>
     public static string Ics(TripSnapshot trip, ExportOptions? options = null)
     {
-        var filter = new ExportFilter(trip, options ?? new());
+        // Calendar files keep exact times, so a time zone chosen for reading changes neither them nor the date range.
+        var filter = new ExportFilter(trip, (options ?? new()) with { TimeZone = null, OtherTimeZones = [] });
         var lines = new List<string> { "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//TravelRepo//TravelRepo 1.0//EN", "CALSCALE:GREGORIAN" };
         foreach (var entry in TripCalendar.Entries(trip, filter.Includes))
         {
