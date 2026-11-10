@@ -512,4 +512,45 @@ public class ExpenseSplitTests
         var cancelled = hotel.Copy(); cancelled.Data["status"] = "cancelled";
         Assert.Equal(BookingCoverage.NoPrice, Expenses.Payment(Trip(cancelled), cancelled).Coverage);
     }
+    [Fact]
+    public void BudgetsCoverTheTripACategoryAPersonOrACollection()
+    {
+        Entity Budget(string title, string value, string currency) { var b = Entity.Create("budget", title); b.Data["amount"] = new JsonObject { ["value"] = value, ["currency"] = currency }; return b; }
+        var dinner = ExpenseCategories.With(Trip(), Expense("Dinner", "90.00", "EUR", Ana), "food");
+        var ferry = ExpenseCategories.With(Trip(), Expense("Ferry", "200.00", "NZD", Ben), "transport");
+        ferry = Expenses.WithCharge(ferry, 112m, "EUR");
+        var snacks = ExpenseCategories.With(Trip(), Expense("Snacks", "30.00", "NZD", Cleo), "food"); snacks.Data["estimated"] = true;
+        var whole = Budget("Trip", "1000.00", "EUR"); var food = Budget("Eating out", "100.00", "EUR"); var ana = Budget("Ana's money", "100.00", "EUR"); var day = Budget("Day trip", "150.00", "EUR");
+        var collection = Entity.Create("collection", "Day trip"); collection.Data["items"] = new JsonArray(ferry.Id.ToString());
+        var trip = Trip(dinner, ferry, snacks, whole, food, ana, day, collection);
+        food = Budgets.WithScope(trip, food, Budgets.Category, "FOOD");
+        ana = Budgets.WithScope(trip, ana, Budgets.Participant, Ana.Id.ToString());
+        day = Budgets.WithScope(trip, day, Budgets.Collection, collection.Id.ToString());
+        trip = With(trip, food, ana, day);
+        Assert.All(new[] { food, ana, day }, b => Assert.Empty(SchemaValidation.Validate(b)));
+        Assert.Equal(("category", "food"), (food.Data["scope"]!.ToString(), food.Data["category"]!.ToString()));
+
+        // Without rates the snacks in NZD cannot count in euros and are named; the ferry counts as charged.
+        var status = Budgets.All(trip).ToDictionary(b => b.Budget.Title);
+        Assert.Equal((202m, 0m, false), (status["Trip"].Spent, status["Trip"].Planned, status["Trip"].Approximate));
+        Assert.Equal([new Money("30.00", "NZD")], status["Trip"].NotIncluded);
+        Assert.Equal((90m, 10m), (status["Eating out"].Spent, status["Eating out"].Left));
+        // Ana's third of the dinner, and of the ferry 66.67 NZD (she gets the cent left over) = 37.34 EUR as charged.
+        Assert.Equal(30m + 37.34m, status["Ana's money"].Spent);
+        Assert.Equal(112m, status["Day trip"].Spent);
+
+        // With rates, the estimated snacks are planned spending, as an estimate.
+        var rates = new ExchangeRates(new DateOnly(2026, 11, 20), new Dictionary<string, decimal> { ["NZD"] = 2m });
+        var withRates = Budgets.Status(trip, food, rates)!;
+        Assert.Equal((90m, 15m, true, -5m), (withRates.Spent, withRates.Planned, withRates.Approximate, withRates.Left));
+
+        // Only the trip budget adds up into the trip's budget per currency.
+        Assert.Equal(1000m, TripSummaries.Costs(trip).Single(c => c.Currency == "EUR").Budget);
+        Assert.Throws<DomainException>(() => Budgets.WithScope(trip, ana, Budgets.Participant, collection.Id.ToString()));
+        // Deleting Ana leaves her budget without a person; it then covers nothing.
+        var deletion = TripDeletion.Plan(trip, [Ana.Id]);
+        var orphan = deletion.Updated.Single(e => e.Id == ana.Id);
+        Assert.Null(orphan.Data["person"]);
+        Assert.Contains(SemanticValidation.Validate(trip with { Entities = trip.Entities.Values.Where(e => e.Id != Ana.Id).ToDictionary(e => e.Id) }), d => d.Code == "reference.missing" && d.Path == ana.Id + "/person");
+    }
 }

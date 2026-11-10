@@ -569,6 +569,14 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
             ["balances"] = new JsonArray(Expenses.Balances(trip, target, rates).Select(b => (JsonNode)new JsonObject { ["person"] = Name(b.Person), ["currency"] = b.Currency, ["net"] = b.Net, ["estimated"] = b.Estimated ? true : null }).ToArray()),
             ["settle_up"] = new JsonArray(Expenses.SettleUp(trip, target, rates).Select(t => (JsonNode)new JsonObject { ["from"] = Name(t.From), ["to"] = Name(t.To), ["currency"] = t.Currency, ["amount"] = t.Amount, ["estimated"] = t.Estimated ? true : null }).ToArray())
         };
+        result["budgets"] = new JsonArray(Budgets.All(trip, rates).Select(b => (JsonNode)new JsonObject
+        {
+            ["id"] = b.Budget.Id.ToString(), ["title"] = b.Budget.Title, ["scope"] = b.Scope,
+            ["for"] = b.Scope == Budgets.Participant || b.Scope == Budgets.Collection ? (Guid.TryParse(b.Target, out var forId) ? trip.Find(forId)?.Title : null) : b.Target,
+            ["amount"] = b.Amount.Amount, ["currency"] = b.Amount.Currency, ["spent"] = b.Spent, ["planned"] = b.Planned, ["left"] = b.Left,
+            ["estimated"] = b.Approximate ? true : null,
+            ["not_included"] = b.NotIncluded.Count > 0 ? new JsonArray(b.NotIncluded.Select(m => (JsonNode)new JsonObject { ["amount"] = m.Value, ["currency"] = m.Currency }).ToArray()) : null
+        }).ToArray());
         result["by_category"] = new JsonArray(ExpenseCategories.Totals(trip, target, rates).Select(t => (JsonNode)new JsonObject { ["category"] = t.Category, ["currency"] = t.Currency, ["amount"] = t.Amount, ["estimated"] = t.Estimated ? true : null }).ToArray());
         if (target is not null)
         {

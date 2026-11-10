@@ -1047,6 +1047,20 @@ Budgets may exist for:
 
 Budget support is part of the format direction. A reference client may ship only a basic implementation in v1.
 
+A budget has an `amount` and a `scope`: `trip` (also without a scope or with one a client does not know), `category` with the expense `category` it covers (section 34.2), `participant` with the `person` whose part of each expense it covers (section 34.1), or `collection` with the `collection` whose plans, bookings, places and expenses it covers, including expenses for the bookings of those plans.
+
+```yaml
+type: budget
+title: Eating out
+amount:
+  value: "600.00"
+  currency: EUR
+scope: category
+category: food
+```
+
+A budget counts what the expenses it covers come to in its own currency: exactly where an amount is in that currency or was charged in it (section 35), otherwise with reference rates as an estimate, which clients mark as such. Amounts that cannot be converted are named separately instead of being left out silently. Estimated expenses count as planned, apart from what was spent. Only `trip` budgets add up into a trip's budget per currency; the others are reported one by one.
+
 ## 37. Collections
 
 Collections group arbitrary trip entities without changing their primary type.
