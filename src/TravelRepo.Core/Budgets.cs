@@ -23,6 +23,8 @@ public sealed record BudgetStatus(Entity Budget, string Scope, string? Target, M
 /// </summary>
 public sealed record TripBudgetStatus(string Currency, decimal Amount, bool AmountApproximate, IReadOnlyList<Money> AmountNotConverted, IReadOnlyList<Entity> Budgets, ConvertedTotal Paid, ConvertedTotal Planned)
 {
+    /// <summary>What payments for ideas would cost; shown apart, not part of <see cref="Used"/>.</summary>
+    public ConvertedTotal? Ideas { get; init; }
     public decimal Used => Paid.Total + Planned.Total;
     /// <summary>What is left; negative when the budget is exceeded.</summary>
     public decimal Left => Amount - Used;
@@ -121,7 +123,9 @@ public static class Budgets
             amount += value; approximate |= how == Conversion.Reference;
         }
         var expenses = trip.Entities.Values.Where(e => e.Type == "expense").ToArray();
-        return new(currency, amount, approximate, missing, budgets, Expenses.Total(expenses, currency, rates), Expenses.Total(expenses, currency, rates, planned: true));
+        var ideas = expenses.Where(e => Expenses.IsIdea(trip, e)).ToArray();
+        return new(currency, amount, approximate, missing, budgets, Expenses.Total(expenses, currency, rates), Expenses.Total(expenses.Except(ideas), currency, rates, planned: true))
+        { Ideas = ideas.Length > 0 ? Expenses.Total(ideas, currency, rates, planned: true) : null };
     }
 
     /// <summary>Budgets with a limit, such as a category or a person, with where they stand, in order of title.</summary>
@@ -146,7 +150,8 @@ public static class Budgets
             ? (collection.Data["items"] as JsonArray ?? []).Select(n => Guid.TryParse(n?.ToString(), out var id) ? id : (Guid?)null).OfType<Guid>().ToHashSet() : [];
         foreach (var expense in trip.Entities.Values.Where(e => e.Type == "expense"))
         {
-            if (TripSummaries.Money(expense.Data["amount"]) is not { } money) continue;
+            // Payments for ideas say what it would cost; they do not count until it is booked.
+            if (TripSummaries.Money(expense.Data["amount"]) is not { } money || Expenses.IsIdea(trip, expense)) continue;
             if (filters.Category is { } wanted && !string.Equals(ExpenseCategories.Of(trip, expense), wanted, StringComparison.CurrentCultureIgnoreCase)) continue;
             if (filters.Collection is not null && !(inCollection.Contains(expense.Id) || Related(trip, expense).Any(inCollection.Contains))) continue;
             decimal? part = money.Amount;

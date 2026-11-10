@@ -51,6 +51,11 @@ public readonly record struct DebtKey(Guid Expense, Guid From, Guid To);
 /// </summary>
 public sealed record ExpenseDebt(Guid Expense, Guid From, Guid To, string Currency, decimal Amount, decimal Settled, LocalDate? SettledOn = null)
 {
+    /// <summary>
+    /// What was transferred in another currency when it was paid back, such as euros for a debt in NZD, with the rate
+    /// used then; null when it was paid in the debt's own currency or before this was recorded.
+    /// </summary>
+    public Transferred? PaidIn { get; init; }
     public DebtKey Key => new(Expense, From, To);
     public decimal Open => Amount - Settled;
     public bool IsSettled => Open == 0;
@@ -78,6 +83,13 @@ public sealed record ExpenseSplit(Entity Expense, Money? Amount, SplitMethod? Me
     /// <summary>The part of <paramref name="person"/>, or zero.</summary>
     public decimal ShareOf(Guid person) => Shares.Where(s => s.Person == person).Sum(s => s.Amount);
 }
+
+/// <summary>
+/// What was transferred to pay back a debt in another currency (specification section 34.1): the amount, its currency,
+/// units of it per unit of the debt's currency, the day of the rate, and whether the rate was a reference rate
+/// (an estimate) rather than what a card charged.
+/// </summary>
+public sealed record Transferred(decimal Value, string Currency, decimal Rate, LocalDate? RateDate, bool Reference);
 
 /// <summary>Where one person stands in one currency: positive when others owe them, negative when they owe others.</summary>
 public sealed record ExpenseBalance(Guid Person, string Currency, decimal Net)
@@ -236,8 +248,8 @@ public static class Expenses
         foreach (var settled in ReadSettled(expense))
         {
             var index = debts.FindIndex(d => d.From == settled.From && d.To == settled.To);
-            if (index >= 0) debts[index] = debts[index] with { Settled = debts[index].Settled + settled.Value, SettledOn = settled.On ?? debts[index].SettledOn };
-            else if (issues == SplitIssues.None) debts.Add(new(expense.Id, settled.From, settled.To, currency, 0, settled.Value, settled.On));
+            if (index >= 0) debts[index] = debts[index] with { Settled = debts[index].Settled + settled.Value, SettledOn = settled.On ?? debts[index].SettledOn, PaidIn = settled.PaidIn ?? debts[index].PaidIn };
+            else if (issues == SplitIssues.None) debts.Add(new(expense.Id, settled.From, settled.To, currency, 0, settled.Value, settled.On) { PaidIn = settled.PaidIn });
         }
         var assigned = method switch { SplitMethod.Equal => money?.Amount ?? 0, _ => parts.Sum(p => p.Value ?? 0) };
         return new(expense, money, method, payers, shares, debts, issues) { Assigned = assigned, People = parts.Select(p => p.Person).ToArray() };
@@ -416,7 +428,13 @@ public static class Expenses
     /// Marks the given debts as paid in full on <paramref name="on"/> and returns the changed expenses. A debt that is
     /// owed back because more was paid than is owed counts as paid back. Other fields of the expense are kept.
     /// </summary>
-    public static IReadOnlyList<Entity> Settle(TripSnapshot trip, IEnumerable<DebtKey> keys, LocalDate? on = null)
+    /// <remarks>
+    /// With <paramref name="currency"/>, the currency the travellers paid back in, such as the trip's: what is
+    /// transferred now for a debt in another currency is kept with the paid mark, converted as in <see cref="Convert"/>
+    /// (exactly with what a card charged, otherwise with <paramref name="rates"/>), so the history shows what was
+    /// really paid and that amount no longer changes with the rates.
+    /// </remarks>
+    public static IReadOnlyList<Entity> Settle(TripSnapshot trip, IEnumerable<DebtKey> keys, LocalDate? on = null, string? currency = null, ExchangeRates? rates = null)
     {
         var result = new List<Entity>();
         foreach (var group in keys.Distinct().GroupBy(k => k.Expense))
@@ -429,6 +447,7 @@ public static class Expenses
             {
                 var debt = split.Debts.FirstOrDefault(d => d.Key == key) ?? throw new DomainException("expense.debt", "This person owes nothing for this expense.");
                 SetSettled(copy, debt.From, debt.To, debt.Amount == 0 ? null : Format(debt.Amount, debt.Currency), on);
+                if (debt.Amount != 0 && debt.Open > 0 && currency is not null && currency != debt.Currency) RecordTransfer(copy, expense, debt, currency, rates, on);
             }
             result.Add(copy);
         }
@@ -436,14 +455,14 @@ public static class Expenses
     }
 
     /// <summary>Marks everything owed for an expense as paid, or, with <paramref name="from"/>, only what that person owes.</summary>
-    public static Entity Settle(TripSnapshot trip, Entity expense, Guid? from = null, LocalDate? on = null)
+    public static Entity Settle(TripSnapshot trip, Entity expense, Guid? from = null, LocalDate? on = null, string? currency = null, ExchangeRates? rates = null)
     {
         var keys = Split(trip, expense).Debts.Where(d => from is not { } p || d.From == p).Select(d => d.Key).ToArray();
-        return keys.Length == 0 ? expense.Copy() : Settle(trip, keys, on).Single();
+        return keys.Length == 0 ? expense.Copy() : Settle(trip, keys, on, currency, rates).Single();
     }
 
     /// <summary>Marks every open debt of the trip as paid, for example after everyone paid what <see cref="SettleUp"/> says.</summary>
-    public static IReadOnlyList<Entity> SettleAll(TripSnapshot trip, LocalDate? on = null) => Settle(trip, Open(trip).Select(d => d.Key), on);
+    public static IReadOnlyList<Entity> SettleAll(TripSnapshot trip, LocalDate? on = null, string? currency = null, ExchangeRates? rates = null) => Settle(trip, Open(trip).Select(d => d.Key), on, currency, rates);
 
     /// <summary>
     /// Takes back the paid mark of an expense, or with <paramref name="from"/> only of what that person owed, or with
@@ -601,6 +620,15 @@ public static class Expenses
         return copy;
     }
 
+    /// <summary>
+    /// Whether a payment still to pay belongs to an idea or something cancelled: a booking or plan with the status
+    /// <c>idea</c> or <c>cancelled</c>. Such payments say what it would cost; they do not count as still to pay or in
+    /// budgets until what they belong to is booked. What was paid always counts.
+    /// </summary>
+    public static bool IsIdea(TripSnapshot trip, Entity expense) => IsPlanned(expense)
+        && (expense.Data["related"] as JsonArray ?? []).Select(r => Id(r?["id"])).OfType<Guid>().Select(trip.Find).OfType<Entity>()
+            .Any(e => e.Data["status"]?.ToString() is "idea" or "cancelled");
+
     /// <summary>Whether an expense is still to pay: an estimate, or an amount that is booked but not paid yet.</summary>
     public static bool IsPlanned(Entity expense) => expense.Data["estimated"] is JsonValue flag && flag.TryGetValue<bool>(out var planned) && planned;
 
@@ -726,7 +754,30 @@ public static class Expenses
     }
 
     private sealed record Part(Guid Person, decimal? Value);
-    private sealed record SettledMark(Guid From, Guid To, decimal Value, LocalDate? On);
+    private sealed record SettledMark(Guid From, Guid To, decimal Value, LocalDate? On, Transferred? PaidIn);
+
+    /// <summary>
+    /// Keeps with a paid mark what was transferred now in <paramref name="currency"/> for the open part of
+    /// <paramref name="debt"/>, added to what an earlier part was transferred for in the same currency.
+    /// </summary>
+    private static void RecordTransfer(Entity copy, Entity expense, ExpenseDebt debt, string currency, ExchangeRates? rates, LocalDate? on)
+    {
+        var (value, code, how) = Convert(expense, debt.Open, debt.Currency, currency, rates);
+        if (code != currency || how == Conversion.None) return;
+        var entry = (copy.Data["settled"] as JsonArray ?? []).OfType<JsonObject>().First(e => Id(e["person"]) == debt.From && Id(e["to"]) == debt.To);
+        var total = value + (debt.PaidIn is { } earlier && earlier.Currency == currency ? earlier.Value : 0);
+        var basis = debt.Open + (debt.PaidIn is { } before && before.Currency == currency ? debt.Settled : 0);
+        LocalDate? rateDay = how == Conversion.Reference ? rates is { } r ? LocalDate.FromDateOnly(r.Date) : null : ChargeOf(expense)?.Date ?? on;
+        var converted = new JsonObject
+        {
+            ["value"] = Format(total, currency),
+            ["currency"] = currency,
+            ["rate"] = Math.Round(total / basis, 6, MidpointRounding.AwayFromZero).ToString("0.######", CultureInfo.InvariantCulture),
+            ["source"] = how == Conversion.Reference ? "reference" : "card"
+        };
+        if (rateDay is { } d) converted["rate_date"] = LocalDatePattern.Iso.Format(d);
+        entry["converted"] = converted;
+    }
 
     private static (SplitMethod? Method, IReadOnlyList<Part> Parts, SplitIssues Issues) ReadSplit(TripSnapshot trip, Entity expense)
     {
@@ -758,7 +809,10 @@ public static class Expenses
     {
         foreach (var entry in (expense.Data["settled"] as JsonArray ?? []).OfType<JsonObject>())
             if (Id(entry["person"]) is { } from && Id(entry["to"]) is { } to && TryDecimal(entry["value"], out var value))
-                yield return new(from, to, value, entry["date"] is JsonValue d && LocalDatePattern.Iso.Parse(d.ToString()).TryGetValue(default, out var day) ? day : null);
+                yield return new(from, to, value, entry["date"] is JsonValue d && LocalDatePattern.Iso.Parse(d.ToString()).TryGetValue(default, out var day) ? day : null,
+                    entry["converted"] is JsonObject c && ExchangeRates.Code(c["currency"]?.ToString()) is { } code && TryDecimal(c["value"], out var paid)
+                        ? new Transferred(paid, code, TryDecimal(c["rate"], out var rate) ? rate : value == 0 ? 0 : paid / value, c["rate_date"] is JsonValue rd && LocalDatePattern.Iso.Parse(rd.ToString()).TryGetValue(default, out var rateDay) ? rateDay : null, c["source"]?.ToString() == "reference")
+                        : null);
     }
 
     private static void SetSettled(Entity expense, Guid from, Guid to, string? value, LocalDate? on)
@@ -771,6 +825,8 @@ public static class Expenses
         else
         {
             if (entry is null) { entry = new JsonObject { ["person"] = from.ToString(), ["to"] = to.ToString() }; settled.Add(entry); }
+            // A transfer in another currency is recorded again by the caller when there is one; a stale one would mislead.
+            if (entry["value"]?.ToString() != value) entry.Remove("converted");
             entry["value"] = value;
             if (on is { } day) entry["date"] = LocalDatePattern.Iso.Format(day);
         }

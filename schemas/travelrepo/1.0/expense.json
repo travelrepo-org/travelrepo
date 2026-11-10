@@ -108,6 +108,32 @@
           },
           "date": {
             "type": "string"
+          },
+          "converted": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "string",
+                "pattern": "^-?\\d+(\\.\\d+)?$"
+              },
+              "currency": {
+                "type": "string"
+              },
+              "rate": {
+                "type": "string"
+              },
+              "rate_date": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "value",
+              "currency"
+            ],
+            "additionalProperties": true
           }
         },
         "required": [

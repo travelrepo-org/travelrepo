@@ -646,7 +646,17 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         {
             ["method"] = split.Method is { } m ? Expenses.Name(m) : split.Expense.Data["split"]?["method"]?.DeepClone(),
             ["parts"] = new JsonArray(split.Shares.Select(x => (JsonNode)new JsonObject { ["person"] = Name(x.Person), ["amount"] = x.Amount, ["value"] = x.Value }).ToArray()),
-            ["debts"] = new JsonArray(split.Debts.Select(d => (JsonNode)new JsonObject { ["from"] = Name(d.From), ["to"] = Name(d.To), ["amount"] = d.Amount, ["paid"] = d.Settled, ["open"] = d.Open, ["paid_on"] = d.SettledOn?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) }).ToArray()),
+            ["debts"] = new JsonArray(split.Debts.Select(d => (JsonNode)new JsonObject
+            {
+                ["from"] = Name(d.From),
+                ["to"] = Name(d.To),
+                ["amount"] = d.Amount,
+                ["paid"] = d.Settled,
+                ["open"] = d.Open,
+                ["paid_on"] = d.SettledOn?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                ["paid_in"] = d.PaidIn is { } t ? new JsonObject { ["amount"] = t.Value, ["currency"] = t.Currency, ["rate"] = t.Rate, ["estimated"] = t.Reference ? true : null } : null
+            }).ToArray()),
+            ["idea"] = Expenses.IsIdea(trip, split.Expense) ? true : null,
             ["open"] = split.Open,
             ["issues"] = issues.Length > 0 ? new JsonArray(issues) : null
         };
@@ -793,7 +803,8 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
             var target = Find(state.Trip, expense);
             if (target.Type != "expense") throw new McpException(target.Title + " is not an expense.");
             Guid? from = person is null ? null : Person(state.Trip, person).Id;
-            var changed = paid ? Expenses.Settle(state.Trip, target, from, day) : Expenses.Unsettle(target, from);
+            // Paid back in the trip's currency: what was transferred is kept with the mark.
+            var changed = paid ? Expenses.Settle(state.Trip, target, from, day, TripCurrency.Of(state.Trip), Rates()) : Expenses.Unsettle(target, from);
             return ([new EntityEdit(changed.Id, changed)], null);
         }, ct);
         return SplitJson(saved.Trip, Expenses.Split(saved.Trip, Find(saved.Trip, expense)));

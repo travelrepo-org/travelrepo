@@ -43,6 +43,14 @@ public sealed record CostExportLabels
     public string Owes { get; init; } = "{0} owes {1} {2}";
     public string Charged { get; init; } = "charged {0}";
     public string StateToPay { get; init; } = "to pay";
+    /// <summary>A payment still to pay for an idea or something cancelled, which does not count.</summary>
+    public string StateIdea { get; init; } = "idea, not counted";
+    /// <summary>What payments for ideas would cost, apart from what is still to pay.</summary>
+    public string Ideas { get; init; } = "Ideas, not counted";
+    /// <summary>A debt paid back, for example "Ben paid back Ana 30.00 NZD".</summary>
+    public string PaidBack { get; init; } = "{0} paid back {1} {2}";
+    /// <summary>What was transferred for it in another currency, for example "as 17.10 EUR".</summary>
+    public string TransferredAs { get; init; } = "as {0}";
     public string StateSettled { get; init; } = "settled";
     public string StateOpen { get; init; } = "{0} open";
     public string DueOn { get; init; } = "due {0}";
@@ -71,7 +79,11 @@ public sealed record CostExportLabels
 }
 
 /// <summary>One payment of a cost export, with the parts of the people in it.</summary>
-public sealed record CostExportRow(Entity Expense, LocalDateOrNone Day, string Category, string? BelongsTo, Money Amount, Charge? Charge, (decimal Amount, Conversion How) InCurrency, IReadOnlyList<string> Payers, ExpenseSplit Split, bool Planned, NodaTime.LocalDate? Due, decimal ChosenParts, (decimal Amount, Conversion How) ChosenPartsInCurrency);
+public sealed record CostExportRow(Entity Expense, LocalDateOrNone Day, string Category, string? BelongsTo, Money Amount, Charge? Charge, (decimal Amount, Conversion How) InCurrency, IReadOnlyList<string> Payers, ExpenseSplit Split, bool Planned, NodaTime.LocalDate? Due, decimal ChosenParts, (decimal Amount, Conversion How) ChosenPartsInCurrency)
+{
+    /// <summary>A payment still to pay for an idea or something cancelled; it does not count.</summary>
+    public bool Idea { get; init; }
+}
 
 /// <summary>A day or none, so rows sort with undated payments last.</summary>
 public readonly record struct LocalDateOrNone(NodaTime.LocalDate? Value);
@@ -105,7 +117,8 @@ public static class CostExport
             var partsIn = Expenses.Convert(expense, parts, money.Currency, currency, options.Rates);
             rows.Add(new(expense, new(Expenses.DayOf(trip, expense)), ExpenseCategories.Of(trip, expense), related, money, Expenses.ChargeOf(expense),
                 (full.Amount, full.Currency == currency ? full.How : Conversion.None), payers.Select(p => trip.Find(p)?.Title ?? "").ToArray(), split,
-                Expenses.IsPlanned(expense), Expenses.DueOf(expense), parts, (partsIn.Amount, partsIn.Currency == currency ? partsIn.How : Conversion.None)));
+                Expenses.IsPlanned(expense), Expenses.DueOf(expense), parts, (partsIn.Amount, partsIn.Currency == currency ? partsIn.How : Conversion.None))
+            { Idea = Expenses.IsIdea(trip, expense) });
         }
         return rows.OrderBy(r => r.Day.Value is null ? 1 : 0).ThenBy(r => r.Day.Value).ThenBy(r => r.Expense.Title, StringComparer.CurrentCulture).ToArray();
     }
@@ -138,7 +151,7 @@ public static class CostExport
         foreach (var r in Rows(trip, options))
         {
             var code = r.Amount.Currency;
-            var state = r.Planned ? labels.StateToPay : r.Split.Debts.Count == 0 ? "" : r.Split.IsSettled ? labels.StateSettled : string.Format(culture, labels.StateOpen, Number(r.Split.Open, code) + " " + code);
+            var state = r.Idea ? labels.StateIdea : r.Planned ? labels.StateToPay : r.Split.Debts.Count == 0 ? "" : r.Split.IsSettled ? labels.StateSettled : string.Format(culture, labels.StateOpen, Number(r.Split.Open, code) + " " + code);
             var cells = new List<string>
             {
                 Text(r.Day.Value?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)), Text(r.Expense.Title), Text(labels.CategoryName(r.Category)), Text(r.BelongsTo),
@@ -187,14 +200,15 @@ public static class CostExport
         if (chosen.Length == 0)
         {
             overview.Add(new(labels.Paid, Sum(rows.Where(r => !r.Planned).Select(r => (r.InCurrency.Amount, r.InCurrency.How, r.Amount)))));
-            if (rows.Any(r => r.Planned)) overview.Add(new(labels.ToPay, Sum(rows.Where(r => r.Planned).Select(r => (r.InCurrency.Amount, r.InCurrency.How, r.Amount)))));
+            if (rows.Any(r => r.Planned && !r.Idea)) overview.Add(new(labels.ToPay, Sum(rows.Where(r => r.Planned && !r.Idea).Select(r => (r.InCurrency.Amount, r.InCurrency.How, r.Amount)))));
+            if (rows.Any(r => r.Idea)) overview.Add(new(labels.Ideas, Sum(rows.Where(r => r.Idea).Select(r => (r.InCurrency.Amount, r.InCurrency.How, r.Amount)))));
             if (Budgets.ForTrip(trip, options.Rates) is { } budget)
                 overview.Add(new(labels.Budget, M(budget.Amount, budget.Currency), string.Format(culture, labels.BudgetUsed, (budget.Approximate ? "≈ " : "") + M(budget.Used, budget.Currency), M(budget.Amount, budget.Currency), M(budget.Left, budget.Currency))));
         }
         else
         {
             overview.Add(new(labels.Share + " · " + labels.Paid, Sum(rows.Where(r => !r.Planned && r.ChosenParts != 0).Select(r => (r.ChosenPartsInCurrency.Amount, r.ChosenPartsInCurrency.How, new Money(Expenses.Format(r.ChosenParts, r.Amount.Currency), r.Amount.Currency))))));
-            if (rows.Any(r => r.Planned && r.ChosenParts != 0)) overview.Add(new(labels.Share + " · " + labels.ToPay, Sum(rows.Where(r => r.Planned && r.ChosenParts != 0).Select(r => (r.ChosenPartsInCurrency.Amount, r.ChosenPartsInCurrency.How, new Money(Expenses.Format(r.ChosenParts, r.Amount.Currency), r.Amount.Currency))))));
+            if (rows.Any(r => r.Planned && !r.Idea && r.ChosenParts != 0)) overview.Add(new(labels.Share + " · " + labels.ToPay, Sum(rows.Where(r => r.Planned && !r.Idea && r.ChosenParts != 0).Select(r => (r.ChosenPartsInCurrency.Amount, r.ChosenPartsInCurrency.How, new Money(Expenses.Format(r.ChosenParts, r.Amount.Currency), r.Amount.Currency))))));
             foreach (var b in Budgets.Limited(trip, options.Rates).Where(b => b.Filters.Person is { } p && chosen.Contains(p)))
                 overview.Add(new(b.Budget.Title, M(b.Amount.Amount, b.Amount.Currency), string.Format(culture, labels.BudgetUsed, (b.Approximate ? "≈ " : "") + M(b.Used, b.Amount.Currency), M(b.Amount.Amount, b.Amount.Currency), M(b.Left, b.Amount.Currency))));
         }
@@ -216,13 +230,18 @@ public static class CostExport
         {
             var code = r.Amount.Currency;
             var lead = M(r.Amount.Amount, code) + (r.Charge is { } c ? " · " + string.Format(culture, labels.Charged, M(c.Value, c.Currency)) : "");
-            var state = r.Planned ? labels.StateToPay + (r.Due is { } due ? " · " + string.Format(culture, labels.DueOn, due.ToString("d", culture)) : "")
+            var state = r.Idea ? labels.StateIdea : r.Planned ? labels.StateToPay + (r.Due is { } due ? " · " + string.Format(culture, labels.DueOn, due.ToString("d", culture)) : "")
                 : r.Split.Debts.Count == 0 ? null : r.Split.IsSettled ? labels.StateSettled : string.Format(culture, labels.StateOpen, M(r.Split.Open, code));
             var summary = string.Join(" · ", new[] { r.Day.Value?.ToString("d", culture), labels.CategoryName(r.Category), r.BelongsTo, r.Payers.Count > 0 ? string.Format(culture, labels.PaidBy, string.Join(", ", r.Payers)) : null, state }.Where(x => !string.IsNullOrEmpty(x)));
             var details = new List<string>();
             if (r.Split.Shares.Count > 0) details.Add(string.Format(culture, labels.SharedBy, string.Join(", ", r.Split.Shares.Select(x => Name(x.Person) + " " + M(x.Amount, code)))));
-            foreach (var d in r.Split.Debts.Where(d => !d.IsSettled && (chosen.Length == 0 || chosen.Contains(d.From) || chosen.Contains(d.To))))
-                details.Add(d.Open > 0 ? string.Format(culture, labels.Owes, Name(d.From), Name(d.To), M(d.Open, d.Currency)) : string.Format(culture, labels.Owes, Name(d.To), Name(d.From), M(-d.Open, d.Currency)));
+            foreach (var d in r.Split.Debts.Where(d => chosen.Length == 0 || chosen.Contains(d.From) || chosen.Contains(d.To)))
+            {
+                // Paid back, with what was transferred in another currency, and what is still open.
+                if (d.Settled > 0) details.Add(string.Format(culture, labels.PaidBack, Name(d.From), Name(d.To), M(Math.Min(d.Settled, d.Amount), d.Currency))
+                    + (d.PaidIn is { } t ? " " + string.Format(culture, labels.TransferredAs, (t.Reference ? "≈ " : "") + M(t.Value, t.Currency)) : ""));
+                if (!d.IsSettled) details.Add(d.Open > 0 ? string.Format(culture, labels.Owes, Name(d.From), Name(d.To), M(d.Open, d.Currency)) : string.Format(culture, labels.Owes, Name(d.To), Name(d.From), M(-d.Open, d.Currency)));
+            }
             return new ExportRow(r.Expense.Title, lead, summary, details);
         }).ToArray();
         sections.Add(new(ExportParts.Costs, labels.Payments, payments));

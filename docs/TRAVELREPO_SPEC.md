@@ -971,7 +971,7 @@ extensions: {}
 
 The schema should support multi-currency from the first version even if a reference client exposes only part of the functionality initially.
 
-An expense is a payment: `amount` is what the bill says, in the currency it was paid in. `estimated: true` marks one that is not paid yet: an estimate, or an amount that is booked but still to pay, such as the rest of a hotel paid on site. Such a planned expense counts as planned in totals and budgets and creates no debts until it is marked as paid (`estimated: false`). It may have a day it is due, `due: { date: 2027-04-01 }`, such as the balance of a deposit; clients remind the travellers shortly before, and marking it as paid removes `due`.
+An expense is a payment: `amount` is what the bill says, in the currency it was paid in. `estimated: true` marks one that is not paid yet: an estimate, or an amount that is booked but still to pay, such as the rest of a hotel paid on site. Such a planned expense counts as planned in totals and budgets and creates no debts until it is marked as paid (`estimated: false`). It may have a day it is due, `due: { date: 2027-04-01 }`, such as the balance of a deposit; clients remind the travellers shortly before, and marking it as paid removes `due`. A planned expense that belongs to a booking or plan with the status `idea` or `cancelled` says what it would cost: it counts neither as still to pay nor in budgets, and clients show it apart, for example as ideas not counted. It counts once what it belongs to is booked. Paid expenses always count.
 
 ### 34.1 Dividing expenses and paying back
 
@@ -1009,6 +1009,8 @@ settled:
     value: "30.00"
     date: 2027-05-03
 ```
+
+A paid mark may record what was transferred in another currency, such as the euros for a debt in NZD: `converted` with `value`, `currency`, the `rate` (units of it per unit of the expense's currency), `rate_date` and `source` (`card` when it follows what a card charged, `reference` when it was estimated with reference rates). It keeps what was really paid in the history, so that amount no longer changes with later rates; the debt itself stays in the expense's currency.
 
 What is still open is what is owed minus what is marked as paid. When the split changes after paying back, the difference shows: more is owed, or the person who received too much owes it back. Marking a debt as paid sets its entry to what is owed at that moment; paying back what was received too much removes the entry.
 
@@ -1081,7 +1083,7 @@ amount:
 category: food
 ```
 
-A budget counts what the expenses it covers come to in its currency: exactly where an amount is in that currency or was charged in it (section 35), otherwise with reference rates as an estimate, which clients mark as such. A budget without limits in another currency than the trip's converts the same way. Amounts that cannot be converted are named separately instead of being left out silently. Planned expenses count as planned, apart from what was spent.
+A budget counts what the expenses it covers come to in its currency: exactly where an amount is in that currency or was charged in it (section 35), otherwise with reference rates as an estimate, which clients mark as such. A budget without limits in another currency than the trip's converts the same way. Amounts that cannot be converted are named separately instead of being left out silently. Planned expenses count as planned, apart from what was spent; planned expenses for ideas do not count (section 34).
 
 ## 37. Collections
 

@@ -191,6 +191,8 @@ public static class ScheduleQueries
 /// <summary>A per-currency cost overview. Values stay decimal and are never converted silently.</summary>
 public sealed record CurrencyTotal(string Currency, decimal Paid, decimal Estimated, decimal Budget)
 {
+    /// <summary>What payments for ideas would cost; not part of <see cref="Estimated"/> or <see cref="Total"/>.</summary>
+    public decimal Ideas { get; init; }
     public decimal Total => Paid + Estimated;
 }
 
@@ -242,15 +244,17 @@ public static class TripSummaries
     /// </summary>
     public static IReadOnlyList<CurrencyTotal> Costs(TripSnapshot trip)
     {
-        var totals = new Dictionary<string, (decimal Paid, decimal Estimated)>(StringComparer.Ordinal);
+        var totals = new Dictionary<string, (decimal Paid, decimal Estimated, decimal Ideas)>(StringComparer.Ordinal);
         foreach (var e in trip.Entities.Values.Where(e => e.Type == "expense"))
         {
             if (Money(e.Data["amount"]) is not { } money) continue;
             var current = totals.GetValueOrDefault(money.Currency);
-            if (Expenses.IsPlanned(e)) current.Estimated += money.Amount; else current.Paid += money.Amount;
+            // Payments for ideas are what it would cost, listed apart.
+            if (Expenses.IsIdea(trip, e)) current.Ideas += money.Amount;
+            else if (Expenses.IsPlanned(e)) current.Estimated += money.Amount; else current.Paid += money.Amount;
             totals[money.Currency] = current;
         }
-        return totals.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => new CurrencyTotal(p.Key, p.Value.Paid, p.Value.Estimated, 0)).ToArray();
+        return totals.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => new CurrencyTotal(p.Key, p.Value.Paid, p.Value.Estimated, 0) { Ideas = p.Value.Ideas }).ToArray();
     }
 
     public static Money? Money(JsonNode? node)

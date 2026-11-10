@@ -132,4 +132,61 @@ public class CostExportTests
         Assert.Contains("for Ben", bens.Meta[0], StringComparison.Ordinal);
         Assert.Equal("Lake trip - Costs - Ben.csv", CostExport.FileName(trip, new() { People = [Ben.Id] }, new(), "csv"));
     }
+
+    [Fact]
+    public void PaymentsForIdeasAreListedApartAndCountOnceBooked()
+    {
+        var glamping = Entity.Create("booking", "Glamping"); glamping.Data["status"] = "idea";
+        var maybe = Expense("Glamping", "400.00", "EUR", Ana, "accommodation"); maybe.Data["estimated"] = true; maybe.Data.Remove("paid_by");
+        maybe.Data["related"] = new JsonArray(new JsonObject { ["type"] = "booking", ["id"] = glamping.Id.ToString() });
+        var ferry = Expense("Ferry balance", "100.00", "EUR", Ana, "transport"); ferry.Data["estimated"] = true;
+        var budget = Entity.Create("budget", "Trip"); budget.Data["amount"] = new JsonObject { ["value"] = "1000.00", ["currency"] = "EUR" };
+        var food = Entity.Create("budget", "Stays"); food.Data["amount"] = new JsonObject { ["value"] = "300.00", ["currency"] = "EUR" }; food.Data["category"] = "accommodation";
+        var trip = Trip(glamping, maybe, ferry, budget, food);
+        Assert.True(Expenses.IsIdea(trip, maybe)); Assert.False(Expenses.IsIdea(trip, ferry));
+        var costs = TripSummaries.Costs(trip).Single();
+        Assert.Equal((100m, 400m), (costs.Estimated, costs.Ideas));
+        var status = Budgets.ForTrip(trip)!;
+        Assert.Equal((100m, 400m), (status.Planned.Total, status.Ideas!.Total));
+        Assert.Equal(0m, Budgets.Status(trip, food)!.Planned);
+        var document = CostExport.Document(trip, culture: CultureInfo.InvariantCulture);
+        Assert.Equal([("Still to pay", "100.00 EUR"), ("Ideas, not counted", "400.00 EUR")], document.Sections[0].Rows.Where(r => r.Title is "Still to pay" or "Ideas, not counted").Select(r => (r.Title, r.Lead)));
+        Assert.Contains("idea, not counted", document.Sections.Single(x => x.Title == "Payments").Rows.Single(r => r.Title == "Glamping").Summary, StringComparison.Ordinal);
+
+        // Booked: it counts as still to pay. A paid payment of a cancelled booking always counts.
+        var booked = glamping.Copy(); booked.Data["status"] = "confirmed";
+        var counted = trip with { Entities = trip.Entities.Values.Where(e => e.Id != glamping.Id).Append(booked).ToDictionary(e => e.Id) };
+        Assert.Equal(500m, Budgets.ForTrip(counted)!.Planned.Total);
+        Assert.Null(Budgets.ForTrip(counted)!.Ideas);
+        var cancelled = glamping.Copy(); cancelled.Data["status"] = "cancelled";
+        var deposit = Expenses.MarkPaid(maybe, [Ana.Id]);
+        var paidDeposit = trip with { Entities = trip.Entities.Values.Where(e => e.Id != glamping.Id && e.Id != maybe.Id).Append(cancelled).Append(deposit).ToDictionary(e => e.Id) };
+        Assert.Equal(400m, TripSummaries.Costs(paidDeposit).Single().Paid);
+    }
+
+    [Fact]
+    public void APaidMarkKeepsWhatWasTransferredInTheTripsCurrency()
+    {
+        var ferry = Expense("Ferry", "60.00", "NZD", Ana, "transport", Ana, Ben);
+        var tour = Expense("Tour", "100.00", "NZD", Ana, "activity", Ana, Ben);
+        ferry = Expenses.WithCharge(ferry, 33m, "EUR", new LocalDate(2027, 2, 3));
+        var trip = Trip(ferry, tour);
+        var rates = new ExchangeRates(new DateOnly(2027, 2, 10), new Dictionary<string, decimal> { ["NZD"] = 2m });
+        var paid = Expenses.SettleAll(trip, new LocalDate(2027, 2, 12), "EUR", rates);
+        trip = trip with { Entities = trip.Entities.Values.Where(e => paid.All(p => p.Id != e.Id)).Concat(paid).ToDictionary(e => e.Id) };
+        // The ferry as the card charged it, the tour with the reference rate of that day; the debts stay in NZD.
+        var ferryDebt = Expenses.Split(trip, trip.Find(ferry.Id)!).Debts.Single();
+        Assert.Equal((30m, true), (ferryDebt.Settled, ferryDebt.IsSettled));
+        Assert.Equal(new Transferred(16.50m, "EUR", 0.55m, new LocalDate(2027, 2, 3), false), ferryDebt.PaidIn);
+        var tourDebt = Expenses.Split(trip, trip.Find(tour.Id)!).Debts.Single();
+        Assert.Equal(new Transferred(25.00m, "EUR", 0.5m, new LocalDate(2027, 2, 10), true), tourDebt.PaidIn);
+        Assert.Empty(SchemaValidation.Validate(trip.Find(tour.Id)!));
+        // Later rates do not change it, and taking the mark back removes it.
+        Assert.Equal(25.00m, Expenses.Split(trip, trip.Find(tour.Id)!).Debts.Single().PaidIn!.Value);
+        Assert.Null(Expenses.Split(trip, Expenses.Unsettle(trip.Find(tour.Id)!)).Debts.Single().PaidIn);
+        Assert.Contains("Ben paid back Ana 50.00 NZD as ≈ 25.00 EUR", TripExport.Text(CostExport.Document(trip, culture: CultureInfo.InvariantCulture)), StringComparison.Ordinal);
+        // Paid back in its own currency: nothing more to record.
+        var own = Expenses.Settle(Trip(ferry), ferry, null, new LocalDate(2027, 2, 12), "NZD");
+        Assert.Null(own.Data["settled"]![0]!["converted"]);
+    }
 }
