@@ -99,6 +99,30 @@ public sealed record Transfer(Guid From, Guid To, string Currency, decimal Amoun
 /// </summary>
 public sealed record Charge(decimal Value, string Currency, decimal Rate, LocalDate? Date, string? Source);
 
+/// <summary>How far a booking's price is recorded as expenses.</summary>
+public enum BookingCoverage
+{
+    /// <summary>The booking has no price, or it is cancelled or only an idea.</summary>
+    NoPrice,
+    /// <summary>No expense belongs to it yet.</summary>
+    None,
+    /// <summary>Expenses cover part of the price, for example a deposit; the rest is still to pay.</summary>
+    Partial,
+    /// <summary>Expenses add up to the price.</summary>
+    Complete,
+    /// <summary>Expenses add up to more than the price, for example with fees or extras.</summary>
+    More,
+    /// <summary>Expenses are in another currency without an amount charged in the price's currency, so they cannot be compared.</summary>
+    OtherCurrency
+}
+
+/// <summary>A booking's price next to the expenses recorded for it, in the price's currency.</summary>
+public sealed record BookingPayment(Entity Booking, Money? Price, IReadOnlyList<Entity> Expenses, decimal Recorded, BookingCoverage Coverage)
+{
+    /// <summary>What is not recorded yet; negative when more was recorded than the price.</summary>
+    public decimal Rest => (Price?.Amount ?? 0) - Recorded;
+}
+
 /// <summary>How an amount came to be in the requested currency.</summary>
 public enum Conversion
 {
@@ -530,23 +554,48 @@ public static class Expenses
     /// Bookings with a price but no expense yet: what is booked but not recorded as paid, so it is missing from the
     /// costs and from who owes whom. Cancelled bookings and ideas are left out. In order of title.
     /// </summary>
-    public static IReadOnlyList<Entity> WithoutExpense(TripSnapshot trip)
-    {
-        var covered = trip.Entities.Values.Where(e => e.Type == "expense").SelectMany(e => (e.Data["related"] as JsonArray ?? []).Select(r => Id(r?["id"]))).OfType<Guid>().ToHashSet();
-        return trip.Entities.Values.Where(b => b.Type == "booking" && b.Data["status"]?.ToString() is not ("cancelled" or "idea") && TripSummaries.Money(b.Data["price"]) is { Amount: not 0 } && !covered.Contains(b.Id))
-            .OrderBy(b => b.Title, StringComparer.Ordinal).ToArray();
-    }
+    public static IReadOnlyList<Entity> WithoutExpense(TripSnapshot trip) => Payments(trip).Where(p => p.Coverage == BookingCoverage.None).Select(p => p.Booking).ToArray();
 
     /// <summary>
-    /// A new expense for a booking: its title, its price as the amount and a link back to it, not an estimate. Who
-    /// paid and how it is divided are left to the caller; without a split it is divided equally among all travellers.
+    /// A booking's price next to its expenses. The price is what the booking costs and never counts as an expense
+    /// itself; expenses count. An expense in another currency counts with the amount charged in the price's currency.
     /// </summary>
-    public static Entity FromBooking(Entity booking)
+    public static BookingPayment Payment(TripSnapshot trip, Entity booking)
+    {
+        var expenses = ForBooking(trip, booking.Id);
+        var price = TripSummaries.Money(booking.Data["price"]);
+        if (price is not { Amount: not 0 } || booking.Data["status"]?.ToString() is "cancelled" or "idea") return new(booking, price, expenses, 0, BookingCoverage.NoPrice);
+        if (expenses.Count == 0) return new(booking, price, expenses, 0, BookingCoverage.None);
+        decimal recorded = 0;
+        foreach (var expense in expenses)
+        {
+            if (TripSummaries.Money(expense.Data["amount"]) is not { } money) continue;
+            var (amount, code, _) = Convert(expense, money.Amount, money.Currency, price.Currency);
+            if (code != price.Currency) return new(booking, price, expenses, recorded, BookingCoverage.OtherCurrency);
+            recorded += amount;
+        }
+        return new(booking, price, expenses, recorded, recorded == price.Amount ? BookingCoverage.Complete : recorded < price.Amount ? BookingCoverage.Partial : BookingCoverage.More);
+    }
+
+    /// <summary>Every booking's <see cref="Payment"/>, in order of title.</summary>
+    public static IReadOnlyList<BookingPayment> Payments(TripSnapshot trip) => trip.Entities.Values.Where(b => b.Type == "booking")
+        .OrderBy(b => b.Title, StringComparer.Ordinal).ThenBy(b => b.Id).Select(b => Payment(trip, b)).ToArray();
+
+    /// <summary>
+    /// A new expense for a booking: its title, its price as the amount, or what is still open of it when part is
+    /// recorded already, and a link back to it, not an estimate. Its category follows the booking's plans. Who paid
+    /// and how it is divided are left to the caller; without a split it is divided equally among all travellers.
+    /// </summary>
+    public static Entity FromBooking(Entity booking) => FromBooking(null, booking);
+
+    /// <inheritdoc cref="FromBooking(Entity)"/>
+    public static Entity FromBooking(TripSnapshot? trip, Entity booking)
     {
         if (booking.Type != "booking") throw new DomainException("expense.booking", "Only a booking can become an expense.");
         var price = TripSummaries.Money(booking.Data["price"]) ?? throw new DomainException("expense.amount", "The booking has no price.");
+        var amount = trip is not null && Payment(trip, booking) is { Coverage: BookingCoverage.Partial } partial ? partial.Rest : price.Amount;
         var expense = Entity.Create("expense", booking.Title);
-        expense.Data["amount"] = new JsonObject { ["value"] = price.Value, ["currency"] = price.Currency };
+        expense.Data["amount"] = new JsonObject { ["value"] = Format(amount, price.Currency), ["currency"] = price.Currency };
         expense.Data["estimated"] = false;
         expense.Data["related"] = new JsonArray(new JsonObject { ["type"] = "booking", ["id"] = booking.Id.ToString() });
         return expense;
