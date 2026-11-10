@@ -191,11 +191,13 @@ public static class TripItinerary
             var shownZone = fixedZone ? zone : stayZone;
             void Add(ItineraryRole role, LocalDate day, Stay? source, LocalTime fallback)
             {
-                if (!filter.InRange(day, day)) return;
                 var value = role == ItineraryRole.CheckIn ? source?.CheckIn : source?.CheckOut;
                 var approximate = role == ItineraryRole.CheckIn ? source?.CheckInApproximate ?? true : source?.CheckOutApproximate ?? true;
                 Instant? at = null;
                 try { at = value?.ToInstant(); } catch (DomainException) { }
+                // In an explicit time zone an exact check-in or check-out is listed on its day there.
+                if (fixedZone && !approximate && at is { } moment) day = moment.InZone(zone).Date;
+                if (!filter.InRange(day, day)) return;
                 var sort = at ?? day.At(fallback).InZoneLeniently(stayZone).ToInstant();
                 var time = at is { } exact && !approximate ? (shownZone.Id == zone.Id ? Clock(exact.InZone(zone)) : Short(exact, shownZone)) : "";
                 IReadOnlyList<string> elsewhere = at is { } when && !approximate ? [.. others.Select(z => Elsewhere(z, when, day, Clock(when.InZone(z))))] : [];
@@ -211,6 +213,12 @@ public static class TripItinerary
         var (start, end) = TripQueries.EffectiveDates(trip);
         var nightDays = runs.SelectMany(r => Enumerable.Range(0, r.Nights).Select(r.FirstNight.PlusDays)).Where(d => filter.InRange(d, d));
         var allDays = entries.Where(e => e.Day is not null).Select(e => e.Day!.Value).Concat(nightDays).Distinct().Order().ToArray();
+        // In an explicit time zone the first or last plan can fall on a day outside the trip's own dates; the dates widen to include it.
+        if (fixedZone && allDays.Length > 0)
+        {
+            start = start is { } s && s < allDays[0] ? s : allDays[0];
+            end = end is { } e && e > allDays[^1] ? e : allDays[^1];
+        }
         var firstDay = start ?? allDays.DefaultIfEmpty(LocalDate.MinIsoValue).Min();
         var days = allDays.Select(date => new ItineraryDay(date, firstDay == LocalDate.MinIsoValue ? 0 : Period.Between(firstDay, date, PeriodUnits.Days).Days + 1,
             entries.Where(e => e.Day == date).OrderBy(e => e.Start).Select(e => e.Entry).ToArray())

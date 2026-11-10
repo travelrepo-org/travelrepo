@@ -198,7 +198,8 @@ public static partial class TripExport
             foreach (var e in day.Entries.Where(e => e.Role == ItineraryRole.Item))
             {
                 var span = ScheduleQueries.Span(trip, e.Item);
-                if (span.Precision == TimePrecision.AllDay || span.Start is not { } a || span.End is not { } b) continue;
+                // In an explicit time zone a day-part plan keeps its planned day, so its hours there would not fit that day.
+                if (span.Precision == TimePrecision.AllDay || (options.TimeZone is not null && span.Precision == TimePrecision.DayPart) || span.Start is not { } a || span.End is not { } b) continue;
                 blocks.Add((Minute(a), Math.Max(Minute(b), Minute(a) + 15), e.Item.Title, Tone(e.Kind)));
             }
             return new(ExportTimeline.Arrange(blocks), day.Nights.Select(n => n.Run.Main.Item.Title).ToArray());
