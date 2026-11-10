@@ -243,7 +243,8 @@ public static class TripSummaries
         {
             if (Money(e.Data["amount"]) is not { } money) continue;
             var current = totals.GetValueOrDefault(money.Currency);
-            if (e.Type == "budget") current.Budget += money.Amount;
+            // Budgets for a category, a person or a collection have their own status; see Budgets.
+            if (e.Type == "budget") { if (Budgets.ScopeOf(e) == Budgets.Trip) current.Budget += money.Amount; else continue; }
             else if (e.Data["estimated"] is JsonValue flag && flag.TryGetValue<bool>(out var estimated) && estimated) current.Estimated += money.Amount;
             else current.Paid += money.Amount;
             totals[money.Currency] = current;
