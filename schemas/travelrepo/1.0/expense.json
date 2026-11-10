@@ -38,6 +38,9 @@
     "estimated": {
       "type": "boolean"
     },
+    "category": {
+      "type": "string"
+    },
     "paid_by": {
       "type": "array",
       "items": {

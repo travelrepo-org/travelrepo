@@ -450,4 +450,66 @@ public class ExpenseSplitTests
         Assert.DoesNotContain(SemanticValidation.Validate(trip), d => d.Severity == Severity.Error);
         Assert.Throws<DomainException>(() => Expenses.FromBooking(noPrice));
     }
+    [Fact]
+    public void ExpensesHaveStandardOrOwnCategoriesOrFollowTheirPlans()
+    {
+        var stay = Entity.Create("schedule_item", "Te Anau Lakeview"); stay.Data["components"] = new JsonObject { ["accommodation"] = new JsonObject() };
+        var hotel = Entity.Create("booking", "Te Anau Lakeview"); hotel.Data["items"] = new JsonArray(stay.Id.ToString());
+        var lodging = Expense("Te Anau", "347.60", "NZD", Ana); lodging.Data["related"] = new JsonArray(new JsonObject { ["type"] = "booking", ["id"] = hotel.Id.ToString() });
+        var kiwi = Expense("Kiwi plush", "35.00", "NZD", Ben);
+        var trip = Trip(stay, hotel, lodging, kiwi);
+
+        // Without a category, the booking's stay suggests one; otherwise it is other.
+        Assert.Equal("accommodation", ExpenseCategories.Of(trip, lodging));
+        Assert.Equal("other", ExpenseCategories.Of(trip, kiwi));
+        var souvenir = ExpenseCategories.With(trip, kiwi, "SOUVENIRS");
+        Assert.Equal("souvenirs", souvenir.Data["category"]!.ToString());
+        Assert.Empty(SchemaValidation.Validate(souvenir));
+
+        // A category of their own is shared through the trip and reused regardless of case.
+        var fees = ExpenseCategories.With(trip, Expense("Park entry", "20.00", "NZD", Ana), " Eintritte ");
+        trip = With(trip, souvenir, fees);
+        Assert.Equal(["Eintritte"], ExpenseCategories.Custom(trip));
+        Assert.Equal("Eintritte", ExpenseCategories.With(trip, Expense("Museum", "25.00", "NZD", Ben), "eintritte").Data["category"]!.ToString());
+        Assert.Null(ExpenseCategories.With(trip, souvenir, "").Data["category"]);
+
+        Assert.Equal([("accommodation", 347.60m), ("souvenirs", 35m), ("Eintritte", 20m)], ExpenseCategories.Totals(trip).Select(t => (t.Category, t.Amount)));
+        var rates = new ExchangeRates(new DateOnly(2026, 11, 20), new Dictionary<string, decimal> { ["NZD"] = 2m });
+        var inEuros = ExpenseCategories.Totals(With(trip, Expenses.WithCharge(lodging, 190m, "EUR")), "EUR", rates);
+        Assert.Equal((190m, false), (inEuros.Single(t => t.Category == "accommodation").Amount, inEuros.Single(t => t.Category == "accommodation").Estimated));
+        Assert.True(inEuros.Single(t => t.Category == "souvenirs").Estimated);
+    }
+
+    [Fact]
+    public void ABookingsPriceIsComparedWithItsExpensesAndNeverCountedItself()
+    {
+        var hotel = Entity.Create("booking", "Park Hotel Ruapehu"); hotel.Data["status"] = "confirmed";
+        hotel.Data["price"] = new JsonObject { ["value"] = "348.50", ["currency"] = "NZD" };
+        var trip = Trip(hotel);
+        Assert.Equal(BookingCoverage.None, Expenses.Payment(trip, hotel).Coverage);
+        Assert.Empty(TripSummaries.Costs(trip));
+
+        // A deposit now, the rest on site: the rest is open, and a new expense from the booking takes just the rest.
+        var deposit = Expenses.FromBooking(trip, hotel); deposit.Data["amount"]!["value"] = "100.00";
+        trip = With(trip, deposit);
+        var payment = Expenses.Payment(trip, hotel);
+        Assert.Equal((BookingCoverage.Partial, 100m, 248.50m), (payment.Coverage, payment.Recorded, payment.Rest));
+        Assert.Empty(Expenses.WithoutExpense(trip));
+        var rest = Expenses.FromBooking(trip, hotel);
+        Assert.Equal("248.50", rest.Data["amount"]!["value"]!.ToString());
+        trip = With(trip, rest);
+        Assert.Equal(BookingCoverage.Complete, Expenses.Payment(trip, hotel).Coverage);
+        Assert.Equal(348.50m, TripSummaries.Costs(trip).Single().Paid);
+
+        // A fee on top is more than the price; an expense in euros counts only with an amount charged in NZD.
+        var fee = Expenses.FromBooking(Trip(hotel), hotel); fee.Data["amount"]!["value"] = "5.00";
+        Assert.Equal(BookingCoverage.More, Expenses.Payment(With(trip, fee), hotel).Coverage);
+        var inEuros = Expenses.FromBooking(Trip(hotel), hotel); inEuros.Data["amount"] = new JsonObject { ["value"] = "190.00", ["currency"] = "EUR" };
+        Assert.Equal(BookingCoverage.OtherCurrency, Expenses.Payment(Trip(hotel, inEuros), hotel).Coverage);
+        Assert.Equal(BookingCoverage.Complete, Expenses.Payment(Trip(hotel, Expenses.WithCharge(inEuros, 348.50m, "NZD")), hotel).Coverage);
+
+        // Cancelled bookings and ideas are left alone.
+        var cancelled = hotel.Copy(); cancelled.Data["status"] = "cancelled";
+        Assert.Equal(BookingCoverage.NoPrice, Expenses.Payment(Trip(cancelled), cancelled).Coverage);
+    }
 }

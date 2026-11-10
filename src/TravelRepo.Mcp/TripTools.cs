@@ -501,6 +501,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
             ["plans"] = new JsonArray(plans.Select(e => (JsonNode)Summary(trip, e)).ToArray()),
             ["files"] = new JsonArray(TripCommands.AttachedDocuments(trip, booking).Select(d => (JsonNode)new JsonObject { ["id"] = d.Id.ToString(), ["name"] = d.Title }).ToArray()),
             ["expenses"] = new JsonArray(Expenses.ForBooking(trip, booking.Id).Select(e => (JsonNode)new JsonObject { ["id"] = e.Id.ToString(), ["title"] = e.Title }).ToArray()),
+            ["recorded"] = Expenses.Payment(trip, booking) is { Coverage: not BookingCoverage.NoPrice } payment ? new JsonObject { ["coverage"] = payment.Coverage.ToString().ToLowerInvariant(), ["amount"] = payment.Recorded, ["open"] = payment.Coverage == BookingCoverage.Partial ? payment.Rest : null } : null,
             ["missing_expense"] = Expenses.WithoutExpense(trip).Any(b => b.Id == booking.Id) ? true : null
         };
     }
@@ -553,6 +554,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
                 ["estimated"] = e.Data["estimated"]?.DeepClone(),
                 ["paid_by"] = Names(trip, e.Data["paid_by"]),
                 ["belongs_to"] = new JsonArray(related.Select(t => (JsonNode)t).ToArray()),
+                ["category"] = ExpenseCategories.Of(trip, e),
                 ["split"] = SplitJson(trip, Expenses.Split(trip, e)),
                 ["charged"] = Expenses.ChargeOf(e) is { } charge ? new JsonObject { ["amount"] = charge.Value, ["currency"] = charge.Currency, ["rate"] = charge.Rate, ["date"] = charge.Date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) } : null
             };
@@ -565,6 +567,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
             ["balances"] = new JsonArray(Expenses.Balances(trip, target, rates).Select(b => (JsonNode)new JsonObject { ["person"] = Name(b.Person), ["currency"] = b.Currency, ["net"] = b.Net, ["estimated"] = b.Estimated ? true : null }).ToArray()),
             ["settle_up"] = new JsonArray(Expenses.SettleUp(trip, target, rates).Select(t => (JsonNode)new JsonObject { ["from"] = Name(t.From), ["to"] = Name(t.To), ["currency"] = t.Currency, ["amount"] = t.Amount, ["estimated"] = t.Estimated ? true : null }).ToArray())
         };
+        result["by_category"] = new JsonArray(ExpenseCategories.Totals(trip, target, rates).Select(t => (JsonNode)new JsonObject { ["category"] = t.Category, ["currency"] = t.Currency, ["amount"] = t.Amount, ["estimated"] = t.Estimated ? true : null }).ToArray());
         if (target is not null)
         {
             var paid = Expenses.Total(trip, target, rates);
@@ -702,6 +705,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         [Description("Optional people who paid it (ids or names).")] string[]? paid_by = null,
         [Description("Optional id of the plan or booking it belongs to.")] string? belongs_to = null,
         [Description("True when it is only an estimate so far.")] bool estimated = false,
+        [Description("Optional category: transport, accommodation, food, activity, souvenirs, other, or a name of the travellers' own. Without one, the plan or booking it belongs to suggests it.")] string? category = null,
         CancellationToken ct = default) => Run(async () =>
     {
         if (string.IsNullOrWhiteSpace(title)) throw new McpException("An expense needs a title.");
@@ -715,6 +719,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
             e.Data["estimated"] = estimated;
             if (paid_by is { Length: > 0 }) e.Data["paid_by"] = new JsonArray(paid_by.Select(p => (JsonNode)Person(state.Trip, p).Id.ToString()).ToArray());
             if (belongs_to is not null && Find(state.Trip, belongs_to) is var target) e.Data["related"] = new JsonArray(new JsonObject { ["id"] = target.Id.ToString(), ["type"] = target.Type });
+            if (category is not null) e = ExpenseCategories.With(state.Trip, e, category);
             return ([new EntityEdit(e.Id, e)], null);
         }, ct);
         return new JsonObject { ["id"] = expense.Id.ToString(), ["entity"] = saved.Trip.Find(expense.Id)!.Data.DeepClone() };

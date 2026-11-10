@@ -1006,9 +1006,17 @@ What is still open is what is owed minus what is marked as paid. When the split 
 
 Clients work out balances per person and currency from what is still open, and may suggest the payments that settle them. Each currency is settled on its own; amounts are never converted for this. A person may choose which open debts to settle now; what they owe each other person for the chosen debts is set off into one payment per person and currency.
 
-A booking's `price` says what it costs; it is not an expense. An expense that belongs to a booking names it in `related`. Clients may point out bookings with a price but no such expense, which are missing from the costs, and offer to record one from the booking's title and price.
-
 Lists in `split.parts` and `settled` are entries of people. They merge per person (and `to`), so people who pay back at the same time on different devices do not conflict. Deleting a person removes their entries.
+
+### 34.2 Expense categories
+
+An expense may have a `category`. The standard values are `transport`, `accommodation`, `food`, `activity`, `souvenirs` and `other`; clients translate them. Any other value is a category the travellers created, stored as they named it and shown as is. Clients offer the names already used in the trip, so both travellers share them, and treat names that differ only in case as the same.
+
+Without a category, an expense takes one from the plans it belongs to, directly or through a booking: a journey is `transport`, a stay `accommodation`, food `food`, shopping `souvenirs`, and activities, sights, culture, nature, nightlife and free time `activity`. Otherwise it is `other`.
+
+### 34.3 Bookings and expenses
+
+A booking's `price` says what the booking costs. It is never counted as an expense, so nothing is counted twice. What was paid is recorded as expenses that name the booking in `related`; there may be several, such as a deposit and the rest paid on site. Clients compare their sum with the price, in the price's currency (an expense in another currency counts with its amount charged in that currency): none recorded, part recorded with the rest still open, all recorded, or more than the price. They may offer to record what is still open from the booking's title and price. Changing the price does not change its expenses, and changing an expense does not change the price.
 
 ## 35. Historical currency conversion
 
