@@ -1394,3 +1394,7 @@ The following should be specified next:
 - compatibility and migration policy,
 - package and namespace naming,
 - conformance test suite.
+
+Possible later additions for costs:
+- telling a rough estimate (such as food for the trip) apart from an amount that is booked but not paid yet (such as the rest of a stay due on site). Both are `estimated: true` today and count as still to pay; a separate state could keep rough estimates out of "still to pay" and reminders while still counting them in the budget,
+- a cost export on the command line (`export-costs`), giving the PDF, CSV (with a chosen separator) and text the clients and the MCP server produce.
