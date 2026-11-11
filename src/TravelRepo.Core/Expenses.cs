@@ -624,6 +624,22 @@ public static class Expenses
     }
 
     /// <summary>
+    /// The day an expense was paid: its own <c>date</c>, otherwise the first day of the plan it belongs to (see
+    /// <see cref="DayOf"/>), otherwise the day an amount was charged. Null when none of them is known.
+    /// </summary>
+    public static NodaTime.LocalDate? DateOf(TripSnapshot trip, Entity expense) =>
+        (expense.Data["date"] is JsonValue d && LocalDatePattern.Iso.Parse(d.ToString()).TryGetValue(default, out var day) ? day : (NodaTime.LocalDate?)null)
+        ?? DayOf(trip, expense) ?? ChargeOf(expense)?.Date;
+
+    /// <summary>A copy of the expense paid on <paramref name="day"/>, or without a day of its own.</summary>
+    public static Entity WithDate(Entity expense, NodaTime.LocalDate? day)
+    {
+        var copy = expense.Copy();
+        if (day is { } d) copy.Data["date"] = LocalDatePattern.Iso.Format(d); else copy.Data.Remove("date");
+        return copy;
+    }
+
+    /// <summary>
     /// Whether a payment still to pay belongs to an idea or something cancelled: a booking or plan with the status
     /// <c>idea</c> or <c>cancelled</c>. Such payments say what it would cost; they do not count as still to pay or in
     /// budgets until what they belong to is booked. What was paid always counts.
@@ -639,9 +655,10 @@ public static class Expenses
     /// A new expense that always names who shares it: the people of what it belongs to (see <see cref="PeopleFor"/>),
     /// divided equally. A planned one is still to pay and creates no debts until it is paid.
     /// </summary>
-    public static Entity Create(TripSnapshot trip, string title, Money amount, IEnumerable<Guid> payers, Guid? related = null, bool planned = false, string? category = null)
+    public static Entity Create(TripSnapshot trip, string title, Money amount, IEnumerable<Guid> payers, Guid? related = null, bool planned = false, string? category = null, NodaTime.LocalDate? on = null)
     {
         var expense = Entity.Create("expense", title.Trim());
+        if (on is { } day) expense.Data["date"] = LocalDatePattern.Iso.Format(day);
         var code = ExchangeRates.Code(amount.Currency) ?? throw new DomainException("expense.currency", "A currency is a code with three letters, such as EUR.");
         expense.Data["amount"] = new JsonObject { ["value"] = Format(amount.Amount, code), ["currency"] = code };
         expense.Data["estimated"] = planned;
@@ -687,11 +704,16 @@ public static class Expenses
     public static bool SharesWithEveryone(Entity expense) =>
         expense.Data["split"] is not JsonObject split || (split["method"]?.ToString() ?? "equal") == "equal" && (split["parts"] as JsonArray ?? []).Count == 0;
 
-    /// <summary>A copy of a planned expense marked as paid, by <paramref name="payers"/> when it names nobody yet.</summary>
-    public static Entity MarkPaid(Entity expense, IEnumerable<Guid>? payers = null)
+    /// <summary>
+    /// A copy of a planned expense marked as paid, by <paramref name="payers"/> when it names nobody yet, on
+    /// <paramref name="on"/> when it has no day of its own.
+    /// </summary>
+    public static Entity MarkPaid(Entity expense, IEnumerable<Guid>? payers = null, NodaTime.LocalDate? on = null)
     {
         var copy = expense.Copy();
         copy.Data["estimated"] = false;
+        // Paid on that day, unless the expense already says when.
+        if (on is { } day && copy.Data["date"] is null) copy.Data["date"] = LocalDatePattern.Iso.Format(day);
         // Paid now, so it is no longer due.
         copy.Data.Remove("due");
         if ((copy.Data["paid_by"] as JsonArray ?? []).Count == 0 && payers?.Distinct().ToArray() is { Length: > 0 } who) copy.Data["paid_by"] = new JsonArray(who.Select(p => (JsonNode)p.ToString()).ToArray());
@@ -732,6 +754,7 @@ public static class Expenses
         {
             var path = expense.Id.ToString();
             if (expense.Data["due"]?["date"] is JsonValue dueDate && !LocalDatePattern.Iso.Parse(dueDate.ToString()).Success) yield return new("date.invalid", Severity.Error, path + "/due", "Invalid calendar date.");
+            if (expense.Data["date"] is JsonValue paidOn && !LocalDatePattern.Iso.Parse(paidOn.ToString()).Success) yield return new("date.invalid", Severity.Error, path + "/date", "Invalid calendar date.");
             foreach (var (field, key) in new[] { ("split/parts", "person"), ("settled", "person"), ("settled", "to") })
             {
                 var list = field == "settled" ? expense.Data["settled"] : expense.Data["split"]?["parts"];

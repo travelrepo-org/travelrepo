@@ -19,7 +19,8 @@ public sealed record BudgetStatus(Entity Budget, string Scope, string? Target, M
 /// <summary>
 /// The trip's budget in the trip's currency: <see cref="Amount"/> from every budget without limits (approximate where
 /// one is in another currency, <see cref="AmountNotConverted"/> where it cannot be converted), and the paid and planned
-/// expenses converted the same way.
+/// expenses converted the same way. When no budget converts to the trip's currency, for example after the currency
+/// changed and before rates are known, <see cref="Currency"/> is the budget's own currency instead.
 /// </summary>
 public sealed record TripBudgetStatus(string Currency, decimal Amount, bool AmountApproximate, IReadOnlyList<Money> AmountNotConverted, IReadOnlyList<Entity> Budgets, ConvertedTotal Paid, ConvertedTotal Planned)
 {
@@ -113,7 +114,15 @@ public static class Budgets
     {
         var budgets = TripBudgets(trip);
         if (budgets.Count == 0) return null;
-        var currency = TripCurrency.Of(trip) ?? TripSummaries.Money(budgets[0].Data["amount"])!.Currency;
+        var status = ForTrip(trip, budgets, TripCurrency.Of(trip) ?? TripSummaries.Money(budgets[0].Data["amount"])!.Currency, rates);
+        // A budget set before the trip's currency changed, with no rate to convert it yet, stays in its own currency
+        // instead of reading as a budget of zero.
+        if (status.Amount == 0 && status.AmountNotConverted.Count > 0) status = ForTrip(trip, budgets, status.AmountNotConverted[0].Currency, rates);
+        return status;
+    }
+
+    private static TripBudgetStatus ForTrip(TripSnapshot trip, IReadOnlyList<Entity> budgets, string currency, ExchangeRates? rates)
+    {
         decimal amount = 0; var approximate = false; var missing = new List<Money>();
         foreach (var budget in budgets)
         {
@@ -126,6 +135,28 @@ public static class Budgets
         var ideas = expenses.Where(e => Expenses.IsIdea(trip, e)).ToArray();
         return new(currency, amount, approximate, missing, budgets, Expenses.Total(expenses, currency, rates), Expenses.Total(expenses.Except(ideas), currency, rates, planned: true))
         { Ideas = ideas.Length > 0 ? Expenses.Total(ideas, currency, rates, planned: true) : null };
+    }
+
+    /// <summary>
+    /// Budgets in another currency than <paramref name="currency"/>, such as after the trip's currency changed, each
+    /// converted to it with <paramref name="rates"/> and rounded to whole units; budgets that cannot be converted are
+    /// left out. Clients offer this when the trip's currency changes, showing old and new amounts, and save it only
+    /// after the travellers agree.
+    /// </summary>
+    public static IReadOnlyList<(Entity Budget, Money Before, Money After)> ConvertTo(TripSnapshot trip, string currency, ExchangeRates? rates)
+    {
+        var result = new List<(Entity, Money, Money)>();
+        foreach (var budget in trip.Entities.Values.Where(e => e.Type == "budget").OrderBy(e => e.Title, StringComparer.Ordinal))
+        {
+            if (TripSummaries.Money(budget.Data["amount"]) is not { } money || money.Currency == currency || rates?.Convert(money.Amount, money.Currency, currency) is not { } value) continue;
+            var after = new Money(Expenses.Format(Math.Round(value, 0, MidpointRounding.AwayFromZero), currency), currency);
+            var copy = budget.Copy();
+            var amount = copy.Data["amount"] as JsonObject ?? new JsonObject();
+            amount["value"] = after.Value; amount["currency"] = currency;
+            copy.Data["amount"] = amount;
+            result.Add((copy, money, after));
+        }
+        return result;
     }
 
     /// <summary>Budgets with a limit, such as a category or a person, with where they stand, in order of title.</summary>

@@ -96,7 +96,8 @@ public class CostExportTests
         Assert.Equal("Date,Payment,Category,Belongs to,Amount,Currency,Charged,Charged currency,In EUR,Paid by,State,Open,Due,Part Ana,Part Ben,Part Cleo", csv[0]);
         // A title with the separator is quoted; a title that looks like a formula gets an apostrophe; amounts are plain.
         Assert.Contains(csv, l => l.StartsWith(",\"Dinner, lake view\",Essen,,90.00,EUR,,,90.00,Ana,60.00 EUR open,60.00,,30.00,30.00,30.00", StringComparison.Ordinal));
-        Assert.Contains(csv, l => l.StartsWith(",Ferry,transport,,60.00,NZD,33.00,EUR,33.00,Ben,", StringComparison.Ordinal));
+        // Without a day of its own or a plan, the ferry takes the day the card charged it.
+        Assert.Contains(csv, l => l.StartsWith("2027-02-03,Ferry,transport,,60.00,NZD,33.00,EUR,33.00,Ben,", StringComparison.Ordinal));
         Assert.Contains(csv, l => l.StartsWith(",'-Refund,", StringComparison.Ordinal));
 
         // German with a semicolon: decimal commas. German with a comma: points, so columns stay apart.
@@ -192,5 +193,46 @@ public class CostExportTests
         // Paid back in its own currency: nothing more to record.
         var own = Expenses.Settle(Trip(ferry), ferry, null, new LocalDate(2027, 2, 12), "NZD");
         Assert.Null(own.Data["settled"]![0]!["converted"]);
+    }
+
+    [Fact]
+    public void AnExpenseHasItsOwnDayOrTheDayOfWhatItBelongsTo()
+    {
+        var taxi = Expense("Taxi", "30.00", "EUR", Ana, "transport");
+        var trip = Trip(taxi);
+        Assert.Null(Expenses.DateOf(trip, taxi));
+        var dated = Expenses.WithDate(taxi, new LocalDate(2027, 5, 16));
+        Assert.Empty(SchemaValidation.Validate(dated));
+        Assert.Equal(new LocalDate(2027, 5, 16), Expenses.DateOf(Trip(dated), dated));
+        Assert.Equal(new LocalDate(2027, 5, 16), Assert.Single(CostExport.Rows(Trip(dated))).Day.Value);
+        Assert.Null(Expenses.WithDate(dated, null).Data["date"]);
+        var broken = dated.Copy(); broken.Data["date"] = "2027-13-40";
+        Assert.Contains(Expenses.Validate(Trip(broken)), d => d.Code == "date.invalid");
+
+        // A payment still to pay gets the day it is marked as paid, unless it already has one.
+        var rest = Expense("Lodge balance", "300.00", "EUR", Ana, "accommodation"); rest.Data["estimated"] = true;
+        Assert.Equal("2027-05-20", Expenses.MarkPaid(rest, on: new LocalDate(2027, 5, 20)).Data["date"]!.ToString());
+        Assert.Equal("2027-05-16", Expenses.MarkPaid(Expenses.WithDate(rest, new LocalDate(2027, 5, 16)), on: new LocalDate(2027, 5, 20)).Data["date"]!.ToString());
+    }
+
+    [Fact]
+    public void ABudgetThatCannotBeConvertedYetStaysInItsOwnCurrency()
+    {
+        var budget = Entity.Create("budget", "Trip");
+        budget.Data["amount"] = new JsonObject { ["value"] = "1000.00", ["currency"] = "EUR" };
+        var dinner = Expense("Dinner", "90.00", "EUR", Ana, "food");
+        var trip = Trip(budget, dinner);
+        trip = trip with { Manifest = TripCurrency.With(trip.Manifest, "CHF") };
+        // Not a budget of zero in francs, but the euros it was set in.
+        var status = Budgets.ForTrip(trip)!;
+        Assert.Equal(("EUR", 1000m, 90m), (status.Currency, status.Amount, status.Paid.Total));
+
+        // With rates, the travellers can convert it; only then it counts in francs.
+        var rates = new ExchangeRates(new DateOnly(2027, 2, 10), new Dictionary<string, decimal> { ["CHF"] = 0.94m });
+        var (converted, before, after) = Assert.Single(Budgets.ConvertTo(trip, "CHF", rates));
+        Assert.Equal(("1000.00", "EUR", "940.00", "CHF"), (before.Value, before.Currency, after.Value, after.Currency));
+        Assert.Equal(budget.Id, converted.Id);
+        Assert.Empty(SchemaValidation.Validate(converted));
+        Assert.Empty(Budgets.ConvertTo(trip, "CHF", null));
     }
 }

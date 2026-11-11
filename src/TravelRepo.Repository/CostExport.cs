@@ -115,7 +115,7 @@ public static class CostExport
             var full = Expenses.Convert(expense, money.Amount, money.Currency, currency, options.Rates);
             var parts = chosen.Sum(split.ShareOf);
             var partsIn = Expenses.Convert(expense, parts, money.Currency, currency, options.Rates);
-            rows.Add(new(expense, new(Expenses.DayOf(trip, expense)), ExpenseCategories.Of(trip, expense), related, money, Expenses.ChargeOf(expense),
+            rows.Add(new(expense, new(Expenses.DateOf(trip, expense)), ExpenseCategories.Of(trip, expense), related, money, Expenses.ChargeOf(expense),
                 (full.Amount, full.Currency == currency ? full.How : Conversion.None), payers.Select(p => trip.Find(p)?.Title ?? "").ToArray(), split,
                 Expenses.IsPlanned(expense), Expenses.DueOf(expense), parts, (partsIn.Amount, partsIn.Currency == currency ? partsIn.How : Conversion.None))
             { Idea = Expenses.IsIdea(trip, expense) });

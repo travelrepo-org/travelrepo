@@ -959,6 +959,8 @@ amount:
 
 estimated: false
 
+date: 2027-05-16
+
 paid_by:
   - 0195f36b-....
 
@@ -971,7 +973,7 @@ extensions: {}
 
 The schema should support multi-currency from the first version even if a reference client exposes only part of the functionality initially.
 
-An expense is a payment: `amount` is what the bill says, in the currency it was paid in. `estimated: true` marks one that is not paid yet: an estimate, or an amount that is booked but still to pay, such as the rest of a hotel paid on site. Such a planned expense counts as planned in totals and budgets and creates no debts until it is marked as paid (`estimated: false`). It may have a day it is due, `due: { date: 2027-04-01 }`, such as the balance of a deposit; clients remind the travellers shortly before, and marking it as paid removes `due`. A planned expense that belongs to a booking or plan with the status `idea` or `cancelled` says what it would cost: it counts neither as still to pay nor in budgets, and clients show it apart, for example as ideas not counted. It counts once what it belongs to is booked. Paid expenses always count.
+An expense is a payment: `amount` is what the bill says, in the currency it was paid in. `estimated: true` marks one that is not paid yet: an estimate, or an amount that is booked but still to pay, such as the rest of a hotel paid on site. Such a planned expense counts as planned in totals and budgets and creates no debts until it is marked as paid (`estimated: false`). `date` is the day it was paid, optional: without it, the first day of the plan it belongs to (directly or through a booking) counts, otherwise the day an amount was charged (section 35). Clients set it to the day a payment is entered or a planned one is marked as paid. It may have a day it is due, `due: { date: 2027-04-01 }`, such as the balance of a deposit; clients remind the travellers shortly before, and marking it as paid removes `due`. A planned expense that belongs to a booking or plan with the status `idea` or `cancelled` says what it would cost: it counts neither as still to pay nor in budgets, and clients show it apart, for example as ideas not counted. It counts once what it belongs to is booked. Paid expenses always count.
 
 ### 34.1 Dividing expenses and paying back
 
@@ -1070,7 +1072,7 @@ Budgets may exist for:
 
 Budget support is part of the format direction. A reference client may ship only a basic implementation in v1.
 
-A trip has one budget, in the trip's currency (section 4.3.1). It is the sum of the budgets without limits; there is normally one. A budget may also be limited by an expense `category` (section 34.2), a `person` whose part of each expense it covers (section 34.1), and a `collection` whose plans, bookings, places and expenses it covers, including expenses for the bookings of those plans. All limits that are given apply together: a budget with `category: food` and a `person` covers that person's part of food. Such a budget is shown on its own and is not part of the trip's budget.
+A trip has one budget, in the trip's currency (section 4.3.1). It is the sum of the budgets without limits; there is normally one. A budget in another currency converts to it like an expense; while none of them can be converted, for example after the trip's currency changed and before rates are known, the trip's budget is shown in its own currency rather than as zero. When the trip's currency changes, clients may offer to convert budgets in the old currency with reference rates, showing old and new amounts, and change them only after the travellers agree. A budget may also be limited by an expense `category` (section 34.2), a `person` whose part of each expense it covers (section 34.1), and a `collection` whose plans, bookings, places and expenses it covers, including expenses for the bookings of those plans. All limits that are given apply together: a budget with `category: food` and a `person` covers that person's part of food. Such a budget is shown on its own and is not part of the trip's budget.
 
 `scope` was written by older clients and only repeated the limits; readers ignore it and writers remove it.
 

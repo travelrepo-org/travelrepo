@@ -574,6 +574,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
                 ["paid_by"] = Names(trip, e.Data["paid_by"]),
                 ["belongs_to"] = new JsonArray(related.Select(t => (JsonNode)t).ToArray()),
                 ["category"] = ExpenseCategories.Of(trip, e),
+                ["date"] = Expenses.DateOf(trip, e)?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 ["due"] = Expenses.DueOf(e)?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 ["split"] = SplitJson(trip, Expenses.Split(trip, e)),
                 ["charged"] = Expenses.ChargeOf(e) is { } charge ? new JsonObject { ["amount"] = charge.Value, ["currency"] = charge.Currency, ["rate"] = charge.Rate, ["date"] = charge.Date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) } : null
@@ -709,7 +710,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
             if (value is not null && code is null) throw new McpException("The trip has no currency yet; name one with \"currency\" or set it with set_trip_currency.");
             Entity changed;
             // The day of the charge: as given, as entered before, the expense's own day, otherwise today.
-            var chargeDay = day ?? Expenses.ChargeOf(target)?.Date ?? Expenses.DayOf(state.Trip, target) ?? SystemClock.Instance.GetCurrentInstant().InUtc().Date;
+            var chargeDay = day ?? Expenses.ChargeOf(target)?.Date ?? Expenses.DateOf(state.Trip, target) ?? SystemClock.Instance.GetCurrentInstant().InUtc().Date;
             try { changed = value is { } v ? Expenses.WithCharge(target, v, code!, chargeDay) : Expenses.WithoutCharge(target); }
             catch (DomainException ex) { throw new McpException(ex.Message); }
             return ([new EntityEdit(changed.Id, changed)], null);
@@ -719,12 +720,23 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
     });
 
     [McpServerTool(Name = "set_trip_currency", Title = "Set the trip's currency", Destructive = false, Idempotent = true, OpenWorld = false)]
-    [Description("Sets the currency the travellers count in, such as EUR: the budget, totals and who owes whom are shown in it, and amounts charged on cards are entered in it. Amounts of expenses stay in the currency they were paid in.")]
-    public Task<string> SetTripCurrency([Description("A three-letter code such as EUR.")] string currency, CancellationToken ct = default) => Run(async () =>
+    [Description("Sets the currency the travellers count in, such as EUR: the budget, totals and who owes whom are shown in it, and amounts charged on cards are entered in it. Amounts of expenses stay in the currency they were paid in. Budgets in another currency are listed in the answer; ask the travellers before converting them with convert_budgets.")]
+    public Task<string> SetTripCurrency(
+        [Description("A three-letter code such as EUR.")] string currency,
+        [Description("True converts budgets in another currency with the app's exchange rates, rounded to whole units; ask the travellers first. Otherwise they stay in their currency.")] bool convert_budgets = false,
+        CancellationToken ct = default) => Run(async () =>
     {
         var code = ExchangeRates.Code(currency) ?? throw new McpException("\"currency\" must be a code with three letters, such as EUR.");
-        var saved = await Write(state => ([new EntityEdit(state.Trip.Manifest.Id, TripCurrency.With(state.Trip.Manifest, code))], null), ct);
-        return new JsonObject { ["currency"] = TripCurrency.Of(saved.Trip) };
+        var saved = await Write(state =>
+        {
+            var edits = new List<EntityEdit> { new(state.Trip.Manifest.Id, TripCurrency.With(state.Trip.Manifest, code)) };
+            if (convert_budgets) edits.AddRange(Budgets.ConvertTo(state.Trip, code, Rates()).Select(b => new EntityEdit(b.Budget.Id, b.Budget)));
+            return (edits.ToArray(), null);
+        }, ct);
+        // Budgets still in another currency are named, so the travellers can decide about them.
+        var other = saved.Trip.Entities.Values.Where(e => e.Type == "budget" && TripSummaries.Money(e.Data["amount"]) is { } m && m.Currency != code)
+            .Select(e => (JsonNode)new JsonObject { ["id"] = e.Id.ToString(), ["title"] = e.Title, ["amount"] = TripSummaries.Money(e.Data["amount"])!.Value, ["currency"] = TripSummaries.Money(e.Data["amount"])!.Currency }).ToArray();
+        return new JsonObject { ["currency"] = TripCurrency.Of(saved.Trip), ["budgets_in_other_currency"] = new JsonArray(other) };
     });
 
     [McpServerTool(Name = "set_budget", Title = "Set a budget", Destructive = false, OpenWorld = false)]
@@ -764,14 +776,17 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         [Description("The expense's id.")] string expense,
         [Description("Optional people who paid it (ids or names), when it names nobody yet.")] string[]? paid_by = null,
         [Description("Optional amount as on the bill, when it differs from the planned one.")] string? amount = null,
+        [Description("Optional day it was paid, such as 2027-05-16; today when left out.")] string? date = null,
         CancellationToken ct = default) => Run(async () =>
     {
+        NodaTime.LocalDate? paidOn = date is null ? null : NodaTime.Text.LocalDatePattern.Iso.Parse(date.Trim()) is { Success: true } parsedDate ? parsedDate.Value : throw new McpException("\"date\" must look like 2027-05-16.");
         decimal? value = amount is null ? null : ExchangeRates.Amount(amount) ?? throw new McpException("\"amount\" must be a number such as 48.50.");
         var saved = await Write(state =>
         {
             var target = Find(state.Trip, expense);
             if (target.Type != "expense") throw new McpException(target.Title + " is not an expense.");
-            var paid = Expenses.MarkPaid(target, (paid_by ?? []).Select(p => Person(state.Trip, p).Id));
+            if (!Expenses.IsPlanned(target)) throw new McpException(target.Title + " is already paid. Change its amount with update_entity, or mark what people paid back with mark_paid.");
+            var paid = Expenses.MarkPaid(target, (paid_by ?? []).Select(p => Person(state.Trip, p).Id), paidOn ?? SystemClock.Instance.GetCurrentInstant().InZone(ScheduleQueries.TripZone(state.Trip)).Date);
             if (value is { } v && TripSummaries.Money(paid.Data["amount"]) is { } money) paid.Data["amount"] = new JsonObject { ["value"] = Expenses.Format(v, money.Currency), ["currency"] = money.Currency };
             return ([new EntityEdit(paid.Id, paid)], null);
         }, ct);
@@ -854,10 +869,12 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         [Description("Optional id of the plan or booking it belongs to.")] string? belongs_to = null,
         [Description("True when it is not paid yet: an estimate or an amount still to pay.")] bool estimated = false,
         [Description("Optional category: transport, accommodation, food, activity, souvenirs, other, or a name of the travellers' own. Without one, the plan or booking it belongs to suggests it.")] string? category = null,
-        [Description("Optional day a payment still to pay is due, such as 2027-04-01; the app reminds the travellers a week before.")] string? due = null,
+        [Description("Optional day a payment still to pay is due, such as 2027-04-01; the computer reminds the travellers a week before, the phone three days before.")] string? due = null,
+        [Description("Optional day it was paid, such as 2027-05-16; without one, the day of the plan it belongs to counts, or today for a payment made now.")] string? date = null,
         CancellationToken ct = default) => Run(async () =>
     {
         if (string.IsNullOrWhiteSpace(title)) throw new McpException("An expense needs a title.");
+        NodaTime.LocalDate? paidOn = date is null ? null : NodaTime.Text.LocalDatePattern.Iso.Parse(date.Trim()) is { Success: true } parsedDate ? parsedDate.Value : throw new McpException("\"date\" must look like 2027-05-16.");
         NodaTime.LocalDate? dueDay = due is null ? null : NodaTime.Text.LocalDatePattern.Iso.Parse(due.Trim()) is { Success: true } parsedDue ? parsedDue.Value : throw new McpException("\"due\" must look like 2027-04-01.");
         var value = ExchangeRates.Amount(amount) ?? throw new McpException("\"amount\" must be a number such as 48.50.");
         var code = ExchangeRates.Code(currency) ?? throw new McpException("\"currency\" must be a code with three letters, such as EUR or NZD.");
@@ -866,7 +883,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         {
             var payers = (paid_by ?? []).Select(p => Person(state.Trip, p).Id).ToArray();
             Guid? related = belongs_to is null ? null : Find(state.Trip, belongs_to).Id;
-            var e = Expenses.Create(state.Trip, title, new Money(Expenses.Format(value, code), code), payers, related, estimated, category);
+            var e = Expenses.Create(state.Trip, title, new Money(Expenses.Format(value, code), code), payers, related, estimated, category, estimated ? null : paidOn);
             if (dueDay is not null && estimated) e = Expenses.WithDue(e, dueDay);
             id = e.Id;
             return ([new EntityEdit(e.Id, e)], null);

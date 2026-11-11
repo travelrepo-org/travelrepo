@@ -398,6 +398,9 @@ public sealed class McpServerTests : IDisposable
         // Nobody owes anything for a payment that is still to pay, so there is nothing to mark as paid back.
         var later = (await Call(client, "add_expense", """{"title":"Lodge balance","amount":"80","currency":"EUR","estimated":true}"""))["id"]!.ToString();
         Assert.Contains("record_payment", await Call(client, "mark_paid", "{\"expense\":\"" + later + "\"}", expectError: true));
+        var paid = await Call(client, "record_payment", "{\"expense\":\"" + later + "\",\"date\":\"2027-05-20\"}");
+        Assert.Equal("2027-05-20", paid["entity"]!["date"]!.ToString());
+        Assert.Contains("already paid", await Call(client, "record_payment", "{\"expense\":\"" + later + "\"}", expectError: true));
 
         // The rate follows from both amounts, also after the amount on the bill is corrected.
         await Call(client, "set_charged", "{\"expense\":\"" + ramen + "\",\"amount\":\"21,60\"}");

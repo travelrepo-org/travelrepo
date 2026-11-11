@@ -38,6 +38,9 @@
     "estimated": {
       "type": "boolean"
     },
+    "date": {
+      "type": "string"
+    },
     "due": {
       "type": "object",
       "properties": {
