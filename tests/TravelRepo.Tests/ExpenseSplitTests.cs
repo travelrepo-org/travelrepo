@@ -504,9 +504,9 @@ public class ExpenseSplitTests
     [Fact]
     public void ExpensesHaveStandardOrOwnCategoriesOrFollowTheirPlans()
     {
-        var stay = Entity.Create("schedule_item", "Te Anau Lakeview"); stay.Data["components"] = new JsonObject { ["accommodation"] = new JsonObject() };
-        var hotel = Entity.Create("booking", "Te Anau Lakeview"); hotel.Data["items"] = new JsonArray(stay.Id.ToString());
-        var lodging = Expense("Te Anau", "347.60", "NZD", Ana); lodging.Data["related"] = new JsonArray(new JsonObject { ["type"] = "booking", ["id"] = hotel.Id.ToString() });
+        var stay = Entity.Create("schedule_item", "Lakeside Lodge"); stay.Data["components"] = new JsonObject { ["accommodation"] = new JsonObject() };
+        var hotel = Entity.Create("booking", "Lakeside Lodge"); hotel.Data["items"] = new JsonArray(stay.Id.ToString());
+        var lodging = Expense("Lodge", "320.00", "NZD", Ana); lodging.Data["related"] = new JsonArray(new JsonObject { ["type"] = "booking", ["id"] = hotel.Id.ToString() });
         var kiwi = Expense("Kiwi plush", "35.00", "NZD", Ben);
         var trip = Trip(stay, hotel, lodging, kiwi);
 
@@ -524,7 +524,7 @@ public class ExpenseSplitTests
         Assert.Equal("Eintritte", ExpenseCategories.With(trip, Expense("Museum", "25.00", "NZD", Ben), "eintritte").Data["category"]!.ToString());
         Assert.Null(ExpenseCategories.With(trip, souvenir, "").Data["category"]);
 
-        Assert.Equal([("accommodation", 347.60m), ("souvenirs", 35m), ("Eintritte", 20m)], ExpenseCategories.Totals(trip).Select(t => (t.Category, t.Amount)));
+        Assert.Equal([("accommodation", 320.00m), ("souvenirs", 35m), ("Eintritte", 20m)], ExpenseCategories.Totals(trip).Select(t => (t.Category, t.Amount)));
         var rates = new ExchangeRates(new DateOnly(2026, 11, 20), new Dictionary<string, decimal> { ["NZD"] = 2m });
         var inEuros = ExpenseCategories.Totals(With(trip, Expenses.WithCharge(lodging, 190m, "EUR")), "EUR", rates);
         Assert.Equal((190m, false), (inEuros.Single(t => t.Category == "accommodation").Amount, inEuros.Single(t => t.Category == "accommodation").Estimated));
