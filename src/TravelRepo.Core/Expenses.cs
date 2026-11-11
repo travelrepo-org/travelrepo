@@ -289,7 +289,8 @@ public static class Expenses
     public static Charge? ChargeOf(Entity expense)
     {
         if (expense.Data["converted"] is not JsonObject c || ExchangeRates.Code(c["currency"]?.ToString()) is not { } code || !TryDecimal(c["value"], out var value)) return null;
-        var rate = TryDecimal(c["rate"], out var stored) ? stored : TripSummaries.Money(expense.Data["amount"]) is { Amount: not 0 } money ? value / money.Amount : 0;
+        // Both amounts are what was entered; the rate follows from them, so it stays right when the amount is corrected later.
+        var rate = TripSummaries.Money(expense.Data["amount"]) is { Amount: not 0 } money ? Math.Round(value / money.Amount, 6, MidpointRounding.AwayFromZero) : TryDecimal(c["rate"], out var stored) ? stored : 0;
         LocalDate? date = c["rate_date"] is JsonValue d && LocalDatePattern.Iso.Parse(d.ToString()).TryGetValue(default, out var day) ? day : null;
         return new(value, code, rate, date, c["source"]?.ToString());
     }
@@ -305,6 +306,8 @@ public static class Expenses
         var money = TripSummaries.Money(expense.Data["amount"]) ?? throw new DomainException("expense.amount", "The expense needs an amount first.");
         if (code == money.Currency) throw new DomainException("expense.charge_currency", "The charged amount is for another currency than the expense's.");
         if (money.Amount == 0) throw new DomainException("expense.amount", "The expense needs an amount first.");
+        // A rate below zero would turn what is owed around; a refund is charged as a refund.
+        if (value == 0 || Math.Sign(value) != Math.Sign(money.Amount)) throw new DomainException("expense.charge_value", money.Amount < 0 ? "The amount charged for a refund is below zero, like the refund." : "The charged amount must be above zero.");
         var copy = expense.Copy();
         var converted = copy.Data["converted"] as JsonObject ?? new JsonObject();
         converted["value"] = Format(value, code);

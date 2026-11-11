@@ -152,7 +152,7 @@ public static class Budgets
         {
             // Payments for ideas say what it would cost; they do not count until it is booked.
             if (TripSummaries.Money(expense.Data["amount"]) is not { } money || Expenses.IsIdea(trip, expense)) continue;
-            if (filters.Category is { } wanted && !string.Equals(ExpenseCategories.Of(trip, expense), wanted, StringComparison.CurrentCultureIgnoreCase)) continue;
+            if (filters.Category is { } wanted && !string.Equals(ExpenseCategories.Of(trip, expense), wanted, StringComparison.OrdinalIgnoreCase)) continue;
             if (filters.Collection is not null && !(inCollection.Contains(expense.Id) || Related(trip, expense).Any(inCollection.Contains))) continue;
             decimal? part = money.Amount;
             if (filters.Person is { } person) part = Expenses.Split(trip, expense) is var split && split.People.Contains(person) ? split.ShareOf(person) : null;

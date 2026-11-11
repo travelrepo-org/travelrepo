@@ -380,6 +380,33 @@ public sealed class McpServerTests : IDisposable
     }
 
     [Fact]
+    public async Task CostToolsRefuseValuesThatWouldMislead()
+    {
+        var (repo, _) = await Trip();
+        var client = await Connect(repo.Root);
+        var ana = Entity.Create("person", "Ana");
+        await repo.ApplyAsync(await repo.ReadAsync(), [new(ana.Id, ana)]);
+        await Call(client, "set_trip_currency", """{"currency":"EUR"}""");
+        var ramen = (await Call(client, "add_expense", """{"title":"Ramen","amount":"3600","currency":"JPY","paid_by":["Ana"]}"""))["id"]!.ToString();
+
+        // A charged amount below zero would turn the rate, and what is owed, around.
+        Assert.Contains("above zero", await Call(client, "set_charged", "{\"expense\":\"" + ramen + "\",\"amount\":\"-5\"}", expectError: true));
+        Assert.Contains("above zero", await Call(client, "set_charged", "{\"expense\":\"" + ramen + "\",\"amount\":\"0\"}", expectError: true));
+        Assert.Contains("above zero", await Call(client, "set_budget", """{"title":"Trip","amount":"-5"}""", expectError: true));
+        Assert.Contains("csv or text", await Call(client, "export_costs", """{"format":"xlsx"}""", expectError: true));
+
+        // Nobody owes anything for a payment that is still to pay, so there is nothing to mark as paid back.
+        var later = (await Call(client, "add_expense", """{"title":"Lodge balance","amount":"80","currency":"EUR","estimated":true}"""))["id"]!.ToString();
+        Assert.Contains("record_payment", await Call(client, "mark_paid", "{\"expense\":\"" + later + "\"}", expectError: true));
+
+        // The rate follows from both amounts, also after the amount on the bill is corrected.
+        await Call(client, "set_charged", "{\"expense\":\"" + ramen + "\",\"amount\":\"21,60\"}");
+        var state = await repo.ReadAsync();
+        var corrected = state.Trip.Find(Guid.Parse(ramen))!.Copy(); corrected.Data["amount"]!["value"] = "4320";
+        Assert.Equal(0.005m, Expenses.ChargeOf(corrected)!.Rate);
+    }
+
+    [Fact]
     public async Task AssistantsRecordBookingPaymentsBudgetsAndTheTripCurrency()
     {
         var (repo, _) = await Trip();

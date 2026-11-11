@@ -53,6 +53,10 @@ public class CostExportTests
         var reminder = Assert.Single(TripReminders.For(trip, At(3, 26)), r => r.Kind == ReminderKind.PaymentDue);
         Assert.Equal((rest.Id, false), (reminder.Entity!.Value, reminder.Urgent));
         Assert.True(Assert.Single(TripReminders.For(trip, At(4, 3)), r => r.Kind == ReminderKind.PaymentDue).Urgent);
+        // For a booking that is only an idea, or cancelled, nothing is owed, so nothing is due.
+        var idea = Entity.Create("booking", "Lodge"); idea.Data["status"] = "idea";
+        var forIdea = rest.Copy(); forIdea.Data["related"] = new JsonArray(new JsonObject { ["type"] = "booking", ["id"] = idea.Id.ToString() });
+        Assert.DoesNotContain(TripReminders.For(Trip(forIdea, idea), At(3, 26)), r => r.Kind == ReminderKind.PaymentDue);
         // Paid: no longer due, no reminder.
         var paid = Expenses.MarkPaid(rest, [Ana.Id]);
         Assert.Null(Expenses.DueOf(paid));

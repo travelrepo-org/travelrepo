@@ -80,7 +80,8 @@ public static class TripReminders
         // Payments still to pay that are due within a week or overdue.
         foreach (var expense in trip.Entities.Values.Where(e => e.Type == "expense" && Expenses.IsPlanned(e)))
         {
-            if (Expenses.DueOf(expense) is not { } due || due > today.PlusDays(PaymentLeadDays)) continue;
+            // A payment for an idea or something cancelled is not owed, so nothing is due.
+            if (Expenses.DueOf(expense) is not { } due || due > today.PlusDays(PaymentLeadDays) || Expenses.IsIdea(trip, expense)) continue;
             result.Add(new("payment:" + expense.Id + ":" + LocalDatePattern.Iso.Format(due), ReminderKind.PaymentDue, expense.Id, expense.Title, zone.AtStartOfDay(due).ToInstant(), due <= today.PlusDays(2), [due]));
         }
 

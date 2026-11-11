@@ -739,6 +739,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         CancellationToken ct = default) => Run(async () =>
     {
         var value = ExchangeRates.Amount(amount) ?? throw new McpException("\"amount\" must be a number such as 600.");
+        if (value <= 0) throw new McpException("A budget is an amount above zero. Remove a budget with delete_entity.");
         Guid target = default;
         var saved = await Write(state =>
         {
@@ -787,6 +788,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
     {
         var trip = (await repository.ReadAsync(ct)).Trip;
         var options = new CostExportOptions { People = (people ?? []).Select(p => Person(trip, p).Id).ToArray(), Rates = Rates() };
+        if (format.Trim().ToLowerInvariant() is not ("csv" or "text")) throw new McpException("\"format\" is csv or text.");
         if (format.Trim().ToLowerInvariant() == "text") return new JsonObject { ["text"] = TripExport.Text(CostExport.Document(trip, options, culture: CultureInfo.InvariantCulture)) };
         var sep = CostExport.Separators.GetValueOrDefault(separator.Trim().ToLowerInvariant()) ?? throw new McpException("\"separator\" is comma, semicolon, tab or pipe.");
         return new JsonObject { ["csv"] = CostExport.Csv(trip, options, culture: CultureInfo.InvariantCulture, separator: sep) };
@@ -806,6 +808,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         {
             var target = Find(state.Trip, expense);
             if (target.Type != "expense") throw new McpException(target.Title + " is not an expense.");
+            if (paid && Expenses.IsPlanned(target)) throw new McpException(target.Title + " is still to pay, so nobody owes anything for it yet. Record that it was paid with record_payment.");
             Guid? from = person is null ? null : Person(state.Trip, person).Id;
             // Paid back in the trip's currency: what was transferred is kept with the mark.
             var changed = paid ? Expenses.Settle(state.Trip, target, from, day, TripCurrency.Of(state.Trip), Rates()) : Expenses.Unsettle(target, from);
