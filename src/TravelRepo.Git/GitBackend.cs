@@ -48,12 +48,13 @@ public sealed class GitCliBackend(string? executable = null, ICredentialBroker? 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); timeout.CancelAfter(TimeSpan.FromMinutes(2));
         var start = new ProcessStartInfo(Executable) { WorkingDirectory = directory, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true, UseShellExecute = false, CreateNoWindow = true };
         start.Environment["GIT_TERMINAL_PROMPT"] = "0"; start.Environment["LC_ALL"] = "C"; start.Environment["GCM_INTERACTIVE"] = "never";
+        // Trip files are stored byte for byte even where the user's Git settings convert line endings; the trip's
+        // .gitattributes says the same, this also covers trips that do not carry it yet.
+        var config = new List<(string Key, string Value)> { ("core.autocrlf", "false") };
         if (credentialBroker is not null && await credentialBroker.GetAsync(new Uri("https://github.com"), timeout.Token) is { } credential)
-        {
-            start.Environment["GIT_CONFIG_COUNT"] = "1";
-            start.Environment["GIT_CONFIG_KEY_0"] = "http.https://github.com/.extraHeader";
-            start.Environment["GIT_CONFIG_VALUE_0"] = "Authorization: Basic " + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(credential.Username + ":" + credential.Password));
-        }
+            config.Add(("http.https://github.com/.extraHeader", "Authorization: Basic " + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(credential.Username + ":" + credential.Password))));
+        start.Environment["GIT_CONFIG_COUNT"] = config.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        for (var i = 0; i < config.Count; i++) { start.Environment["GIT_CONFIG_KEY_" + i] = config[i].Key; start.Environment["GIT_CONFIG_VALUE_" + i] = config[i].Value; }
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         using var process = Process.Start(start) ?? throw new IOException("Unable to start Git.");
         using var registration = timeout.Token.Register(() => { try { if (!process.HasExited) process.Kill(true); } catch (InvalidOperationException) { } });
@@ -109,7 +110,14 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
         return r.Output.TrimEnd('\r', '\n');
     }
     /// <summary>The paths a trip version contains. Other files in the folder are neither staged nor reported as changes.</summary>
-    public static IReadOnlyList<string> TripPaths { get; } = new[] { "travel.yaml", "README.md" }.Concat(TravelRepository.Folders.Values.Distinct()).Concat(["assets", ".travelrepo"]).ToArray();
+    public static IReadOnlyList<string> TripPaths { get; } = new[] { "travel.yaml", "README.md" }.Concat(TravelRepository.Folders.Values.Distinct()).Concat(["assets", ".travelrepo", ".gitattributes"]).ToArray();
+
+    /// <summary>
+    /// The rule every trip carries in its <c>.gitattributes</c>: Git stores and checks out each file byte for byte. Without
+    /// it, a setting such as <c>core.autocrlf</c> rewrites the line endings of an attached e-mail, and the stored file no
+    /// longer matches its hash, so every other copy of the trip is invalid.
+    /// </summary>
+    public const string AttributesRule = "* -text";
     private async Task InitializeCoreAsync(string name, string email, CancellationToken ct = default)
     {
         await Run(ct, "init", "-b", "main"); await SetIdentityCoreAsync(name, email, ct);
@@ -148,13 +156,28 @@ public sealed partial class GitRepository(TravelRepository repository, IGitBacke
     {
         var staged = (await Run(ct, "diff", "--cached", "--name-only", "-z")).Split('\0', StringSplitOptions.RemoveEmptyEntries);
         var roots = TravelRepository.Folders.Values.Distinct().Concat(new[] { "assets", ".travelrepo" }).ToArray();
-        if (staged.Any(p => p is not ("travel.yaml" or "README.md") && !roots.Any(root => p.StartsWith(root + "/", StringComparison.Ordinal)))) throw new DomainException("version.foreign_index", "Other files are already staged by an external tool. Commit or unstage those files before creating a trip version.");
+        if (staged.Any(p => p is not ("travel.yaml" or "README.md" or ".gitattributes") && !roots.Any(root => p.StartsWith(root + "/", StringComparison.Ordinal)))) throw new DomainException("version.foreign_index", "Other files are already staged by an external tool. Commit or unstage those files before creating a trip version.");
     }
     private async Task StageAsync(CancellationToken ct)
     {
+        var added = await EnsureAttributesAsync(ct);
         var tracked = (await Run(ct, "ls-files", "-z")).Split('\0', StringSplitOptions.RemoveEmptyEntries);
         foreach (var path in TripPaths)
             if (File.Exists(Repository.SafePath(path)) || Directory.Exists(Repository.SafePath(path)) || tracked.Any(p => p == path || p.StartsWith(path + "/", StringComparison.Ordinal))) await Run(ct, "add", "-A", "--", path);
+        // Files stored before the rule may have been converted; storing them again from the folder repairs them.
+        if (added && tracked.Length > 0) await Run(ct, ["add", "--renormalize", "--", .. TripPaths.Where(path => tracked.Any(p => p == path || p.StartsWith(path + "/", StringComparison.Ordinal)))]);
+    }
+
+    /// <summary>Adds <see cref="AttributesRule"/> to the trip's <c>.gitattributes</c> when it is missing. Other rules are kept.</summary>
+    /// <returns>Whether the rule was added.</returns>
+    private async Task<bool> EnsureAttributesAsync(CancellationToken ct)
+    {
+        var path = Repository.SafePath(".gitattributes");
+        var text = File.Exists(path) ? await File.ReadAllTextAsync(path, ct) : "";
+        if (text.Split('\n').Any(line => line.Trim() == AttributesRule)) return false;
+        var rule = "# TravelRepo: store every file byte for byte, so attachments keep their hashes.\n" + AttributesRule + "\n";
+        await File.WriteAllTextAsync(path, text.Length == 0 || text.EndsWith('\n') ? text + rule : text + "\n" + rule, ct);
+        return true;
     }
     public async Task<IReadOnlyList<Variant>> VariantsAsync(CancellationToken ct = default)
     {

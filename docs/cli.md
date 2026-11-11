@@ -24,7 +24,10 @@ Commands:
   - `--parts schedule,stays,bookings,contacts,costs,tasks,notes,packing`: choose the parts. The default is schedule, stays, bookings, contacts and costs. Calendar files ignore this option.
   - `--compact`: times, titles, places and booking references only.
   - `--comments`: show the comments on each plan, stay, booking, task, expense and note below it, with author and day.
+  - `--timezone Pacific/Auckland`: show every time and day in this time zone instead of the trip's. Calendar files ignore this option.
+  - `--also-timezones Europe/Berlin,UTC`: show each time also in these time zones, below it and named by city. Calendar files ignore this option.
 - `export-lists PATH OUTPUT.txt|.csv [--person NAME|ID] [--list NAME|ID]... [--unassigned] [--comments]`: packing lists as text with check boxes or as CSV for spreadsheets. Without `--list`, all lists are exported. `--unassigned` keeps only what nobody brings yet. `--comments` adds the comments on lists and items to the text file; CSV files leave them out.
+- Costs are not exported here yet; Jourfold and the MCP tool `export_costs` do that. A possible later `export-costs PATH OUTPUT.pdf|.csv|.txt [--person NAME|ID]... [--separator comma|semicolon|tab|pipe]` is noted in the specification (section 54).
 - `mcp [PATH] [--read-only]`: serve the trip to an AI assistant over the Model Context Protocol on standard input and output. See [AI assistants](mcp.md).
 
 The default path for inspect/validate is the current directory. The CLI never changes global Git configuration. Generic remotes use normal Git SSH configuration and credential helpers.
