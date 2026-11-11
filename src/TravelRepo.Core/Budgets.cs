@@ -101,7 +101,7 @@ public static class Budgets
         return copy;
     }
 
-    /// <summary>The budgets for the whole trip, which together make the trip's budget (see <see cref="ForTrip"/>).</summary>
+    /// <summary>The budgets for the whole trip, which together make the trip's budget (see <see cref="ForTrip(TripSnapshot, ExchangeRates?)"/>).</summary>
     public static IReadOnlyList<Entity> TripBudgets(TripSnapshot trip) => trip.Entities.Values
         .Where(e => e.Type == "budget" && FiltersOf(e).IsWholeTrip && TripSummaries.Money(e.Data["amount"]) is not null).OrderBy(e => e.Title, StringComparer.Ordinal).ToArray();
 

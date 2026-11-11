@@ -2,6 +2,24 @@
 
 All notable changes to TravelRepo. Generated from `docs/releases` by `python eng/changelog.py`; do not edit by hand.
 
+## 0.9.0 – 2026-11-11
+
+### Changes
+
+- Costs have one trip currency, stored as `currency` in travel.yaml (TripCurrency). Totals, the trip's budget and who owes whom are in it. An amount charged on a card is kept with its rate and day (`converted`, Expenses.WithCharge), so it never moves with the rates; everything else is estimated with reference rates and marked as such.
+- A booking has no price of its own any more: what it costs is its payments, the expenses that belong to it, paid or still to pay with an optional due date (`due`). Payments for ideas and cancelled bookings say what they would cost but are not counted. Reminders mention payments still to pay that are due within a week or overdue.
+- Every expense names who shares it, so a traveller who joins later does not share earlier expenses by accident. Splits are equal, by amounts, by shares or in percent (ExpenseSplit). Marks for what was paid back keep the amount transferred in the trip currency (`settled[].converted`), and Expenses.Debts, the balances and PaymentPlan give who owes whom and the fewest payments that settle it.
+- An expense can have a `date`, the day it was paid. Without one, the day of the plan it belongs to or the day of the card charge counts (Expenses.DateOf).
+- One budget for the whole trip, plus budgets limited to a category, a person, a collection or several of them together (Budgets). A budget that cannot be converted to the trip currency yet stays in its own currency, and Budgets.ConvertTo lets clients offer to convert budgets when the trip currency changes.
+- CostExport writes the costs as CSV with a comma, semicolon, tab or pipe, or as an ExportDocument for PDF and text, for everyone or for the part of chosen people. Plan exports show a booking's payments and who owes whom.
+- CostUpgrade.Plan brings costs written by older versions into the current shape: booking prices become payments still to pay, expenses name who shares them, and the trip gets a currency. Nothing that was paid, owed or paid back changes, and clients save the plan only after the travellers agree.
+- All of this is additive in format 1.0. Older data reads as before, and a booking's `price` is kept until the upgrade. Semantic merge keeps each person's entries apart, such as their part of an expense or what they paid back, and deleting a person or collection offers to delete budgets only for them (specification sections 34 to 36 and 54).
+- MCP tools for costs: get_costs, add_expense, split_expense, set_charged, set_trip_currency, set_budget, record_payment, mark_paid and export_costs. They refuse values that would mislead, such as a negative charged amount, a budget of zero or marking a payment still to pay as paid back.
+
+### Fixes
+
+- Attached files such as e-mails keep their line endings whatever Git is set to convert. With core.autocrlf=input, as on many Macs, the git program stored an e-mail with other line endings than its hash names, and every other copy of the trip reported asset.corrupt and refused all changes. Every trip now carries a .gitattributes with `* -text`, and GitCliBackend runs Git with core.autocrlf=false. A trip that was already affected is repaired by its next version on the device that still has the original file.
+
 ## 0.8.0 – 2026-11-10
 
 ### Changes
