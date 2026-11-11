@@ -362,6 +362,24 @@ public sealed class McpServerTests : IDisposable
     }
 
     [Fact]
+    public async Task AmountsChargedAreInTheTripCurrencyUnlessAnotherIsNamed()
+    {
+        var (repo, _) = await Trip();
+        var client = await Connect(repo.Root);
+        var ana = Entity.Create("person", "Ana");
+        await repo.ApplyAsync(await repo.ReadAsync(), [new(ana.Id, ana)]);
+        await Call(client, "set_trip_currency", """{"currency":"chf"}""");
+        var ramen = (await Call(client, "add_expense", """{"title":"Ramen","amount":"3600","currency":"JPY","paid_by":["Ana"]}"""))["id"]!.ToString();
+
+        var charged = await Call(client, "set_charged", "{\"expense\":\"" + ramen + "\",\"amount\":\"21,10\"}");
+        Assert.Equal("CHF", charged["converted"]!["currency"]!.ToString());
+        Assert.Equal("21.10", charged["converted"]!["value"]!.ToString());
+
+        // Another currency only when it is named.
+        Assert.Equal("EUR", (await Call(client, "set_charged", "{\"expense\":\"" + ramen + "\",\"amount\":\"22,50\",\"currency\":\"EUR\"}"))["converted"]!["currency"]!.ToString());
+    }
+
+    [Fact]
     public async Task AssistantsRecordBookingPaymentsBudgetsAndTheTripCurrency()
     {
         var (repo, _) = await Trip();

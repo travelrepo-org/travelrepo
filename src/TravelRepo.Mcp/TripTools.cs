@@ -690,23 +690,27 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
     });
 
     [McpServerTool(Name = "set_charged", Title = "Enter the amount charged", Destructive = false, Idempotent = true, OpenWorld = false)]
-    [Description("Records what was actually charged for an expense in another currency, for example the euros on the card statement for a payment in NZD (\"190,40\" works). The rate is worked out from both amounts and kept with the day, so the conversion never changes later. get_costs with `in` then uses it exactly. Without an amount the charged amount is removed.")]
+    [Description("Records what was actually charged for an expense in another currency, for example the euros on the card statement for a payment in NZD (\"190,40\" works). It is in the trip's currency unless `currency` names another. The rate is worked out from both amounts and kept with the day, so the conversion never changes later. get_costs with `in` then uses it exactly. Without an amount the charged amount is removed.")]
     public Task<string> SetCharged(
         [Description("The expense's id.")] string expense,
         [Description("The amount charged, for example 190.40; empty removes it.")] string? amount = null,
-        [Description("Its currency, for example EUR.")] string currency = "EUR",
-        [Description("Optional day it was charged, such as 2026-11-26.")] string? date = null,
+        [Description("Its currency, for example EUR; the trip's currency when left out.")] string? currency = null,
+        [Description("Optional day it was charged, such as 2026-11-26; otherwise the day entered before or the expense's day.")] string? date = null,
         CancellationToken ct = default) => Run(async () =>
     {
         LocalDate? day = date is null ? null : NodaTime.Text.LocalDatePattern.Iso.Parse(date.Trim()) is { Success: true } parsed ? parsed.Value : throw new McpException("\"date\" must look like 2026-11-26.");
-        var code = ExchangeRates.Code(currency) ?? throw new McpException("\"currency\" must be a code with three letters, such as EUR.");
+        var given = currency is null ? null : ExchangeRates.Code(currency) ?? throw new McpException("\"currency\" must be a code with three letters, such as EUR.");
         decimal? value = string.IsNullOrWhiteSpace(amount) ? null : ExchangeRates.Amount(amount) ?? throw new McpException("\"amount\" must be a number such as 190.40.");
         var saved = await Write(state =>
         {
             var target = Find(state.Trip, expense);
             if (target.Type != "expense") throw new McpException(target.Title + " is not an expense.");
+            var code = given ?? TripCurrency.Of(state.Trip);
+            if (value is not null && code is null) throw new McpException("The trip has no currency yet; name one with \"currency\" or set it with set_trip_currency.");
             Entity changed;
-            try { changed = value is { } v ? Expenses.WithCharge(target, v, code, day) : Expenses.WithoutCharge(target); }
+            // The day of the charge: as given, as entered before, the expense's own day, otherwise today.
+            var chargeDay = day ?? Expenses.ChargeOf(target)?.Date ?? Expenses.DayOf(state.Trip, target) ?? SystemClock.Instance.GetCurrentInstant().InUtc().Date;
+            try { changed = value is { } v ? Expenses.WithCharge(target, v, code!, chargeDay) : Expenses.WithoutCharge(target); }
             catch (DomainException ex) { throw new McpException(ex.Message); }
             return ([new EntityEdit(changed.Id, changed)], null);
         }, ct);
