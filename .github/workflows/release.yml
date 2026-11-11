@@ -1,8 +1,11 @@
 name: Release
-# Runs when a maintainer publishes a GitHub release, preferably as a pre-release. The release tag must be
-# v + <Version> from Directory.Build.props. The workflow builds and tests the tagged commit, attaches the NuGet
-# packages and then turns a pre-release with a plain version tag into a full release. If anything fails, the
-# release goes back to draft so nobody uses it; fix the problem and publish it again.
+# Runs when a maintainer publishes a GitHub release. Its first step turns the release into a pre-release, however it
+# was published, so it is not the latest release before its packages are attached. The release tag must be
+# v + <Version> from Directory.Build.props. Title and notes may be left empty: a release without a title is named
+# "TravelRepo <version>", and the notes from docs/releases are written below whatever the release already says.
+# The workflow builds and tests the tagged commit, attaches the NuGet packages and then turns a release with a plain
+# version tag (v1.2.3) into a full, latest release; tags with a suffix (v1.2.3-beta.1) stay pre-releases. If anything
+# fails, the release goes back to draft so nobody uses it; fix the problem and publish it again.
 on:
   release:
     types: [published]
@@ -25,6 +28,10 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
+      # Before anything else, so that a release published as a full release is not the latest one without its packages.
+      - name: Make the release a pre-release until its packages are attached
+        if: github.event_name == 'release' && github.event.release.prerelease != true
+        run: gh release edit "$TAG" --prerelease --latest=false --repo "$GITHUB_REPOSITORY"
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.TAG }}
@@ -40,6 +47,14 @@ jobs:
           gh release view "$TAG" --json body --jq .body --repo "$GITHUB_REPOSITORY" > "$RUNNER_TEMP/existing.md"
           python3 eng/changelog.py --release-body "$TAG" --existing "$RUNNER_TEMP/existing.md" > "$RUNNER_TEMP/body.md"
           gh release edit "$TAG" --notes-file "$RUNNER_TEMP/body.md" --repo "$GITHUB_REPOSITORY"
+      - name: Title the release when it has no title
+        if: github.event_name == 'release'
+        env:
+          TITLE: ${{ github.event.release.name }}
+        run: |
+          if [ -z "$TITLE" ] || [ "$TITLE" = "$TAG" ]; then
+            gh release edit "$TAG" --title "TravelRepo ${TAG#v}" --repo "$GITHUB_REPOSITORY"
+          fi
   verify:
     needs: version
     strategy:
@@ -89,9 +104,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$TAG" artifacts/packages/*.nupkg --clobber --repo "$GITHUB_REPOSITORY"
       - name: Turn the pre-release into a full release
-        # Publish as a pre-release; once everything is attached, a tag without a suffix (v1.2.3) becomes a full,
-        # latest release. Tags with a suffix (v1.2.3-beta.1) stay pre-releases.
-        if: github.event_name == 'release' && github.event.release.prerelease && !contains(env.TAG, '-')
+        # Every published release starts as a pre-release (see the first step); once everything is attached, a tag
+        # without a suffix (v1.2.3) becomes a full, latest release. Tags with a suffix (v1.2.3-beta.1) stay pre-releases.
+        if: github.event_name == 'release' && !contains(env.TAG, '-')
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release edit "$TAG" --prerelease=false --latest --repo "$GITHUB_REPOSITORY"
