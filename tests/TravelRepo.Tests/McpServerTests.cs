@@ -327,4 +327,126 @@ public sealed class McpServerTests : IDisposable
         Assert.Equal(["Ana"], costs["expenses"]![0]!["paid_by"]!.AsArray().Select(n => n!.ToString()));
         Assert.Equal(["Ferry"], costs["expenses"]![0]!["belongs_to"]!.AsArray().Select(n => n!.ToString()));
     }
+    [Fact]
+    public async Task AssistantsDivideExpensesAndMarkThemPaid()
+    {
+        var (repo, _) = await Trip();
+        var client = await Connect(repo.Root);
+        var ana = Entity.Create("person", "Ana"); var ben = Entity.Create("person", "Ben");
+        await repo.ApplyAsync(await repo.ReadAsync(), [new(ana.Id, ana), new(ben.Id, ben)]);
+        var id = (await Call(client, "add_expense", """{"title":"Boat hire","amount":"60","currency":"EUR","paid_by":["Ana"]}"""))["id"]!.ToString();
+
+        // Equally among everyone by default.
+        var costs = await Call(client, "get_costs", "{}");
+        Assert.Equal("equal", costs["expenses"]![0]!["split"]!["method"]!.ToString());
+        Assert.Equal(30m, costs["expenses"]![0]!["split"]!["open"]!.GetValue<decimal>());
+        Assert.Equal(("Ben", "Ana", 30m), (costs["settle_up"]![0]!["from"]!.ToString(), costs["settle_up"]![0]!["to"]!.ToString(), costs["settle_up"]![0]!["amount"]!.GetValue<decimal>()));
+
+        var split = await Call(client, "split_expense", "{\"expense\":\"" + id + "\",\"method\":\"amount\",\"people\":[\"Ana\",\"Ben\"],\"values\":[\"20\",\"40,00\"]}");
+        Assert.Equal(40m, split["open"]!.GetValue<decimal>());
+        Assert.Contains("add up", await Call(client, "split_expense", "{\"expense\":\"" + id + "\",\"method\":\"percent\",\"people\":[\"Ana\",\"Ben\"],\"values\":[\"50\",\"40\"]}", expectError: true));
+
+        var paid = await Call(client, "mark_paid", "{\"expense\":\"" + id + "\",\"person\":\"Ben\",\"date\":\"2027-05-03\"}");
+        Assert.Equal(0m, paid["open"]!.GetValue<decimal>());
+        Assert.Equal("2027-05-03", paid["debts"]![0]!["paid_on"]!.ToString());
+        Assert.Empty((await Call(client, "get_costs", "{}"))["settle_up"]!.AsArray());
+        Assert.Equal(40m, (await Call(client, "mark_paid", "{\"expense\":\"" + id + "\",\"paid\":false}"))["open"]!.GetValue<decimal>());
+
+        // The card charged 33,60 EUR for 60 NZD. Ben owes 40 EUR and half the jet boat, 16,80 EUR, in one payment.
+        var nzd = (await Call(client, "add_expense", """{"title":"Jet boat","amount":"60","currency":"NZD","paid_by":["Ana"]}"""))["id"]!.ToString();
+        Assert.Equal("0.56", (await Call(client, "set_charged", "{\"expense\":\"" + nzd + "\",\"amount\":\"33,60\",\"currency\":\"eur\",\"date\":\"2027-05-03\"}"))["converted"]!["rate"]!.ToString());
+        var inEuros = await Call(client, "get_costs", """{"in":"EUR"}""");
+        Assert.Contains(inEuros["settle_up"]!.AsArray(), t => t!["currency"]!.ToString() == "EUR" && t["amount"]!.GetValue<decimal>() == 56.80m && t["estimated"] is null);
+        Assert.Equal(33.60m + 60m, inEuros["paid_in"]!["exact"]!.GetValue<decimal>());
+        Assert.DoesNotContain((await repo.ReadAsync()).Diagnostics, d => d.Severity == Severity.Error);
+    }
+
+    [Fact]
+    public async Task AmountsChargedAreInTheTripCurrencyUnlessAnotherIsNamed()
+    {
+        var (repo, _) = await Trip();
+        var client = await Connect(repo.Root);
+        var ana = Entity.Create("person", "Ana");
+        await repo.ApplyAsync(await repo.ReadAsync(), [new(ana.Id, ana)]);
+        await Call(client, "set_trip_currency", """{"currency":"chf"}""");
+        var ramen = (await Call(client, "add_expense", """{"title":"Ramen","amount":"3600","currency":"JPY","paid_by":["Ana"]}"""))["id"]!.ToString();
+
+        var charged = await Call(client, "set_charged", "{\"expense\":\"" + ramen + "\",\"amount\":\"21,10\"}");
+        Assert.Equal("CHF", charged["converted"]!["currency"]!.ToString());
+        Assert.Equal("21.10", charged["converted"]!["value"]!.ToString());
+
+        // Another currency only when it is named.
+        Assert.Equal("EUR", (await Call(client, "set_charged", "{\"expense\":\"" + ramen + "\",\"amount\":\"22,50\",\"currency\":\"EUR\"}"))["converted"]!["currency"]!.ToString());
+    }
+
+    [Fact]
+    public async Task CostToolsRefuseValuesThatWouldMislead()
+    {
+        var (repo, _) = await Trip();
+        var client = await Connect(repo.Root);
+        var ana = Entity.Create("person", "Ana");
+        await repo.ApplyAsync(await repo.ReadAsync(), [new(ana.Id, ana)]);
+        await Call(client, "set_trip_currency", """{"currency":"EUR"}""");
+        var ramen = (await Call(client, "add_expense", """{"title":"Ramen","amount":"3600","currency":"JPY","paid_by":["Ana"]}"""))["id"]!.ToString();
+
+        // A charged amount below zero would turn the rate, and what is owed, around.
+        Assert.Contains("above zero", await Call(client, "set_charged", "{\"expense\":\"" + ramen + "\",\"amount\":\"-5\"}", expectError: true));
+        Assert.Contains("above zero", await Call(client, "set_charged", "{\"expense\":\"" + ramen + "\",\"amount\":\"0\"}", expectError: true));
+        Assert.Contains("above zero", await Call(client, "set_budget", """{"title":"Trip","amount":"-5"}""", expectError: true));
+        Assert.Contains("csv or text", await Call(client, "export_costs", """{"format":"xlsx"}""", expectError: true));
+
+        // Nobody owes anything for a payment that is still to pay, so there is nothing to mark as paid back.
+        var later = (await Call(client, "add_expense", """{"title":"Lodge balance","amount":"80","currency":"EUR","estimated":true}"""))["id"]!.ToString();
+        Assert.Contains("record_payment", await Call(client, "mark_paid", "{\"expense\":\"" + later + "\"}", expectError: true));
+        var paid = await Call(client, "record_payment", "{\"expense\":\"" + later + "\",\"date\":\"2027-05-20\"}");
+        Assert.Equal("2027-05-20", paid["entity"]!["date"]!.ToString());
+        Assert.Contains("already paid", await Call(client, "record_payment", "{\"expense\":\"" + later + "\"}", expectError: true));
+
+        // The rate follows from both amounts, also after the amount on the bill is corrected.
+        await Call(client, "set_charged", "{\"expense\":\"" + ramen + "\",\"amount\":\"21,60\"}");
+        var state = await repo.ReadAsync();
+        var corrected = state.Trip.Find(Guid.Parse(ramen))!.Copy(); corrected.Data["amount"]!["value"] = "4320";
+        Assert.Equal(0.005m, Expenses.ChargeOf(corrected)!.Rate);
+    }
+
+    [Fact]
+    public async Task AssistantsRecordBookingPaymentsBudgetsAndTheTripCurrency()
+    {
+        var (repo, _) = await Trip();
+        var client = await Connect(repo.Root);
+        var ana = Entity.Create("person", "Ana"); var ben = Entity.Create("person", "Ben"); var cleo = Entity.Create("person", "Cleo");
+        var state = await repo.ReadAsync();
+        var manifest = state.Trip.Manifest.Copy(); manifest.Data["participants"] = new JsonArray(ana.Id.ToString(), ben.Id.ToString(), cleo.Id.ToString());
+        await repo.ApplyAsync(state, [new(ana.Id, ana), new(ben.Id, ben), new(cleo.Id, cleo), new(manifest.Id, manifest)]);
+        Assert.Equal("EUR", (await Call(client, "set_trip_currency", """{"currency":"eur"}"""))["currency"]!.ToString());
+
+        // A booking created with a price gets a payment still to pay instead, shared by its travellers.
+        var booking = (await Call(client, "create_entity", "{\"type\":\"booking\",\"data\":{\"title\":\"Lodge\",\"status\":\"confirmed\",\"travelers\":[\"" + ana.Id + "\",\"" + ben.Id + "\"],\"price\":{\"value\":\"300.00\",\"currency\":\"EUR\"}}}"))["id"]!.ToString();
+        var bookings = await Call(client, "get_bookings", "{}");
+        var lodge = bookings["bookings"]![0]!;
+        Assert.Null(lodge["legacy_price"]);
+        Assert.Equal(300m, lodge["to_pay"]!["amount"]!.GetValue<decimal>());
+        var payment = lodge["payments"]![0]!["id"]!.ToString();
+        var paid = await Call(client, "record_payment", "{\"expense\":\"" + payment + "\",\"paid_by\":[\"Ana\"],\"amount\":\"310\"}");
+        Assert.False(paid["entity"]!["estimated"]!.GetValue<bool>());
+        var costs = await Call(client, "get_costs", "{}");
+        Assert.Equal("EUR", costs["currency"]!.ToString());
+        Assert.Equal(("Ben", "Ana", 155m), (costs["settle_up"]![0]!["from"]!.ToString(), costs["settle_up"]![0]!["to"]!.ToString(), costs["settle_up"]![0]!["amount"]!.GetValue<decimal>()));
+
+        // A new traveller does not join what was shared before.
+        var dinner = (await Call(client, "add_expense", """{"title":"Dinner","amount":"90","currency":"EUR","paid_by":["Cleo"]}"""))["id"]!.ToString();
+        await Call(client, "create_entity", """{"type":"person","data":{"display_name":"Dana"}}""");
+        costs = await Call(client, "get_costs", "{}");
+        Assert.Equal(3, costs["expenses"]!.AsArray().Single(e => e!["id"]!.ToString() == dinner)!["split"]!["parts"]!.AsArray().Count);
+
+        // One trip budget and one for Ben's food, both in the trip's currency.
+        await Call(client, "set_budget", """{"title":"Trip","amount":"2000"}""");
+        await Call(client, "set_budget", """{"title":"Ben's food","amount":"100","category":"food","person":"Ben"}""");
+        costs = await Call(client, "get_costs", "{}");
+        Assert.Equal((2000m, 400m), (costs["budget"]!["amount"]!.GetValue<decimal>(), costs["budget"]!["spent"]!.GetValue<decimal>()));
+        Assert.Equal("Ben's food", costs["budgets"]![0]!["title"]!.ToString());
+        Assert.Empty(costs["needs_attention"]!.AsArray());
+        Assert.Equal(booking, bookings["bookings"]![0]!["id"]!.ToString());
+        Assert.DoesNotContain((await repo.ReadAsync()).Diagnostics, d => d.Severity == Severity.Error);
+    }
 }

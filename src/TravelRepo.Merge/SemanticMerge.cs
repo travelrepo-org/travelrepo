@@ -74,6 +74,17 @@ public static class SemanticMerge
                 var bs = (b as JsonArray ?? []).Select(n => n!.ToString()).ToHashSet(); var os = oa.Select(n => n!.ToString()).ToHashSet(); var ts = ta.Select(n => n!.ToString()).ToHashSet();
                 return new JsonArray(os.Intersect(ts).Union(os.Except(bs)).Union(ts.Except(bs)).Order(StringComparer.Ordinal).Select(s => (JsonNode?)JsonValue.Create(s)).ToArray());
             }
+            if (o is JsonArray po && t is JsonArray pt && (b is JsonArray || b is null) && PersonKeys(po) is { } ok && PersonKeys(pt) is { } tk && PersonKeys(b as JsonArray ?? []) is { } bk)
+            {
+                // Entries of people, such as parts of an expense or what someone paid back, merge per person.
+                var result = new JsonArray();
+                foreach (var key in ok.Keys.Concat(tk.Keys.Where(k => !ok.ContainsKey(k))).Concat(bk.Keys.Where(k => !ok.ContainsKey(k) && !tk.ContainsKey(k))))
+                {
+                    var merged = Merge(id, path + "/" + key, bk.GetValueOrDefault(key), ok.GetValueOrDefault(key), tk.GetValueOrDefault(key));
+                    if (merged is not null) result.Add(merged);
+                }
+                return result;
+            }
             if (b is JsonArray baseArray && o is JsonArray ours && t is JsonArray theirs && SequenceMerge.TryMerge(baseArray.Select(n => n?.ToJsonString() ?? "null").ToArray(), ours.Select(n => n?.ToJsonString() ?? "null").ToArray(), theirs.Select(n => n?.ToJsonString() ?? "null").ToArray(), out var ordered))
                 return new JsonArray(ordered.Select(s => JsonNode.Parse(s)).ToArray());
             var kind = o is null || t is null ? ConflictKind.DeleteEdit : path.Contains("/blob", StringComparison.Ordinal) ? ConflictKind.Binary : path.EndsWith("/body", StringComparison.Ordinal) ? ConflictKind.Markdown : o is JsonArray ? ConflictKind.OrderedList : ConflictKind.Scalar;
@@ -112,6 +123,19 @@ public static class SemanticMerge
         result = null; if (b is null || o is null || t is null) return false;
         if (!SequenceMerge.TryMerge(System.Text.Encoding.UTF8.GetString(b).Split('\n'), System.Text.Encoding.UTF8.GetString(o).Split('\n'), System.Text.Encoding.UTF8.GetString(t).Split('\n'), out var merged)) return false;
         result = System.Text.Encoding.UTF8.GetBytes(string.Join('\n', merged)); return true;
+    }
+    /// <summary>The entries of a list of people's entries by person (and <c>to</c>), or null when it is another kind of list.</summary>
+    private static Dictionary<string, JsonNode>? PersonKeys(JsonArray a)
+    {
+        var keys = new Dictionary<string, JsonNode>(StringComparer.Ordinal);
+        foreach (var n in a)
+        {
+            if (n is not JsonObject o || !Guid.TryParse(o["person"]?.ToString(), out var person)) return null;
+            var to = o["to"]?.ToString();
+            if (to is not null && !Guid.TryParse(to, out _)) return null;
+            if (!keys.TryAdd(to is null ? person.ToString() : person + ">" + to, n)) return null;
+        }
+        return keys;
     }
     private static bool IsIdSet(JsonArray a) => a.All(n => n is JsonValue && Guid.TryParse(n.ToString(), out _));
 }

@@ -166,8 +166,14 @@ public sealed class ExportFilter(TripSnapshot trip, ExportOptions options)
         return ForPerson(Ids(task.Data["assigned_to"]));
     }
 
-    /// <summary>In a person's export, only expenses that person paid; otherwise all.</summary>
-    public bool IncludesExpense(Entity expense) => options.Person is not { } person || Ids(expense.Data["paid_by"]).Contains(person);
+    /// <summary>In a person's export, the expenses that person paid, shares or owes or is owed money for; otherwise all.</summary>
+    public bool IncludesExpense(Entity expense)
+    {
+        if (options.Person is not { } person) return true;
+        if (Ids(expense.Data["paid_by"]).Contains(person)) return true;
+        var split = Expenses.Split(trip, expense);
+        return split.People.Contains(person) || split.Debts.Any(d => d.From == person || d.To == person);
+    }
 
     /// <summary>The schedule items a booking covers: its <c>items</c> and items that point to it.</summary>
     public IEnumerable<Entity> LinkedItems(Entity booking) =>

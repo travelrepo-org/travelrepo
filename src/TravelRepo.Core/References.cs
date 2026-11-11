@@ -45,7 +45,8 @@ public static class TripReferences
 
     /// <summary>
     /// Returns a copy of <paramref name="source"/> without references to <paramref name="targets"/>. List members are
-    /// removed; a tagged list entry such as a content entry, a related item or a constraint is removed as a whole;
+    /// removed; a tagged list entry such as a content entry, a related item or a constraint, and an entry of a person
+    /// (with <c>person</c> or <c>to</c>) such as a part of an expense, is removed as a whole;
     /// any other field is removed, and an object left empty by that is removed too, except an accommodation or
     /// transport component. Extensions are not changed.
     /// </summary>
@@ -76,6 +77,8 @@ public static class TripReferences
                     if (IsTarget(item)) { a.RemoveAt(i); changed = true; continue; }
                     // An entry that names its kind and points at the deleted entity has no meaning without it.
                     if (item is JsonObject entry && entry.ContainsKey("type") && entry.Any(p => IsTarget(p.Value))) { a.RemoveAt(i); changed = true; continue; }
+                    // So does a person's entry, such as their part of an expense or what they paid back.
+                    if (item is JsonObject own && (IsTarget(own["person"]) || IsTarget(own["to"]))) { a.RemoveAt(i); changed = true; continue; }
                     if (Clean(item, false)) { changed = true; if (item is JsonObject { Count: 0 }) a.RemoveAt(i); }
                 }
             }

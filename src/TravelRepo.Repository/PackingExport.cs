@@ -118,7 +118,7 @@ public static class PackingExport
         return packed.Length == 0 || (!item.Everyone && item.Assignees.Count == 1) ? who : who + " · " + string.Format(CultureInfo.CurrentCulture, labels.PackedBy, string.Join(", ", packed));
     }
 
-    private static string Cell(string value, string separator)
+    internal static string Cell(string value, string separator)
     {
         if (value.Length > 0 && value[0] is '=' or '+' or '-' or '@' or '\t' or '\r') value = "'" + value;
         return value.Contains(separator, StringComparison.Ordinal) || value.Contains('"') || value.Contains('\n') || value.Contains('\r') ? "\"" + value.Replace("\"", "\"\"") + "\"" : value;

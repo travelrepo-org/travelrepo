@@ -51,6 +51,25 @@ public sealed record ExportLabels
     public string With { get; init; } = "with {0}";
     public string PackedBy { get; init; } = "packed by {0}";
     public string PaidBy { get; init; } = "paid by {0}";
+    /// <summary>After an amount that is booked but not paid yet, for example "358.00 NZD to pay".</summary>
+    public string ToPay { get; init; } = "to pay";
+    /// <summary>The trip's budget, for example "1,200.00 EUR of 3,000.00 EUR".</summary>
+    public string BudgetUsed { get; init; } = "{0} of {1}";
+    /// <summary>In one person's export, what the totals are: that person's part of the expenses.</summary>
+    public string Share { get; init; } = "share";
+    /// <summary>One person's part of an expense, for example "share 30.00 EUR".</summary>
+    public string ShareOf { get; init; } = "share {0}";
+    /// <summary>A debt still open, for example "Ben owes Ana 30.00 EUR".</summary>
+    public string Owes { get; init; } = "{0} owes {1} {2}";
+    /// <summary>A debt marked as paid back, for example "Ben paid back Ana 30.00 EUR".</summary>
+    public string PaidBack { get; init; } = "{0} paid back {1} {2}";
+    /// <summary>What is still owed for an expense, for example "30.00 EUR open".</summary>
+    public string OpenAmount { get; init; } = "{0} open";
+    public string Settled { get; init; } = "settled";
+    /// <summary>Heading of the payments that settle what people owe each other.</summary>
+    public string SettleUp { get; init; } = "To settle up";
+    /// <summary>One payment that settles debts, for example "Ben pays Ana".</summary>
+    public string PaysTo { get; init; } = "{0} pays {1}";
     public string Yes { get; init; } = "yes";
     public string No { get; init; } = "no";
     public string List { get; init; } = "List";
@@ -227,9 +246,11 @@ public static class TripItinerary
         var travellers = (trip.Manifest.Data["participants"] as JsonArray ?? []).Select(n => Guid.TryParse(n?.ToString(), out var id) ? trip.Find(id)?.Title : null).OfType<string>().ToArray();
         if (travellers.Length == 0) travellers = trip.Entities.Values.Where(e => e.Type == "person").Select(e => e.Title).ToArray();
         var bookings = trip.Entities.Values.Where(e => e.Type == "booking" && filter.IncludesBooking(e)).OrderBy(e => e.Title, StringComparer.Create(culture, false)).ToArray();
-        // Budgets belong to the whole trip, so one person's export shows only what that person paid.
-        var costs = options.Person is null ? TripSummaries.Costs(trip)
-            : TripSummaries.Costs(trip with { Entities = trip.Entities.Values.Where(e => e.Type == "expense" && filter.IncludesExpense(e)).ToDictionary(e => e.Id) });
+        // Budgets belong to the whole trip, so one person's export shows that person's part of the expenses instead:
+        // Paid is their part of what was paid, Estimated their part of the estimates.
+        var costs = options.Person is not { } person ? TripSummaries.Costs(trip)
+            : Expenses.All(trip).Where(s => s.Amount is not null && filter.IncludesExpense(s.Expense)).GroupBy(s => s.Amount!.Currency, StringComparer.Ordinal).OrderBy(g => g.Key, StringComparer.Ordinal)
+                .Select(g => new CurrencyTotal(g.Key, g.Where(s => !s.Issues.HasFlag(SplitIssues.Estimated)).Sum(s => s.ShareOf(person)), g.Where(s => s.Issues.HasFlag(SplitIssues.Estimated)).Sum(s => s.ShareOf(person)), 0)).ToArray();
         return new(trip.Manifest.Title, start, end, travellers, days, unscheduled, bookings, costs, zone.Id) { Stays = runs };
     }
 }

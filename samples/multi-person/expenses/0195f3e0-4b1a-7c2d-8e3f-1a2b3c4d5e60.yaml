@@ -1,0 +1,10 @@
+id: 0195f3e0-4b1a-7c2d-8e3f-1a2b3c4d5e60
+type: expense
+title: Dinner at the lake
+amount:
+  value: "90.00"
+  currency: EUR
+estimated: false
+paid_by:
+- 28e21c9d-d75e-73e3-ab41-c25fc68f85f8
+extensions: {}
