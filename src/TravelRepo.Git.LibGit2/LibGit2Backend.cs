@@ -155,7 +155,17 @@ public sealed class LibGit2Backend(ICredentialBroker? credentialBroker = null) :
 
     private static GitResult Add(GitRepo repo, List<string> args)
     {
-        Commands.Stage(repo, Operands(args));
+        var paths = Operands(args);
+        if (args.Contains("--renormalize"))
+        {
+            // Stores tracked files again through the current attributes, even when their timestamps say unchanged.
+            var tracked = repo.Index.Select(e => e.Path).Where(p => paths.Any(path => p == path || p.StartsWith(path + "/", StringComparison.Ordinal))).ToArray();
+            foreach (var path in tracked) repo.Index.Remove(path);
+            foreach (var path in tracked) if (File.Exists(Path.Combine(repo.Info.WorkingDirectory, path))) repo.Index.Add(path);
+            repo.Index.Write();
+            return Ok("");
+        }
+        Commands.Stage(repo, paths);
         return Ok("");
     }
 
