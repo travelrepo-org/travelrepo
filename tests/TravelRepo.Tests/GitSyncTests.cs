@@ -63,6 +63,23 @@ public sealed class GitSyncTests : IDisposable
     }
 
     [Fact]
+    public void ALibgit2PathThatCannotBeLoadedSaysSoRightAway()
+    {
+        // iOS apps name the framework libgit2 is in; a wrong path fails where it is given, not at the first Git command.
+        Assert.Throws<DllNotFoundException>(() => TravelRepo.Git.LibGit2.LibGit2Library.Use(Path.Combine(root, "Frameworks", "git2.framework", "git2")));
+    }
+
+    [Fact]
+    public void TheLibgit2NameIsTheOneLibGit2SharpLoads()
+    {
+        // The iOS build script and the app name the library after it; after a LibGit2Sharp update this says it changed
+        // before an app fails at its first Git command. The type is internal, so this also fails when it is renamed.
+        var name = typeof(LibGit2Sharp.Repository).Assembly.GetType("LibGit2Sharp.Core.NativeDllName")
+            ?.GetField("Name", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)?.GetRawConstantValue();
+        Assert.Equal(TravelRepo.Git.LibGit2.LibGit2Library.Name, name);
+    }
+
+    [Fact]
     public async Task FilesOutsideTheTripDoNotCountAsChanges()
     {
         var (repo, git, _, _) = await TwoClones();
