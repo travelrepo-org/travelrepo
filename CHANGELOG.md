@@ -2,6 +2,14 @@
 
 All notable changes to TravelRepo. Generated from `docs/releases` by `python eng/changelog.py`; do not edit by hand.
 
+## 0.10.0 – 2026-11-12
+
+### Changes
+
+- TravelRepo.Git.LibGit2 runs on iPhone and iPad. eng/build-libgit2-ios.sh builds the libgit2 commit LibGit2Sharp loads (libgit2 1.8.6) as git2.xcframework for devices and the simulator, with the system's zlib and, as on Android, without HTTPS and SSH in libgit2, because ManagedHttpTransport uses .NET's HttpClient and with it the system's TLS. iOS loads libraries only from frameworks, so an app passes the path of git2.framework/git2 to LibGit2Library.Use before its first Git command.
+- LibGit2Library.Use loads libgit2 at once and says why it cannot (DllNotFoundException), instead of failing at the first Git command. Calling it again with the same path does nothing; another path is refused. A test checks that LibGit2Library.Name is still the name LibGit2Sharp loads, so a LibGit2Sharp update that changes it is noticed here and not in an app.
+- A device build for iOS needs the Mono interpreter (UseInterpreter), because LibGit2Sharp passes delegates to libgit2 without MonoPInvokeCallback; docs/spike-git-without-cli.md has the iOS notes.
+
 ## 0.9.0 – 2026-11-11
 
 ### Changes
