@@ -2,6 +2,13 @@
 
 All notable changes to TravelRepo. Generated from `docs/releases` by `python eng/changelog.py`; do not edit by hand.
 
+## 0.11.0 – 2026-11-12
+
+### Changes
+
+- ProviderAccount says the account's number (Id) and the email it shows publicly (PublicEmail); GitHubProvider reads both from /user. They are init properties, so code that creates a ProviderAccount keeps working.
+- GitHubProvider.NoReplyEmail builds GitHub's private address for commits, ID+login@users.noreply.github.com, which GitHub links to the account. Without the account's number it gives the older login@users.noreply.github.com, which GitHub links only for accounts made before July 2017. Clients use it to save versions under the account when the user has given no email of their own.
+
 ## 0.10.0 – 2026-11-12
 
 ### Changes
