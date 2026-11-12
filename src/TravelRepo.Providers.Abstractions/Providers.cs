@@ -21,7 +21,13 @@ public interface IProviderAuthentication
 /// <param name="Name">The display name, if the account has one.</param>
 /// <param name="AvatarUrl">The account picture.</param>
 /// <param name="ProfileUrl">The account's public page.</param>
-public sealed record ProviderAccount(string Login, string? Name, Uri? AvatarUrl, Uri? ProfileUrl);
+public sealed record ProviderAccount(string Login, string? Name, Uri? AvatarUrl, Uri? ProfileUrl)
+{
+    /// <summary>The provider's number for the account, which stays when the login is renamed. Null when it does not say.</summary>
+    public long? Id { get; init; }
+    /// <summary>The email the account shows on its public profile, or null when it shows none.</summary>
+    public string? PublicEmail { get; init; }
+}
 public interface IProviderAccount
 {
     /// <summary>The signed-in account, or <c>null</c> when there is no sign-in or the provider rejects it.</summary>

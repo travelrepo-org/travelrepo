@@ -41,9 +41,20 @@ public sealed class GitHubProvider(HttpClient http, ISecretStore secrets, string
         try { user = await Send(HttpMethod.Get, "user", ct: ct); }
         catch (DomainException ex) when (ex.Code == "github.http.401") { return null; }
         static Uri? Link(JsonNode? value) => Uri.TryCreate(value?.ToString(), UriKind.Absolute, out var uri) && uri.Scheme == "https" ? uri : null;
-        var name = user["name"]?.ToString();
-        return new(user["login"]!.ToString(), string.IsNullOrWhiteSpace(name) ? null : name, Link(user["avatar_url"]), Link(user["html_url"]));
+        var name = user["name"]?.ToString(); var email = user["email"]?.ToString();
+        return new(user["login"]!.ToString(), string.IsNullOrWhiteSpace(name) ? null : name, Link(user["avatar_url"]), Link(user["html_url"]))
+        {
+            Id = user["id"] is JsonValue id && id.TryGetValue<long>(out var number) ? number : null,
+            PublicEmail = string.IsNullOrWhiteSpace(email) ? null : email.Trim()
+        };
     }
+
+    /// <summary>
+    /// The private address GitHub gives every account for commits, <c>ID+login@users.noreply.github.com</c>, which
+    /// GitHub links to the account. Without the account's number, the older <c>login@users.noreply.github.com</c>,
+    /// which GitHub links only for accounts made before July 2017.
+    /// </summary>
+    public static string NoReplyEmail(string login, long? id) => (id is { } number ? number.ToString(System.Globalization.CultureInfo.InvariantCulture) + "+" : "") + login + "@users.noreply.github.com";
     public Task SignOutAsync(CancellationToken ct = default) => secrets.DeleteAsync(TokenKey, ct);
     public async Task<DeviceAuthorization> BeginAsync(CancellationToken ct = default)
     {
