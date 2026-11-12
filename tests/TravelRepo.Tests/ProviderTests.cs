@@ -30,12 +30,14 @@ public class ProviderTests
         var provider = new GitHubProvider(new HttpClient(new Handler(r =>
         {
             Assert.Equal("/user", r.RequestUri!.AbsolutePath); Assert.StartsWith("TravelRepo/" + TravelRepoInfo.Version, r.Headers.UserAgent.ToString());
-            return Task.FromResult(status == HttpStatusCode.OK ? Json(new { login = "alex", name = "Alex Example", avatar_url = "https://avatars.githubusercontent.com/u/1", html_url = "https://github.com/alex" }) : new HttpResponseMessage(status));
+            return Task.FromResult(status == HttpStatusCode.OK ? Json(new { login = "alex", id = 1234567, name = "Alex Example", email = "alex@example.invalid", avatar_url = "https://avatars.githubusercontent.com/u/1", html_url = "https://github.com/alex" }) : new HttpResponseMessage(status));
         })), secrets, "test-client");
         Assert.Null(await provider.AccountAsync());
         secrets.Values["github.user-token"] = "token";
         var account = await provider.AccountAsync();
-        Assert.Equal(new ProviderAccount("alex", "Alex Example", new Uri("https://avatars.githubusercontent.com/u/1"), new Uri("https://github.com/alex")), account);
+        Assert.Equal(new ProviderAccount("alex", "Alex Example", new Uri("https://avatars.githubusercontent.com/u/1"), new Uri("https://github.com/alex")) { Id = 1234567, PublicEmail = "alex@example.invalid" }, account);
+        Assert.Equal("1234567+alex@users.noreply.github.com", GitHubProvider.NoReplyEmail(account!.Login, account.Id));
+        Assert.Equal("alex@users.noreply.github.com", GitHubProvider.NoReplyEmail("alex", null));
         status = HttpStatusCode.Unauthorized; Assert.Null(await provider.AccountAsync());
         status = HttpStatusCode.InternalServerError; await Assert.ThrowsAsync<DomainException>(() => provider.AccountAsync());
         await provider.SignOutAsync(); Assert.False(await provider.IsConnectedAsync()); Assert.Empty(secrets.Values);
