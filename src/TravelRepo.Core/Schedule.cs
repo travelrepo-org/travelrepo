@@ -240,7 +240,7 @@ public static class TripSummaries
 
     /// <summary>
     /// What the expenses come to per currency they were paid in: paid and still to pay. The budget is the trip's one
-    /// budget in the trip's currency (see <see cref="Budgets.ForTrip"/>), so <see cref="CurrencyTotal.Budget"/> is always zero.
+    /// budget in the trip's currency (see <see cref="Budgets.ForTrip(TripSnapshot, ExchangeRates?)"/>), so <see cref="CurrencyTotal.Budget"/> is always zero.
     /// </summary>
     public static IReadOnlyList<CurrencyTotal> Costs(TripSnapshot trip)
     {
