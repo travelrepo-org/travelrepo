@@ -1012,7 +1012,7 @@ settled:
     date: 2027-05-03
 ```
 
-A paid mark may record what was transferred in another currency, such as the euros for a debt in NZD: `converted` with `value`, `currency`, the `rate` (units of it per unit of the expense's currency), `rate_date` and `source` (`card` when it follows what a card charged, `reference` when it was estimated with reference rates). It keeps what was really paid in the history, so that amount no longer changes with later rates; the debt itself stays in the expense's currency.
+A paid mark may record what was transferred in another currency, such as the euros for a debt in NZD: `converted` with `value`, `currency`, the `rate` (units of it per unit of the expense's currency), `rate_date` and `source` (`card` when it follows what a card charged, `cash` when it follows the rate of cash bought before, `reference` when it was estimated with reference rates). It keeps what was really paid in the history, so that amount no longer changes with later rates; the debt itself stays in the expense's currency.
 
 What is still open is what is owed minus what is marked as paid. When the split changes after paying back, the difference shows: more is owed, or the person who received too much owes it back. Marking a debt as paid sets its entry to what is owed at that moment; paying back what was received too much removes the entry.
 
@@ -1061,6 +1061,17 @@ converted:
 Clients must not silently rewrite historical conversions using current rates.
 
 For an expense, `converted` with `source: card` records what was actually charged in another currency, for example the euros a card statement shows for a payment in NZD. `rate` is units of the converted currency per unit of the expense's currency, worked out from both amounts (when the amount is corrected later, readers work it out again from both amounts rather than trust a stored rate that no longer matches); `rate_date` is the day of the charge. It is the amount booked from the account, next to the amount on the bill. Clients use it to show costs and to settle debts in that currency: a share of the expense converts exactly at that rate. Where no amount was charged in the wanted currency, a client may convert with reference rates, but must present the result as an estimate and must not store it as `converted`. Debts stay recorded in the expense's own currency; paying back in another currency marks the debt as paid in full.
+
+An expense paid with cash in its own currency, bought before, such as yen from a cash machine, will never be charged by a card. `converted` with `source: cash` records that: `currency` is the currency the travellers count it in, `rate` is units of it that one unit of the expense's currency cost, from the cash machine's receipt or a reference rate the traveller chose to keep, and `rate_date` the day of that rate. Here the rate is what was entered: readers work out the converted amount from the expense's amount and the rate, and a stored `value` only repeats it. Clients treat such an expense like a charged one: its share converts exactly at that rate, and it is not an estimate. Clients may offer the rate of the last cash payment in the same currency, or a reference rate, for the traveller to confirm or correct. A paid mark whose transfer follows that rate records `source: cash`.
+
+```yaml
+converted:
+  currency: EUR
+  rate: "0.00625"
+  value: "15.00"
+  rate_date: 2027-05-15
+  source: cash
+```
 
 ## 36. Budgets
 

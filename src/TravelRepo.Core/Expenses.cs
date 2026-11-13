@@ -288,7 +288,15 @@ public static class Expenses
     /// </summary>
     public static Charge? ChargeOf(Entity expense)
     {
-        if (expense.Data["converted"] is not JsonObject c || ExchangeRates.Code(c["currency"]?.ToString()) is not { } code || !TryDecimal(c["value"], out var value)) return null;
+        if (expense.Data["converted"] is not JsonObject c || ExchangeRates.Code(c["currency"]?.ToString()) is not { } code) return null;
+        // Cash bought before: the rate it cost is what was entered, and the amount in the other currency follows from it.
+        if (c["source"]?.ToString() == Cash)
+        {
+            if (!TryDecimal(c["rate"], out var cashRate) || cashRate <= 0 || TripSummaries.Money(expense.Data["amount"]) is not { } paid) return null;
+            LocalDate? cashDay = c["rate_date"] is JsonValue cd && LocalDatePattern.Iso.Parse(cd.ToString()).TryGetValue(default, out var cashDate) ? cashDate : null;
+            return new(Math.Round(paid.Amount * cashRate, MinorDigits(code), MidpointRounding.AwayFromZero), code, cashRate, cashDay, Cash);
+        }
+        if (!TryDecimal(c["value"], out var value)) return null;
         // Both amounts are what was entered; the rate follows from them, so it stays right when the amount is corrected later.
         var rate = TripSummaries.Money(expense.Data["amount"]) is { Amount: not 0 } money ? Math.Round(value / money.Amount, 6, MidpointRounding.AwayFromZero) : TryDecimal(c["rate"], out var stored) ? stored : 0;
         LocalDate? date = c["rate_date"] is JsonValue d && LocalDatePattern.Iso.Parse(d.ToString()).TryGetValue(default, out var day) ? day : null;
@@ -319,6 +327,47 @@ public static class Expenses
         copy.Data["converted"] = converted;
         return copy;
     }
+
+    /// <summary>The <c>source</c> of an expense's <c>converted</c> when it was paid with cash bought before (specification section 35).</summary>
+    public const string Cash = "cash";
+
+    /// <summary>Whether an expense was paid with cash in its own currency, so no card will ever charge it.</summary>
+    public static bool IsCash(Entity expense) => expense.Data["converted"] is JsonObject c && c["source"]?.ToString() == Cash;
+
+    /// <summary>
+    /// A copy of the expense marked as paid with cash in its own currency, bought before, such as yen from a cash
+    /// machine. No card will charge it, so what it comes to in <paramref name="currency"/> follows from
+    /// <paramref name="rate"/>, the units of <paramref name="currency"/> one unit of the expense's currency cost: from
+    /// the cash machine's receipt, or a reference rate the traveller chose to keep. It is kept with the day of that rate
+    /// and the source <c>cash</c>, so it stays as it was (specification section 35).
+    /// </summary>
+    public static Entity WithCash(Entity expense, string currency, decimal rate, LocalDate on)
+    {
+        var code = ExchangeRates.Code(currency) ?? throw new DomainException("expense.charge_currency", "A currency is a code with three letters, such as EUR.");
+        var money = TripSummaries.Money(expense.Data["amount"]) ?? throw new DomainException("expense.amount", "The expense needs an amount first.");
+        if (code == money.Currency) throw new DomainException("expense.charge_currency", "Cash is counted in another currency than the expense's.");
+        if (rate <= 0) throw new DomainException("expense.cash_rate", "The rate of the cash must be above zero.");
+        var copy = expense.Copy();
+        copy.Data["converted"] = new JsonObject
+        {
+            ["value"] = Format(Math.Round(money.Amount * rate, MinorDigits(code), MidpointRounding.AwayFromZero), code),
+            ["currency"] = code,
+            ["rate"] = Math.Round(rate, 8, MidpointRounding.AwayFromZero).ToString("0.########", CultureInfo.InvariantCulture),
+            ["rate_date"] = LocalDatePattern.Iso.Format(on),
+            ["source"] = Cash
+        };
+        return copy;
+    }
+
+    /// <summary>
+    /// The rate cash in <paramref name="from"/> cost in <paramref name="to"/> the last time it was used in the trip, from
+    /// the latest expense paid with such cash, to offer for the next one: it usually comes from the same withdrawal.
+    /// </summary>
+    public static decimal? LastCashRate(TripSnapshot trip, string from, string to) =>
+        trip.Entities.Values.Where(e => e.Type == "expense" && IsCash(e) && TripSummaries.Money(e.Data["amount"])?.Currency == from)
+            .Select(e => (Expense: e, Charge: ChargeOf(e))).Where(x => x.Charge is { } c && c.Currency == to)
+            .OrderByDescending(x => x.Charge!.Date ?? DateOf(trip, x.Expense) ?? default).ThenByDescending(x => x.Expense.Id.ToString(), StringComparer.Ordinal)
+            .Select(x => (decimal?)x.Charge!.Rate).FirstOrDefault();
 
     /// <summary>A copy of the expense without its charged amount.</summary>
     public static Entity WithoutCharge(Entity expense) { var copy = expense.Copy(); copy.Data.Remove("converted"); return copy; }
@@ -799,7 +848,7 @@ public static class Expenses
             ["value"] = Format(total, currency),
             ["currency"] = currency,
             ["rate"] = Math.Round(total / basis, 6, MidpointRounding.AwayFromZero).ToString("0.######", CultureInfo.InvariantCulture),
-            ["source"] = how == Conversion.Reference ? "reference" : "card"
+            ["source"] = how == Conversion.Reference ? "reference" : ChargeOf(expense)?.Source == Cash ? Cash : "card"
         };
         if (rateDay is { } d) converted["rate_date"] = LocalDatePattern.Iso.Format(d);
         entry["converted"] = converted;
