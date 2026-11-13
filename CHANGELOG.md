@@ -2,6 +2,14 @@
 
 All notable changes to TravelRepo. Generated from `docs/releases` by `python eng/changelog.py`; do not edit by hand.
 
+## 0.12.0 – 2026-11-13
+
+### Changes
+
+- An expense paid with cash bought before, such as yen from a cash machine, can record the rate the cash cost: `converted` with `source: cash`, the rate and the day of that rate (specification section 35). It then counts exactly, not as an estimate, in totals, budgets and debts, and paying it back records `source: cash`. Unlike a card charge, the rate comes first: the amount in the trip currency follows from the expense's amount and the rate. This is additive in format 1.0; older readers see a charged amount with an unknown source and count it as charged.
+- New API: `Expenses.WithCash` records cash with its rate and day, `Expenses.IsCash` tells cash from a card charge, `Expenses.Cash` names the source, and `Expenses.LastCashRate` offers the rate of the last cash payment in the same currency, which usually comes from the same withdrawal.
+- MCP: `set_cash` records a payment made with cash, from the rate on the cash machine's receipt (`per_unit`) or from the two amounts of a withdrawal (`received` and `debited`, fees included). Without either it uses the last cash rate in that currency, otherwise the app's exchange rate. `set_charged` still replaces it with a card charge.
+
 ## 0.11.0 – 2026-11-12
 
 ### Changes
