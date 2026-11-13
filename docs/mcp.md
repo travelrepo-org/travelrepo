@@ -53,6 +53,7 @@ Each server serves exactly one trip folder. Add one entry per trip you want the 
 | `set_budget` | yes | Creates or changes a budget in the trip's currency: part of the trip's one budget, or limited to a category, a person and a collection together. |
 | `export_costs` | no | The costs as CSV (one row per payment with category, amounts, charged amount, who paid, what is open and each person's part; comma, semicolon, tab or pipe) or as text, for everyone or the parts of some people. |
 | `set_charged` | yes | Records what a card actually charged for an expense in another currency, such as euros for NZD, in the trip's currency unless another is named; the rate is kept with the day. |
+| `set_cash` | yes | Records that an expense in another currency was paid with cash bought before, so it counts exactly at the rate the cash cost: as on the cash machine's receipt (`per_unit`, such as 160.5 yen per euro), from the withdrawal (`received` cash and `debited` from the account, fees included), or otherwise the last cash rate in that currency or the app's exchange rate. |
 | `mark_paid` | yes | Marks an expense, or one person's part of it, as paid back, optionally with the day, or takes the mark back. |
 | `link_booking` | yes | Sets which plans a booking is for; booking and plans point to each other, and plans leave a booking they belonged to before. |
 | `add_to_group`, `remove_from_group` | yes | Makes a plan a step of a group, such as a day tour, or takes it out again. A step belongs to one group. |

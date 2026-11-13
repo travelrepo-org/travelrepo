@@ -719,6 +719,39 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         return new JsonObject { ["id"] = result.Id.ToString(), ["converted"] = result.Data["converted"]?.DeepClone() };
     });
 
+    [McpServerTool(Name = "set_cash", Title = "Record a payment made with cash", Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Records that an expense in another currency was paid with cash bought before, such as yen or NZD from a cash machine, which no card will ever charge. It then counts exactly at the rate the cash cost, in the trip's currency, instead of being estimated. Give the rate as on the cash machine's receipt with `per_unit` (how much of the expense's currency one unit of the trip's currency bought, such as 160.5 for yen per euro), or the two amounts of the withdrawal with `received` (cash in the expense's currency, such as 600) and `debited` (what the account was charged in the trip's currency, fees included, such as 318.40). Without either, the rate of the last cash payment in that currency is used, otherwise the app's exchange rate. Use set_charged for card payments instead; set_charged without an amount removes the cash rate too.")]
+    public Task<string> SetCash(
+        [Description("The expense's id.")] string expense,
+        [Description("How much of the expense's currency one unit of the trip's currency bought, such as 160.5 for yen per euro.")] string? per_unit = null,
+        [Description("The cash received in the expense's currency, such as 600; give it with `debited`.")] string? received = null,
+        [Description("What the account was charged for that cash in the trip's currency, fees included, such as 318.40; give it with `received`.")] string? debited = null,
+        [Description("Optional day of the rate, such as 2026-11-26; otherwise the expense's day.")] string? date = null,
+        CancellationToken ct = default) => Run(async () =>
+    {
+        LocalDate? day = date is null ? null : NodaTime.Text.LocalDatePattern.Iso.Parse(date.Trim()) is { Success: true } parsed ? parsed.Value : throw new McpException("\"date\" must look like 2026-11-26.");
+        decimal? Number(string? text, string name) => string.IsNullOrWhiteSpace(text) ? null : ExchangeRates.Amount(text) is { } n && n > 0 ? n : throw new McpException("\"" + name + "\" must be a number above zero.");
+        var perUnit = Number(per_unit, "per_unit"); var cash = Number(received, "received"); var account = Number(debited, "debited");
+        if ((cash is null) != (account is null)) throw new McpException("Give \"received\" and \"debited\" together.");
+        if (perUnit is not null && cash is not null) throw new McpException("Give either \"per_unit\" or \"received\" and \"debited\".");
+        var saved = await Write(state =>
+        {
+            var target = Find(state.Trip, expense);
+            if (target.Type != "expense") throw new McpException(target.Title + " is not an expense.");
+            var code = TripCurrency.Of(state.Trip) ?? throw new McpException("The trip has no currency yet; set it with set_trip_currency.");
+            var paid = TripSummaries.Money(target.Data["amount"]) ?? throw new McpException(target.Title + " has no amount.");
+            // Units of the trip's currency one unit of the cash cost.
+            var rate = perUnit is { } p ? 1 / p : cash is { } c && account is { } a ? a / c
+                : Expenses.LastCashRate(state.Trip, paid.Currency, code) ?? Rates()?.Convert(1m, paid.Currency, code)
+                ?? throw new McpException("No rate is known for " + paid.Currency + " yet; give \"per_unit\" or \"received\" and \"debited\".");
+            var rateDay = day ?? Expenses.DateOf(state.Trip, target) ?? SystemClock.Instance.GetCurrentInstant().InUtc().Date;
+            try { var changed = Expenses.WithCash(target, code, rate, rateDay); return ([new EntityEdit(changed.Id, changed)], null); }
+            catch (DomainException ex) { throw new McpException(ex.Message); }
+        }, ct);
+        var result = Find(saved.Trip, expense);
+        return new JsonObject { ["id"] = result.Id.ToString(), ["converted"] = result.Data["converted"]?.DeepClone() };
+    });
+
     [McpServerTool(Name = "set_trip_currency", Title = "Set the trip's currency", Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Sets the currency the travellers count in, such as EUR: the budget, totals and who owes whom are shown in it, and amounts charged on cards are entered in it. Amounts of expenses stay in the currency they were paid in. Budgets in another currency are listed in the answer; ask the travellers before converting them with convert_budgets.")]
     public Task<string> SetTripCurrency(
