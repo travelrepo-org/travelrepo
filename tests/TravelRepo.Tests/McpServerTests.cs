@@ -380,6 +380,34 @@ public sealed class McpServerTests : IDisposable
     }
 
     [Fact]
+    public async Task CashCountsAtTheRateOfTheReceiptOrTheWithdrawal()
+    {
+        var (repo, _) = await Trip();
+        var client = await Connect(repo.Root);
+        var ana = Entity.Create("person", "Ana");
+        await repo.ApplyAsync(await repo.ReadAsync(), [new(ana.Id, ana)]);
+        await Call(client, "set_trip_currency", """{"currency":"EUR"}""");
+        var kiosk = (await Call(client, "add_expense", """{"title":"Kiosk","amount":"40","currency":"NZD","paid_by":["Ana"]}"""))["id"]!.ToString();
+        var market = (await Call(client, "add_expense", """{"title":"Market","amount":"60","currency":"NZD","paid_by":["Ana"]}"""))["id"]!.ToString();
+
+        // 600 NZD from the cash machine cost 318.40 EUR with fees.
+        var cash = await Call(client, "set_cash", "{\"expense\":\"" + kiosk + "\",\"received\":\"600\",\"debited\":\"318,40\"}");
+        Assert.Equal(("cash", "EUR", "21.23"), (cash["converted"]!["source"]!.ToString(), cash["converted"]!["currency"]!.ToString(), cash["converted"]!["value"]!.ToString()));
+        // The next cash in NZD takes the same rate without being told.
+        var next = await Call(client, "set_cash", "{\"expense\":\"" + market + "\"}");
+        Assert.Equal(cash["converted"]!["rate"]!.ToString(), next["converted"]!["rate"]!.ToString());
+        // As on a receipt: 1 EUR = 1.9 NZD.
+        Assert.Equal("21.05", (await Call(client, "set_cash", "{\"expense\":\"" + kiosk + "\",\"per_unit\":\"1,9\"}"))["converted"]!["value"]!.ToString());
+        var costs = await Call(client, "get_costs", "{}");
+        Assert.Equal(0, costs["paid_in"]!["without_charged_amount"]!.GetValue<int>());
+        Assert.Contains("together", await Call(client, "set_cash", "{\"expense\":\"" + kiosk + "\",\"received\":\"600\"}", expectError: true));
+        Assert.Contains("above zero", await Call(client, "set_cash", "{\"expense\":\"" + kiosk + "\",\"per_unit\":\"0\"}", expectError: true));
+        // A card after all: set_charged replaces the cash rate.
+        Assert.Equal("card", (await Call(client, "set_charged", "{\"expense\":\"" + kiosk + "\",\"amount\":\"21,40\"}"))["converted"]!["source"]!.ToString());
+        Assert.DoesNotContain((await repo.ReadAsync()).Diagnostics, d => d.Severity == Severity.Error);
+    }
+
+    [Fact]
     public async Task CostToolsRefuseValuesThatWouldMislead()
     {
         var (repo, _) = await Trip();
