@@ -3,8 +3,8 @@ name: Release
 # was published, so it is not the latest release before its packages are attached. The release tag must be
 # v + <Version> from Directory.Build.props. Title and notes may be left empty: a release without a title is named
 # "TravelRepo <version>", and the notes from docs/releases are written below whatever the release already says.
-# The workflow builds and tests the tagged commit, attaches the NuGet packages and then turns a release with a plain
-# version tag (v1.2.3) into a full, latest release; tags with a suffix (v1.2.3-beta.1) stay pre-releases. If anything
+# The workflow builds and tests the tagged commit, attaches the NuGet packages, pushes them to nuget.org and then turns
+# a release with a plain version tag (v1.2.3) into a full, latest release; tags with a suffix (v1.2.3-beta.1) stay pre-releases. If anything
 # fails, the release goes back to draft so nobody uses it; fix the problem and publish it again.
 on:
   release:
@@ -87,6 +87,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # For trusted publishing: lets the job ask GitHub for the token nuget.org checks.
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -103,6 +105,28 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$TAG" artifacts/packages/*.nupkg --clobber --repo "$GITHUB_REPOSITORY"
+      # nuget.org trusts this workflow file by name (trusted publishing): the policy there names the repository and
+      # "release.yml", so renaming this file needs a new policy. GitHub's OIDC token is exchanged for a key that is valid
+      # for about an hour; no API key is stored. NUGET_USER is the nuget.org user name the policy belongs to.
+      # A version on nuget.org can never be replaced, so this comes last, after everything else has worked.
+      - name: Check that the nuget.org user is set
+        env:
+          NUGET_USER: ${{ vars.NUGET_USER }}
+        run: |
+          if [ -z "$NUGET_USER" ]; then
+            echo "::error::The repository variable NUGET_USER is not set. Set it to the nuget.org user name of the trusted publishing policy (Settings, Secrets and variables, Actions, Variables). See docs/development.md."
+            exit 1
+          fi
+      - name: Sign in to nuget.org
+        id: nuget
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_USER }}
+      - name: Push the packages to nuget.org
+        env:
+          NUGET_API_KEY: ${{ steps.nuget.outputs.NUGET_API_KEY }}
+        # Packages already there are skipped, so the workflow can run again for the same tag.
+        run: dotnet nuget push "artifacts/packages/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
       - name: Turn the pre-release into a full release
         # Every published release starts as a pre-release (see the first step); once everything is attached, a tag
         # without a suffix (v1.2.3) becomes a full, latest release. Tags with a suffix (v1.2.3-beta.1) stay pre-releases.
