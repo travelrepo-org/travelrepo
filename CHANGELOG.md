@@ -2,6 +2,16 @@
 
 All notable changes to TravelRepo. Generated from `docs/releases` by `python eng/changelog.py`; do not edit by hand.
 
+## 0.13.0 – 2026-11-16
+
+### Changes
+
+- New API: `TripSearch` is a full-text search over a trip: plans, bookings, costs, places, tasks, packing, notes and files. It ignores case and accents ("Wanaka" finds "Wānaka"), takes each word as the beginning of a word, allows one typo in words of five letters or more, and requires every word. Hits come best first, with the day they belong to and the fields that matched, with ranges to highlight. Note texts are searched only on request; `SearchLabels` adds category names in the client's language. The index is kept per `TripSnapshot`, and `TripSearch.ByDay` groups hits by day, today first during the trip.
+- MCP: `search` finds entities by words with the same engine, so an assistant can answer questions such as "on which day is the temple visit?" without reading the whole trip.
+- New API: `ExpenseCategories.SuggestFromTitle` suggests a category from the title of an expense: the category of an earlier expense with the same title, otherwise what a word says in English or German, such as transport for "Taxifahrt" or food for "Restaurant". Clients offer it; nothing is stored by itself (specification section 34.2).
+- Releases are pushed to nuget.org with trusted publishing, after the packages are attached to the GitHub release. No API key is stored; `docs/development.md` says what to set up.
+- The New Zealand conformance fixture has two places with macrons, Wānaka and Kaikōura.
+
 ## 0.12.0 – 2026-11-13
 
 ### Changes
