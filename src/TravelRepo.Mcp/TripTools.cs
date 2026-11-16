@@ -82,6 +82,34 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         return new JsonObject { ["total"] = list.Length, ["entities"] = new JsonArray(list.Take(Math.Clamp(limit, 1, 1000)).Select(e => (JsonNode)Summary(trip, e)).ToArray()) };
     });
 
+    [McpServerTool(Name = "search", Title = "Search the trip", ReadOnly = true, Idempotent = true, OpenWorld = false)]
+    [Description("Finds plans, bookings, costs, places, tasks, packing items, notes and files by words, best match first, each with its day and the field it was found in. It ignores case and accents (Wanaka finds Wānaka), takes each word as the beginning of a word (temp finds Tempel) and allows one typo in words of five letters or more. Every word must be found in the entity. Use it to answer questions such as \"on which day is the temple visit?\".")]
+    public Task<string> Search(
+        [Description("The words to look for.")] string query,
+        [Description("Optional kinds, comma-separated: plan, booking, cost, place, task, packing, note, file. Default: all.")] string? kinds = null,
+        [Description("Also search the texts of notes, not only titles and fields (default false).")] bool notes = false,
+        [Description("Maximum number of results (default 30).")] int limit = 30,
+        CancellationToken ct = default) => Run(async () =>
+    {
+        var trip = (await repository.ReadAsync(ct)).Trip;
+        HashSet<SearchKind>? only = null;
+        foreach (var name in (kinds ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            (only ??= []).Add(Enum.TryParse<SearchKind>(name, ignoreCase: true, out var kind) && Enum.IsDefined(kind) && !int.TryParse(name, out _) ? kind
+                : throw new McpException("\"" + name + "\" is not a kind. Use plan, booking, cost, place, task, packing, note or file."));
+        var all = TripSearch.Find(trip, query, new SearchOptions { Notes = notes, Kinds = only, Limit = 1000 });
+        var hits = all.Take(Math.Clamp(limit, 1, 200)).Select(hit =>
+        {
+            var result = new JsonObject { ["id"] = hit.Entity.Id.ToString(), ["type"] = hit.Entity.Type, ["kind"] = hit.Kind.ToString().ToLowerInvariant(), ["title"] = hit.Entity.Title };
+            if (hit.Day is { } day) result["day"] = Date(day);
+            if (hit.Entity.Type == "schedule_item" && When(trip, hit.Entity) is { } when) result["when"] = when;
+            result["found_in"] = new JsonArray(hit.Matches.Select(m => (JsonNode)new JsonObject { ["field"] = FieldName(m.Field), ["text"] = m.Text }).ToArray());
+            return (JsonNode)result;
+        }).ToArray();
+        return new JsonObject { ["total"] = all.Count, ["results"] = new JsonArray(hits) };
+    });
+
+    private static string FieldName(SearchField field) => field switch { SearchField.LocalName => "local_name", SearchField.BelongsTo => "belongs_to", _ => field.ToString().ToLowerInvariant() };
+
     [McpServerTool(Name = "get_entity", Title = "Read an entity", ReadOnly = true, Idempotent = true, OpenWorld = false)]
     [Description("Returns all fields of one entity, the text of its notes, its parent and the entities that refer to it.")]
     public Task<string> GetEntity([Description("The entity id.")] string id, CancellationToken ct = default) => Run(async () =>

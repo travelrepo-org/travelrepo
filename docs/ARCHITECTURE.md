@@ -550,6 +550,8 @@ PDF OCR and image OCR are not v1 requirements.
 
 Search results always resolve back to canonical TravelRepo entities/documents.
 
+The search over one trip is `TripSearch` in TravelRepo.Core, so every client and the MCP server match the same way. Its index is in memory, built from a `TripSnapshot` and kept as long as the snapshot is; nothing is stored. Clients do presentation, grouping and navigation.
+
 ## 15. Filesystem safety
 
 All application-generated writes should be atomic where supported.

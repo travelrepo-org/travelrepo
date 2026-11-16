@@ -51,6 +51,33 @@ public sealed class McpServerTests : IDisposable
     }
 
     [Fact]
+    public async Task AssistantFindsTheDayOfAPlanBySearching()
+    {
+        var (repo, _) = await Trip(); var client = await Connect(repo.Root);
+        var place = Entity.Create("place", "Kiyomizu-dera"); place.Data["local_name"] = "清水寺";
+        var temple = Entity.Create("schedule_item", "Tempel am Morgen"); temple.Data["default_place"] = place.Id.ToString(); temple.Data["body"] = "Bring coins for the omikuji.";
+        temple.Data["time"] = new JsonObject { ["precision"] = "exact", ["start"] = new ZonedTime("2027-05-14T09:30:00", "Asia/Tokyo").ToJson(), ["end"] = new ZonedTime("2027-05-14T11:00:00", "Asia/Tokyo").ToJson() };
+        var cost = Entity.Create("expense", "Temple tickets"); cost.Data["amount"] = new JsonObject { ["value"] = "800", ["currency"] = "JPY" }; cost.Data["estimated"] = false;
+        await repo.ApplyAsync(await repo.ReadAsync(), [new EntityEdit(place.Id, place), new EntityEdit(temple.Id, temple), new EntityEdit(cost.Id, cost)]);
+
+        var found = await Call(client, "search", """{"query":"templ"}""");
+        Assert.Equal(2, found["total"]!.GetValue<int>());
+        var plan = found["results"]!.AsArray().Single(r => r!["kind"]!.ToString() == "plan")!;
+        Assert.Equal(temple.Id.ToString(), plan["id"]!.ToString());
+        Assert.Equal("2027-05-14", plan["day"]!.ToString());
+        Assert.StartsWith("2027-05-14 Fri 09:30", plan["when"]!.ToString());
+        Assert.Equal("title", plan["found_in"]![0]!["field"]!.ToString());
+
+        // By the place without its accents and hyphen, limited to plans.
+        var byPlace = await Call(client, "search", """{"query":"kiyomizudera","kinds":"plan"}""");
+        Assert.Equal("place", byPlace["results"]!.AsArray().Single()!["found_in"]![0]!["field"]!.ToString());
+        // Note texts only when asked.
+        Assert.Equal(0, (await Call(client, "search", """{"query":"omikuji"}"""))["total"]!.GetValue<int>());
+        Assert.Equal("notes", (await Call(client, "search", """{"query":"omikuji","notes":true}"""))["results"]![0]!["found_in"]![0]!["field"]!.ToString());
+        Assert.Contains("is not a kind", await Call(client, "search", """{"query":"x","kinds":"hotel"}""", expectError: true));
+    }
+
+    [Fact]
     public async Task AssistantPlansADayThroughValidatedEdits()
     {
         var (repo, git) = await Trip(); var client = await Connect(repo.Root);
