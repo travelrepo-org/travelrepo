@@ -245,11 +245,13 @@ public static class Expenses
         }
         // What was marked as paid is kept even when the split no longer asks for it, so a changed split shows as money owed back.
         var currency = money?.Currency ?? "";
+        var charge = money is { Amount: not 0 } ? ChargeOf(expense) : null;
         foreach (var settled in ReadSettled(expense))
         {
             var index = debts.FindIndex(d => d.From == settled.From && d.To == settled.To);
-            if (index >= 0) debts[index] = debts[index] with { Settled = debts[index].Settled + settled.Value, SettledOn = settled.On ?? debts[index].SettledOn, PaidIn = settled.PaidIn ?? debts[index].PaidIn };
-            else if (issues == SplitIssues.None) debts.Add(new(expense.Id, settled.From, settled.To, currency, 0, settled.Value, settled.On) { PaidIn = settled.PaidIn });
+            var value = PaidBackValue(expense, money, charge, settled, index >= 0 ? debts[index].Amount - debts[index].Settled : 0);
+            if (index >= 0) debts[index] = debts[index] with { Settled = debts[index].Settled + value, SettledOn = settled.On ?? debts[index].SettledOn, PaidIn = settled.PaidIn ?? debts[index].PaidIn };
+            else if (issues == SplitIssues.None && value != 0) debts.Add(new(expense.Id, settled.From, settled.To, currency, 0, value, settled.On) { PaidIn = settled.PaidIn });
         }
         var assigned = method switch { SplitMethod.Equal => money?.Amount ?? 0, _ => parts.Sum(p => p.Value ?? 0) };
         return new(expense, money, method, payers, shares, debts, issues) { Assigned = assigned, People = parts.Select(p => p.Person).ToArray() };
@@ -878,6 +880,22 @@ public static class Expenses
         if (method == SplitMethod.Equal && parts.Count == 0) parts.AddRange(TripPeople.Travelers(trip).Select(p => new Part(p.Id, null)));
         if (parts.Count == 0) issues |= SplitIssues.NoPeople;
         return (method, parts, issues);
+    }
+
+    /// <summary>
+    /// What a paid mark is worth in the expense's currency now. Paid back in the currency a card charged, at the card's
+    /// rate, what counts is what was transferred: its value at the card's rate today. So correcting the price while the
+    /// amount charged stays the same changes nothing that was paid back, and a new amount charged shows exactly what is
+    /// still open or owed back. Otherwise the mark keeps the amount it was made for. <paramref name="owed"/> is what is
+    /// still owed for the debt before this mark; when the transfer covers it exactly in the charged currency, the mark
+    /// covers it exactly too, without a cent lost to rounding.
+    /// </summary>
+    private static decimal PaidBackValue(Entity expense, Money? money, Charge? charge, SettledMark mark, decimal owed)
+    {
+        if (mark.PaidIn is not { Reference: false } paid || charge is null || money is null || charge.Currency != paid.Currency || charge.Value <= 0) return mark.Value;
+        var (owedThere, code, _) = Convert(expense, owed, money.Currency, paid.Currency);
+        if (code == paid.Currency && owedThere == paid.Value) return owed;
+        return Math.Round(paid.Value * money.Amount / charge.Value, Digits(money.Value, money.Currency), MidpointRounding.AwayFromZero);
     }
 
     private static IEnumerable<SettledMark> ReadSettled(Entity expense)

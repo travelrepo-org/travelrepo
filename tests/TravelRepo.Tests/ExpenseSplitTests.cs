@@ -604,4 +604,39 @@ public class ExpenseSplitTests
         Assert.Null(Budgets.ForTrip(trip));
         Assert.Throws<DomainException>(() => Budgets.WithFilters(trip, budget, new BudgetFilters(null, dinner.Id, null)));
     }
+    [Fact]
+    public void CorrectingThePriceOfAPaidExpenseKeepsWhatWasPaidBackInTheChargedCurrency()
+    {
+        // Ana paid 340 NZD for herself and Ben; her card charged 190.40 EUR, and Ben paid back his half in euros.
+        var tour = Expenses.WithSplit(Expense("Hobbiton", "340.00", "NZD", Ana), SplitMethod.Equal, [(Ana.Id, null), (Ben.Id, null)]);
+        tour = Expenses.WithCharge(tour, 190.40m, "EUR", new NodaTime.LocalDate(2026, 11, 10));
+        tour = Expenses.Settle(Trip(tour), tour, Ben.Id, new NodaTime.LocalDate(2026, 11, 12), "EUR");
+        Assert.Equal(95.20m, Expenses.Split(Trip(tour), tour).Debts.Single().PaidIn!.Value);
+        Assert.Empty(Expenses.Balances(Trip(tour), "EUR"));
+
+        // The price is corrected to 400 NZD or 300 NZD, but the card still charged 190.40 EUR: nothing changes for Ben.
+        foreach (var price in new[] { "400.00", "300.00", "333.33" })
+        {
+            var corrected = tour.Copy(); corrected.Data["amount"]!["value"] = price;
+            var trip = Trip(corrected);
+            var debt = Expenses.Split(trip, corrected).Debts.Single();
+            Assert.True(debt.IsSettled, price + ": " + debt);
+            Assert.Empty(Expenses.Balances(trip, "EUR"));
+            Assert.Empty(Expenses.Balances(trip));
+            Assert.Empty(Expenses.Open(trip));
+        }
+
+        // The card charged more as well: Ben owes exactly half the difference, in either currency.
+        var dearer = tour.Copy(); dearer.Data["amount"]!["value"] = "400.00";
+        dearer = Expenses.WithCharge(dearer, 224.00m, "EUR", new NodaTime.LocalDate(2026, 11, 10));
+        var open = Expenses.Split(Trip(dearer), dearer).Debts.Single();
+        Assert.Equal((200m, 170m, 30m), (open.Amount, open.Settled, open.Open));
+        Assert.Equal([new Transfer(Ben.Id, Ana.Id, "EUR", 16.80m)], Expenses.SettleUp(Trip(dearer), "EUR"));
+
+        // Without an amount charged, the paid mark keeps the amount it was made for, as before.
+        var plain = Expenses.WithSplit(Expense("Ferry", "100.00", "NZD", Ana), SplitMethod.Equal, [(Ana.Id, null), (Ben.Id, null)]);
+        plain = Expenses.Settle(Trip(plain), plain, Ben.Id);
+        var raised = plain.Copy(); raised.Data["amount"]!["value"] = "120.00";
+        Assert.Equal(10m, Expenses.Split(Trip(raised), raised).Debts.Single().Open);
+    }
 }
