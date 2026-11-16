@@ -9,7 +9,7 @@ A TravelRepo trip is a folder with `travel.yaml` at its root, one YAML file per 
 
 ## How to make changes
 
-Prefer the TravelRepo MCP tools when they are available (`get_trip`, `get_schedule`, `create_entity`, `update_entity`, ...). They validate every change and write it atomically, so the trip cannot end up half-written or invalid.
+Prefer the TravelRepo MCP tools when they are available (`get_trip`, `get_schedule`, `search`, `create_entity`, `update_entity`, ...). They validate every change and write it atomically, so the trip cannot end up half-written or invalid.
 
 Without the MCP tools, edit the YAML files directly and run `travelrepo validate <trip folder>` afterwards. Exit code 2 means the trip is invalid; fix the reported problems before doing anything else.
 

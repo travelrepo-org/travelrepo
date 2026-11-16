@@ -43,6 +43,59 @@ public static class ExpenseCategories
         return null;
     }
 
+    /// <summary>
+    /// Words in the title of an expense that say what it most likely is, in English and German, compared as the
+    /// search compares words (<see cref="TripSearch.Normalize"/>). Words of up to three letters must be the whole
+    /// word, longer ones may begin it, and those of five letters or more may be anywhere in it, as in "Zugfahrt".
+    /// </summary>
+    private static readonly (string Category, string[] Words)[] TitleWords =
+    [
+        (Transport, ["taxi", "uber", "lyft", "bus", "bahn", "zug", "train", "railway", "flug", "flight", "fahrt", "fahrkarte", "fahrschein", "metro", "subway", "tram", "strassenbahn", "faehre", "fahre", "ferry",
+            "maut", "toll", "tanken", "tankstelle", "benzin", "diesel", "sprit", "fuel", "petrol", "gasoline", "parken", "parking", "parkhaus", "parkplatz", "parkgebuhr", "mietwagen", "rental", "leihwagen", "shuttle", "transfer",
+            "shinkansen", "suica", "pasmo", "airline", "transport", "rikscha", "rickshaw", "tuktuk", "seilbahn", "gondel"]),
+        (Accommodation, ["hotel", "hostel", "airbnb", "unterkunft", "ubernachtung", "ryokan", "apartment", "appartement", "ferienwohnung", "ferienhaus", "camping", "campingplatz", "campsite", "campground", "motel", "pension",
+            "lodge", "accommodation", "zimmer", "room", "resort", "guesthouse", "gasthaus", "gasthof", "herberge", "minshuku", "kurtaxe"]),
+        (Food, ["restaurant", "essen", "abendessen", "mittagessen", "fruhstuck", "breakfast", "lunch", "dinner", "brunch", "cafe", "kaffee", "coffee", "bar", "pub", "bier", "beer", "pizza", "pizzeria", "sushi", "ramen", "burger",
+            "supermarkt", "supermarket", "groceries", "grocery", "lebensmittel", "backerei", "bakery", "snack", "snacks", "eis", "eiscreme", "icecream", "gelato", "drinks", "getranke", "wein", "wine", "imbiss", "doner", "kebab",
+            "izakaya", "food", "meal", "picknick", "picnic", "tee", "tea", "kuchen", "cake", "nudeln", "noodles", "curry", "bistro", "kneipe", "cocktail", "cocktails", "wasser", "water", "konbini", "bento", "streetfood", "mensa", "kantine"]),
+        (Activity, ["museum", "eintritt", "entrance", "admission", "tour", "fuhrung", "kino", "cinema", "theater", "theatre", "konzert", "concert", "zoo", "aquarium", "onsen", "spa", "sauna", "therme", "ski", "skipass",
+            "tauchen", "diving", "schnorcheln", "snorkeling", "snorkelling", "kajak", "kayak", "kanu", "canoe", "wanderung", "hike", "hiking", "bootstour", "cruise", "tempel", "temple", "schrein", "shrine", "schloss", "castle", "burg",
+            "show", "festival", "activity", "aktivitat", "ausflug", "excursion", "bungee", "bungy", "rafting", "surfen", "surfing", "klettern", "climbing", "schwimmbad", "freibad", "karaoke", "galerie", "gallery", "ausstellung",
+            "exhibition", "nationalpark", "aussichtsplattform", "observatory", "massage", "minigolf", "bowling", "freizeitpark", "skydive", "jetboat", "rundflug", "whalewatching"]),
+        (Souvenirs, ["souvenir", "souvenirs", "souvenier", "souveniers", "suvenir", "suvenirs", "suvenier", "suveniers", "mitbringsel", "geschenk", "geschenke", "gift", "gifts", "present", "presents", "andenken", "postkarte", "postkarten",
+            "postcard", "postcards", "magnet", "shopping", "keramik", "ceramics"])
+    ];
+
+    /// <summary>
+    /// The category the title of an expense suggests while it is typed, such as food for "Restaurant" or transport
+    /// for "Taxifahrt": the category of an earlier expense of this trip with the same title, which includes the
+    /// travellers' own categories, otherwise what a word of the title says in English or German. The first word that
+    /// says something counts. Null when nothing does. It is a suggestion for clients to offer, never stored by itself.
+    /// </summary>
+    public static string? SuggestFromTitle(string? title, TripSnapshot? trip = null)
+    {
+        var words = TripSearch.Words(title);
+        if (words.Count == 0) return null;
+        if (trip is not null)
+        {
+            var same = trip.Entities.Values.Where(e => e.Type == "expense" && Stored(e) is not null && TripSearch.Words(e.Title).SequenceEqual(words, StringComparer.Ordinal))
+                .GroupBy(e => Stored(e)!, StringComparer.Ordinal).OrderByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.Ordinal).FirstOrDefault();
+            if (same is not null) return same.Key;
+        }
+        foreach (var word in words)
+        {
+            (string Category, int Length)? best = null;
+            foreach (var (category, keys) in TitleWords)
+                foreach (var key in keys)
+                {
+                    var found = key.Length <= 3 ? word == key : key.Length == 4 ? word.StartsWith(key, StringComparison.Ordinal) : word.Contains(key, StringComparison.Ordinal);
+                    if (found && (best is null || key.Length > best.Value.Length)) best = (category, key.Length);
+                }
+            if (best is { } hit) return hit.Category;
+        }
+        return null;
+    }
+
     /// <summary>The expense category for a kind of plan, or null for meetings and other plans.</summary>
     public static string? FromKind(ScheduleKind kind) => kind switch
     {

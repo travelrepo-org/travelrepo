@@ -1024,6 +1024,8 @@ Lists in `split.parts` and `settled` are entries of people. They merge per perso
 
 An expense may have a `category`. The standard values are `transport`, `accommodation`, `food`, `activity`, `souvenirs` and `other`; clients translate them. Any other value is a category the travellers created, stored as they named it and shown as is. Clients offer the names already used in the trip, so both travellers share them, and treat names that differ only in case as the same.
 
+While an expense is entered, clients may suggest a category from its title, for example from an earlier expense with the same title or from words such as "taxi" or "restaurant". It is only offered: a category is stored when the travellers keep or choose it.
+
 Totals per category may count every expense in full, or only the parts of some people (section 34.1), such as one traveller or a couple.
 
 Without a category, an expense takes one from the plans it belongs to, directly or through a booking: a journey is `transport`, a stay `accommodation`, food `food`, shopping `souvenirs`, and activities, sights, culture, nature, nightlife and free time `activity`. Otherwise it is `other`.

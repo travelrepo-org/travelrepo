@@ -35,6 +35,7 @@ Each server serves exactly one trip folder. Add one entry per trip you want the 
 | `read_guide` | no | The agent guide: entity types, fields, time format, editing rules. |
 | `get_trip` | no | Title, dates, timezone, people, variants, entity counts, problems, unsaved changes. |
 | `list_entities` | no | Entities with id, title and, for schedule items, time and place; filter by type or text. |
+| `search` | no | Full-text search: plans, bookings, costs, places, tasks, packing items, notes and files by words, best match first, each with its day and the fields it was found in. Ignores case and accents, takes words as beginnings and allows one typo in longer words; note texts only on request. |
 | `get_entity` | no | All fields of one entity, its note texts, its parent, its steps for a group, and what refers to it. |
 | `get_schedule` | no | The schedule day by day in the trip timezone, then the unscheduled ideas. |
 | `get_packing_lists` | no | Packing lists with their items: group, quantity, who brings each, who has packed it, done, and what nobody brings yet. Optionally one person's items. |
