@@ -81,12 +81,29 @@ Tests must cover DST transitions, ambiguous local times, invalid local times, an
 
 Agents: read this file again before each task; it changes.
 
-No real travel data ever appears in tests, fixtures, examples, samples, comments, code, documentation, pull requests, reviews, commit messages or release notes. That covers real trips, people, places someone went to, bookings, amounts, card charges and dates.
+No real travel data ever appears in tests, fixtures, samples, examples, screenshots, comments, code, documentation, pull requests, reviews, commit messages or release notes. That covers real trips, people, places someone went to, bookings, amounts, card charges and dates.
 
-- Use the trip to Japan that Jourfold ships as its sample trip ("Spring in Japan", in Jourfold's `src/Jourfold.Application/SampleTrip.cs`): its people (Alex and Sam), its places (Frankfurt, Tokyo, Nikko, Kyoto, Nara and the others it has) and its currencies, EUR and JPY, with USD where a third currency is needed.
-- An edge case that trip does not cover yet is set on the same trip to Japan: another place in Japan, another plan, booking or expense on it, or a USD payment for something on it.
-- When someone describes a problem or a feature with an example from a real trip, an agent translates it into the matching case on the Japan trip before writing anything down. It keeps what matters about the example, such as an odd amount, a rounding case or a time zone change, and replaces the names, places, amounts and dates.
-- The conformance fixtures listed under Testing that are older than this rule (Aachen, New Zealand and the others) stay as they are. New and changed tests and examples follow this rule.
+Examples use only these places: the cities below and the places in and around them, such as their stations, airports, hotels, sights and day trips close by.
+
+| Country | Cities | Time zone |
+| --- | --- | --- |
+| Germany | Hamburg, Berlin, Frankfurt | Europe/Berlin |
+| France | Paris, Lyon, Nice | Europe/Paris |
+| Japan | Tokyo, Kyoto, Osaka, Nikko, Nara | Asia/Tokyo |
+| New Zealand | Auckland, Christchurch, Queenstown, Picton, Wellington | Pacific/Auckland |
+| Canada | Montreal, Toronto, Ottawa | America/Toronto |
+| Canada | Vancouver | America/Vancouver |
+| Canada | St. John's | America/St_Johns |
+
+Together they cover the cases that need a place: daylight saving time in Germany, France and Canada, the opposite season in New Zealand and none in Japan, with their ambiguous and invalid local times; the date line between New Zealand or Japan and Canada; several time zones in one country (Canada); an offset of half an hour (St. John's, UTC−3:30); and journeys by plane, train, car and ferry (Picton–Wellington for ferries). UTC is fine where no place is meant.
+
+Currencies are EUR, JPY (no minor unit), NZD, CAD and USD (for example a booking paid online in dollars). KWD is used only where three decimals are needed, such as rounding tests.
+
+People are made up: the sample trip's Alex and Sam, or other first names that belong to nobody in particular. Never a real person, account or e-mail address; e-mail addresses use `example.com`.
+
+- The default example is the sample trip "Spring in Japan" (Jourfold's `src/Jourfold.Application/SampleTrip.cs`): Alex and Sam fly from Frankfurt to Tokyo and travel on to Nikko, Kyoto, Nara and Osaka, paying in EUR and JPY. An edge case it does not cover is set on that trip where it fits, otherwise in the places above.
+- When someone describes a problem or a feature with an example from a real trip, an agent translates it into the matching case in the places above before writing anything down. It keeps what matters about the example, such as an odd amount, a rounding case or a time zone change, and replaces the names, places, amounts and dates.
+- This applies to existing tests, fixtures and documentation too: anything outside these places, currencies and people is moved into them when it is touched.
 
 ## Testing
 
@@ -95,7 +112,7 @@ The conformance suite is part of the product.
 Include fixtures for:
 - minimal repositories,
 - Tokyo,
-- Aachen,
+- Hamburg,
 - New Zealand,
 - flexible time,
 - nested items,
