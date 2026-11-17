@@ -95,11 +95,11 @@ Examples use only these places: the cities below and the places in and around th
 | Canada | Vancouver | America/Vancouver |
 | Canada | St. John's | America/St_Johns |
 
-Together they cover the cases that need a place: daylight saving time in Germany, France and Canada, the opposite season in New Zealand and none in Japan, with their ambiguous and invalid local times; the date line between New Zealand or Japan and Canada; several time zones in one country (Canada); an offset of half an hour (St. John's, UTC−3:30); and journeys by plane, train, car and ferry (Picton–Wellington for ferries). UTC is fine where no place is meant.
+Together they cover the cases that need a place: daylight saving time in Germany, France and Canada, the opposite season in New Zealand and none in Japan, with their ambiguous and invalid local times; the date line between New Zealand or Japan and Canada; several time zones in one country (Canada); an offset of half an hour (St. John's, UTC−3:30); and journeys by plane, train, car and ferry (Picton–Wellington for ferries). UTC, or an offset zone such as `Etc/GMT+3`, is fine where no place is meant, and so is a point that is not a destination, such as one near the pole for the midnight sun.
 
-Currencies are EUR, JPY (no minor unit), NZD, CAD and USD (for example a booking paid online in dollars). KWD is used only where three decimals are needed, such as rounding tests.
+Currencies are EUR, JPY (no minor unit), NZD, CAD and USD (for example a booking paid online in dollars). KWD is used only where three decimals are needed, such as rounding tests. A test that needs more currencies than these, such as one that fills a list of recent currencies, uses ISO codes that belong to no country: XTS (reserved for testing), XXX, XAU and XAG.
 
-People are made up: the sample trip's Alex and Sam, or other first names that belong to nobody in particular. Never a real person, account or e-mail address; e-mail addresses use `example.com`.
+People are made up: the sample trip's Alex and Sam, or other first names that belong to nobody in particular. Never a real person, account or e-mail address; e-mail addresses and web addresses use the reserved example domains (`example.com`, `example.org`, `.example`, `.invalid`).
 
 - The default example is the sample trip "Spring in Japan" (Jourfold's `src/Jourfold.Application/SampleTrip.cs`): Alex and Sam fly from Frankfurt to Tokyo and travel on to Nikko, Kyoto, Nara and Osaka, paying in EUR and JPY. An edge case it does not cover is set on that trip where it fits, otherwise in the places above.
 - When someone describes a problem or a feature with an example from a real trip, an agent translates it into the matching case in the places above before writing anything down. It keeps what matters about the example, such as an odd amount, a rounding case or a time zone change, and replaces the names, places, amounts and dates.
