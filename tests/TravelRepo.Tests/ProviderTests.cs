@@ -30,14 +30,14 @@ public class ProviderTests
         var provider = new GitHubProvider(new HttpClient(new Handler(r =>
         {
             Assert.Equal("/user", r.RequestUri!.AbsolutePath); Assert.StartsWith("TravelRepo/" + TravelRepoInfo.Version, r.Headers.UserAgent.ToString());
-            return Task.FromResult(status == HttpStatusCode.OK ? Json(new { login = "alex", id = 1234567, name = "Alex Example", email = "alex@example.invalid", avatar_url = "https://avatars.githubusercontent.com/u/1", html_url = "https://github.com/alex" }) : new HttpResponseMessage(status));
+            return Task.FromResult(status == HttpStatusCode.OK ? Json(new { login = "alex-travels", id = 1234567, name = "Alex Example", email = "alex@example.invalid", avatar_url = "https://avatars.githubusercontent.com/u/1", html_url = "https://github.com/alex-travels" }) : new HttpResponseMessage(status));
         })), secrets, "test-client");
         Assert.Null(await provider.AccountAsync());
         secrets.Values["github.user-token"] = "token";
         var account = await provider.AccountAsync();
-        Assert.Equal(new ProviderAccount("alex", "Alex Example", new Uri("https://avatars.githubusercontent.com/u/1"), new Uri("https://github.com/alex")) { Id = 1234567, PublicEmail = "alex@example.invalid" }, account);
-        Assert.Equal("1234567+alex@users.noreply.github.com", GitHubProvider.NoReplyEmail(account!.Login, account.Id));
-        Assert.Equal("alex@users.noreply.github.com", GitHubProvider.NoReplyEmail("alex", null));
+        Assert.Equal(new ProviderAccount("alex-travels", "Alex Example", new Uri("https://avatars.githubusercontent.com/u/1"), new Uri("https://github.com/alex-travels")) { Id = 1234567, PublicEmail = "alex@example.invalid" }, account);
+        Assert.Equal("1234567+alex-travels@users.noreply.github.com", GitHubProvider.NoReplyEmail(account!.Login, account.Id));
+        Assert.Equal("alex-travels@users.noreply.github.com", GitHubProvider.NoReplyEmail("alex-travels", null));
         status = HttpStatusCode.Unauthorized; Assert.Null(await provider.AccountAsync());
         status = HttpStatusCode.InternalServerError; await Assert.ThrowsAsync<DomainException>(() => provider.AccountAsync());
         await provider.SignOutAsync(); Assert.False(await provider.IsConnectedAsync()); Assert.Empty(secrets.Values);
@@ -49,9 +49,9 @@ public class ProviderTests
         {
             requests.Add(r.RequestUri!.AbsolutePath); Assert.Equal("Bearer", r.Headers.Authorization!.Scheme);
             if (r.Method == HttpMethod.Post) { var body = JsonNode.Parse(await r.Content!.ReadAsStringAsync())!; Assert.True((bool)body["private"]!); Assert.False((bool)body["auto_init"]!); }
-            return Json(new { full_name = "alex/trip", clone_url = "https://github.com/alex/trip.git", html_url = "https://github.com/alex/trip", @private = r.Method == HttpMethod.Post });
+            return Json(new { full_name = "alex-travels/trip", clone_url = "https://github.com/alex-travels/trip.git", html_url = "https://github.com/alex-travels/trip", @private = r.Method == HttpMethod.Post });
         });
-        var provider = new GitHubProvider(new HttpClient(handler), new Secrets(), "test-client"); Assert.True((await provider.CreateAsync("trip")).IsPrivate); Assert.False((await provider.InspectAsync("alex/trip")).IsPrivate); await provider.InviteAsync("alex/trip", "sam"); Assert.Contains("/repos/alex/trip/collaborators/sam", requests);
+        var provider = new GitHubProvider(new HttpClient(handler), new Secrets(), "test-client"); Assert.True((await provider.CreateAsync("trip")).IsPrivate); Assert.False((await provider.InspectAsync("alex-travels/trip")).IsPrivate); await provider.InviteAsync("alex-travels/trip", "sam-travels"); Assert.Contains("/repos/alex-travels/trip/collaborators/sam-travels", requests);
     }
     [Fact]
     public async Task DiscoveryInspectsGrantedInstallationManifest()
@@ -62,17 +62,17 @@ public class ProviderTests
             return Task.FromResult(path switch
             {
                 "/user/installations" => Json(new { installations = new[] { new { id = 123 } } }),
-                "/user/installations/123/repositories" => Json(new { repositories = new[] { new { full_name = "alex/trip", clone_url = "https://github.com/alex/trip.git", html_url = "https://github.com/alex/trip", @private = true } } }),
+                "/user/installations/123/repositories" => Json(new { repositories = new[] { new { full_name = "alex-travels/trip", clone_url = "https://github.com/alex-travels/trip.git", html_url = "https://github.com/alex-travels/trip", @private = true } } }),
                 _ => Json(new { content = Convert.ToBase64String(Encoding.UTF8.GetBytes(yaml)) })
             });
         })), new Secrets(), "client");
-        Assert.Single(await provider.DiscoverAsync()); Assert.Contains("/repos/alex/trip/contents/travel.yaml", paths);
+        Assert.Single(await provider.DiscoverAsync()); Assert.Contains("/repos/alex-travels/trip/contents/travel.yaml", paths);
     }
     [Fact]
     public async Task DiscoveryReportsProgressAndSkipsEmptyRepositories()
     {
         var yaml = YamlCodec.Write(Entity.CreateTrip("Trip")); var paths = new System.Collections.Concurrent.ConcurrentBag<string>();
-        object Repo(string name, int size) => new { full_name = "alex/" + name, clone_url = "https://github.com/alex/" + name + ".git", html_url = "https://github.com/alex/" + name, @private = true, size };
+        object Repo(string name, int size) => new { full_name = "alex-travels/" + name, clone_url = "https://github.com/alex-travels/" + name + ".git", html_url = "https://github.com/alex-travels/" + name, @private = true, size };
         var provider = new GitHubProvider(new HttpClient(new Handler(r =>
         {
             var path = r.RequestUri!.AbsolutePath; paths.Add(path);
@@ -81,14 +81,14 @@ public class ProviderTests
                 "/user/installations" => Json(new { installations = new[] { new { id = 1 }, new { id = 2 } } }),
                 "/user/installations/1/repositories" => Json(new { repositories = new[] { Repo("trip", 12), Repo("empty", 0), Repo("code", 40) } }),
                 "/user/installations/2/repositories" => Json(new { repositories = new[] { Repo("trip", 12), Repo("later", 8) } }),
-                "/repos/alex/code/contents/travel.yaml" => new HttpResponseMessage(HttpStatusCode.NotFound),
+                "/repos/alex-travels/code/contents/travel.yaml" => new HttpResponseMessage(HttpStatusCode.NotFound),
                 _ => Json(new { content = Convert.ToBase64String(Encoding.UTF8.GetBytes(yaml)) })
             });
         })), new Secrets(), "client");
         var reports = new System.Collections.Concurrent.ConcurrentQueue<DiscoveryProgress>();
         var trips = await provider.DiscoverAsync(new Listener(reports.Enqueue));
-        Assert.Equal(["alex/trip", "alex/later"], trips.Select(t => t.FullName));
-        Assert.DoesNotContain("/repos/alex/empty/contents/travel.yaml", paths);
+        Assert.Equal(["alex-travels/trip", "alex-travels/later"], trips.Select(t => t.FullName));
+        Assert.DoesNotContain("/repos/alex-travels/empty/contents/travel.yaml", paths);
         Assert.All(reports, p => Assert.Equal(4, p.Total));
         Assert.Equal(4, reports.Max(p => p.Checked));
     }
