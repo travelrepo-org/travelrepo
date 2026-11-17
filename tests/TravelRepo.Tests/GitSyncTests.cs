@@ -153,14 +153,14 @@ public sealed class GitSyncTests : IDisposable
     {
         var (repo, git, _, _) = await TwoClones();
         var lockFile = Path.Combine(repo.Root, ".git", "index.lock"); await File.WriteAllTextAsync(lockFile, "");
-        var item = Entity.Create("place", "Rotorua"); await repo.ApplyAsync(await repo.ReadAsync(), [new(item.Id, item)]);
-        var error = await Assert.ThrowsAsync<GitCommandException>(() => git.CreateVersionAsync("Add Rotorua"));
+        var item = Entity.Create("place", "Queenstown"); await repo.ApplyAsync(await repo.ReadAsync(), [new(item.Id, item)]);
+        var error = await Assert.ThrowsAsync<GitCommandException>(() => git.CreateVersionAsync("Add Queenstown"));
         Assert.Equal(GitFailure.Locked, error.Failure);
         Assert.Equal(".git/index.lock", (await git.DiagnoseAsync("origin")).StaleLock);
         Assert.False(await git.RemoveStaleLockAsync(TimeSpan.FromMinutes(5)));
         File.SetLastWriteTimeUtc(lockFile, DateTime.UtcNow.AddMinutes(-10));
         Assert.True(await git.RemoveStaleLockAsync(TimeSpan.FromMinutes(5)));
-        await git.CreateVersionAsync("Add Rotorua");
+        await git.CreateVersionAsync("Add Queenstown");
     }
 
     [Fact]

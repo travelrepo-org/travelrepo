@@ -49,7 +49,7 @@ public class ReleaseIntegrityTests
     public void GeneratedInstantRoundTripsAcrossTimezonesAndTransitions()
     {
         var random = new Random(2041); var epoch = NodaTime.Instant.FromUtc(2020, 1, 1, 0, 0);
-        foreach (var zone in new[] { "Europe/Berlin", "Asia/Tokyo", "Pacific/Auckland", "America/New_York" })
+        foreach (var zone in new[] { "Europe/Berlin", "Asia/Tokyo", "Pacific/Auckland", "America/Toronto", "America/St_Johns" })
             for (var i = 0; i < 250; i++) { var instant = epoch + NodaTime.Duration.FromSeconds(random.NextInt64(0, 20L * 365 * 86400)); Assert.Equal(instant, ZonedTime.At(instant, zone).ToInstant()); }
     }
     [Fact]

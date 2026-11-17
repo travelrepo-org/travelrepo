@@ -51,7 +51,7 @@ public class ProviderTests
             if (r.Method == HttpMethod.Post) { var body = JsonNode.Parse(await r.Content!.ReadAsStringAsync())!; Assert.True((bool)body["private"]!); Assert.False((bool)body["auto_init"]!); }
             return Json(new { full_name = "alex/trip", clone_url = "https://github.com/alex/trip.git", html_url = "https://github.com/alex/trip", @private = r.Method == HttpMethod.Post });
         });
-        var provider = new GitHubProvider(new HttpClient(handler), new Secrets(), "test-client"); Assert.True((await provider.CreateAsync("trip")).IsPrivate); Assert.False((await provider.InspectAsync("alex/trip")).IsPrivate); await provider.InviteAsync("alex/trip", "carla"); Assert.Contains("/repos/alex/trip/collaborators/carla", requests);
+        var provider = new GitHubProvider(new HttpClient(handler), new Secrets(), "test-client"); Assert.True((await provider.CreateAsync("trip")).IsPrivate); Assert.False((await provider.InspectAsync("alex/trip")).IsPrivate); await provider.InviteAsync("alex/trip", "sam"); Assert.Contains("/repos/alex/trip/collaborators/sam", requests);
     }
     [Fact]
     public async Task DiscoveryInspectsGrantedInstallationManifest()

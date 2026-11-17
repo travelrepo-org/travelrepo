@@ -98,7 +98,7 @@ public sealed record SearchDay(LocalDate? Day, IReadOnlyList<SearchHit> Hits);
 /// Full-text search over a trip (plans, bookings, costs, places, tasks, packing, notes and files). It reads the
 /// content as written and never changes it.
 /// <para>
-/// Matching ignores case and accents ("Wanaka" finds "Wānaka"), takes each word as the beginning of a word ("temp"
+/// Matching ignores case and accents ("Otautahi" finds "Ōtautahi"), takes each word as the beginning of a word ("temp"
 /// finds "Tempel") and allows one typo in words of five letters or more ("Templ" finds "Tempel"). Every word of the
 /// query must be found somewhere in the entity. Hits are ordered by relevance: the title counts most, then places and
 /// numbers, then other fields, then notes.

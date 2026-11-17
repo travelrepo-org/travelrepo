@@ -12,7 +12,7 @@ public sealed class LineEndingTests : IDisposable
     private readonly IGitBackend backend = TestGit.Backend();
     public void Dispose() => TestFiles.Delete(root);
 
-    private const string Mail = "From: hotel@example.invalid\r\nSubject: Booking Pinewood Lodge\r\n\r\nConfirmed for two nights in Wanaka.\r\n";
+    private const string Mail = "From: hotel@example.invalid\r\nSubject: Booking Pinewood Lodge\r\n\r\nConfirmed for two nights in Queenstown.\r\n";
 
     private async Task<(TravelRepository, GitRepository)> Trip()
     {
@@ -62,8 +62,8 @@ public sealed class LineEndingTests : IDisposable
         Assert.NotEmpty(await ErrorsOfACopy(git));
         TestFiles.Delete(Path.Combine(root, "copy")); TestFiles.Delete(Path.Combine(root, "remote.git")); RawGit(repo.Root, "remote", "remove", "origin");
 
-        var item = Entity.Create("schedule_item", "Wanaka"); await repo.ApplyAsync(await repo.ReadAsync(), [new(item.Id, item)]);
-        await git.CreateVersionAsync("Add Wanaka");
+        var item = Entity.Create("schedule_item", "Queenstown"); await repo.ApplyAsync(await repo.ReadAsync(), [new(item.Id, item)]);
+        await git.CreateVersionAsync("Add Queenstown");
         Assert.Contains(GitRepository.AttributesRule, await File.ReadAllLinesAsync(Path.Combine(repo.Root, ".gitattributes")));
         Assert.Empty(await git.StatusAsync());
         Assert.Empty(await ErrorsOfACopy(git));

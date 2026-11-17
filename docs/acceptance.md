@@ -725,7 +725,7 @@ A block may have:
 Participant-lane mode:
 - uses one lane per person,
 - may include Unassigned,
-- never creates permanent combination lanes such as `Alex + Carla`,
+- never creates permanent combination lanes such as `Alex + Sam`,
 - shared items remain one underlying entity.
 
 
@@ -1397,7 +1397,7 @@ MUST
 Repository includes sample TravelRepos covering at least:
 - minimal trip,
 - Tokyo timezone flight,
-- Aachen local planning,
+- Hamburg local planning,
 - New Zealand multi-stop trip,
 - nested roadtrip,
 - multiple people,

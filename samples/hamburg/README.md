@@ -1,3 +1,3 @@
-# Aachen weekend
+# Hamburg weekend
 
 Conformance fixture. Initialize with Git before opening as a working trip.

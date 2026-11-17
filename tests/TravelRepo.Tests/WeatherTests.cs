@@ -139,7 +139,8 @@ public sealed class WeatherTests : IDisposable
         (rise, set) = Sun.Times(new GeoPoint(35.7, 139.75), new LocalDate(2026, 10, 19), tokyo); // as Open-Meteo gives it
         Assert.InRange((rise!.Value.InZone(tokyo).TimeOfDay - new LocalTime(5, 50)).ToDuration().TotalMinutes, -3, 3);
         Assert.InRange((set!.Value.InZone(tokyo).TimeOfDay - new LocalTime(17, 1)).ToDuration().TotalMinutes, -3, 3);
-        Assert.Equal((null, null), Sun.Times(new GeoPoint(69.65, 18.96), new LocalDate(2026, 6, 21), DateTimeZoneProviders.Tzdb["Europe/Oslo"]));
+        // Near the pole in June the sun does not set. A point, not a place anyone travels to, so in UTC.
+        Assert.Equal((null, null), Sun.Times(new GeoPoint(89.0, 0.0), new LocalDate(2026, 6, 21), DateTimeZone.Utc));
     }
 
     // Services ------------------------------------------------------------------------------------------------------
@@ -337,14 +338,14 @@ public sealed class WeatherTests : IDisposable
     [Fact]
     public async Task TheChosenServiceFallsBackToOpenMeteoWhereItHasNoForecast()
     {
-        var tokyo = Place("Tokyo", 35.68, 139.77); var honolulu = Place("Honolulu", 21.307, -157.858);
+        var tokyo = Place("Tokyo", 35.68, 139.77); var vancouver = Place("Vancouver", 49.28, -123.12);
         var walk = Item("Park walk", "2026-11-11T09:00:00", "2026-11-11T11:00:00", tokyo, "nature");
-        var beach = Item("Waikiki beach", "2026-11-11T12:00:00", "2026-11-11T14:00:00", honolulu, "nature");
-        var tenDays = Item("Hike in ten days", "2026-11-20T09:00:00", "2026-11-20T12:00:00", honolulu, "nature");
+        var beach = Item("Stanley Park seawall", "2026-11-11T12:00:00", "2026-11-11T14:00:00", vancouver, "nature");
+        var tenDays = Item("Hike in ten days", "2026-11-20T09:00:00", "2026-11-20T12:00:00", vancouver, "nature");
         var openMeteo = new FakeService("open-meteo", 16); var nws = new FakeService("nws", 6, p => p.Longitude < 0);
         var clock = new Clock(Now);
         var service = new WeatherService([openMeteo, nws], null, new WeatherCache(cacheRoot), "nws", clock);
-        var weather = await service.UpdateAsync(Trip(tokyo, honolulu, walk, beach, tenDays));
+        var weather = await service.UpdateAsync(Trip(tokyo, vancouver, walk, beach, tenDays));
         Assert.Equal("nws", weather.Items[beach.Id].Outlooks[0].Provider);
         Assert.Equal("open-meteo", weather.Items[walk.Id].Outlooks[0].Provider);
         // Beyond the chosen service's six days, Open-Meteo's trend.
@@ -353,7 +354,7 @@ public sealed class WeatherTests : IDisposable
 
         // When the chosen service fails, Open-Meteo steps in and the problem is reported.
         clock.Now = Now + Duration.FromHours(3); nws.Clock = clock; openMeteo.Clock = clock; nws.Failure = new DomainException("weather.unavailable", "down");
-        weather = await service.UpdateAsync(Trip(tokyo, honolulu, walk, beach, tenDays));
+        weather = await service.UpdateAsync(Trip(tokyo, vancouver, walk, beach, tenDays));
         Assert.Equal("weather.unavailable", Assert.Single(weather.Problems).Code);
         Assert.Equal("open-meteo", weather.Items[beach.Id].Outlooks[0].Provider);
     }
@@ -385,12 +386,12 @@ public sealed class WeatherTests : IDisposable
     [Fact]
     public async Task FreshWeatherOnRequestWaitsWhenTheServiceSetsTheTime()
     {
-        var oslo = Place("Oslo", 59.91, 10.75); var walk = Item("Fjord walk", "2026-11-11T09:00:00", "2026-11-11T11:00:00", oslo, "nature");
+        var hamburg = Place("Hamburg", 53.55, 9.99); var walk = Item("Walk along the Elbe", "2026-11-11T09:00:00", "2026-11-11T11:00:00", hamburg, "nature");
         var clock = new Clock(Now);
         var openMeteo = new FakeService("open-meteo", 16) { Clock = clock };
         var met = new FakeService("met-norway", 9) { Clock = clock, ServiceSetsExpiry = true, Lifetime = Duration.FromMinutes(45) };
         var service = new WeatherService([openMeteo, met], null, new WeatherCache(cacheRoot), "met-norway", clock);
-        var trip = Trip(oslo, walk);
+        var trip = Trip(hamburg, walk);
         await service.UpdateAsync(trip); Assert.Equal(1, met.Calls);
         // Before the time the service gave, even a request does not ask it again.
         clock.Now = Now + Duration.FromMinutes(30);

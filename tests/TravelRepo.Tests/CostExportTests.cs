@@ -222,17 +222,17 @@ public class CostExportTests
         budget.Data["amount"] = new JsonObject { ["value"] = "1000.00", ["currency"] = "EUR" };
         var dinner = Expense("Dinner", "90.00", "EUR", Ana, "food");
         var trip = Trip(budget, dinner);
-        trip = trip with { Manifest = TripCurrency.With(trip.Manifest, "CHF") };
-        // Not a budget of zero in francs, but the euros it was set in.
+        trip = trip with { Manifest = TripCurrency.With(trip.Manifest, "CAD") };
+        // Not a budget of zero in Canadian dollars, but the euros it was set in.
         var status = Budgets.ForTrip(trip)!;
         Assert.Equal(("EUR", 1000m, 90m), (status.Currency, status.Amount, status.Paid.Total));
 
-        // With rates, the travellers can convert it; only then it counts in francs.
-        var rates = new ExchangeRates(new DateOnly(2027, 2, 10), new Dictionary<string, decimal> { ["CHF"] = 0.94m });
-        var (converted, before, after) = Assert.Single(Budgets.ConvertTo(trip, "CHF", rates));
-        Assert.Equal(("1000.00", "EUR", "940.00", "CHF"), (before.Value, before.Currency, after.Value, after.Currency));
+        // With rates, the travellers can convert it; only then it counts in Canadian dollars.
+        var rates = new ExchangeRates(new DateOnly(2027, 2, 10), new Dictionary<string, decimal> { ["CAD"] = 1.52m });
+        var (converted, before, after) = Assert.Single(Budgets.ConvertTo(trip, "CAD", rates));
+        Assert.Equal(("1000.00", "EUR", "1520.00", "CAD"), (before.Value, before.Currency, after.Value, after.Currency));
         Assert.Equal(budget.Id, converted.Id);
         Assert.Empty(SchemaValidation.Validate(converted));
-        Assert.Empty(Budgets.ConvertTo(trip, "CHF", null));
+        Assert.Empty(Budgets.ConvertTo(trip, "CAD", null));
     }
 }
