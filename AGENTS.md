@@ -84,7 +84,7 @@ The conformance suite is part of the product.
 Include fixtures for:
 - minimal repositories,
 - Tokyo,
-- Aachen,
+- Hamburg,
 - New Zealand,
 - flexible time,
 - nested items,

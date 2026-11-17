@@ -18,6 +18,6 @@ public class ConformanceTests
     {
         async Task<TripSnapshot> Read(string name) => (await new TravelRepository(Path.Combine(Samples(), "merge-scenarios", name)).ReadAsync()).Trip;
         var b = await Read("base"); var o = await Read("current"); var t = await Read("incoming"); var plan = SemanticMerge.Plan(b, o, t); var conflict = Assert.Single(plan.Conflicts); Assert.Equal("/display_name", conflict.Path);
-        var resolved = SemanticMerge.Plan(b, o, t, new Dictionary<string, System.Text.Json.Nodes.JsonNode?> { [conflict.Entity + conflict.Path] = conflict.Incoming }); Assert.True(resolved.CanApply); Assert.Equal("Carla", Assert.Single(resolved.Result.Entities.Values).Title);
+        var resolved = SemanticMerge.Plan(b, o, t, new Dictionary<string, System.Text.Json.Nodes.JsonNode?> { [conflict.Entity + conflict.Path] = conflict.Incoming }); Assert.True(resolved.CanApply); Assert.Equal("Kim", Assert.Single(resolved.Result.Entities.Values).Title);
     }
 }

@@ -17,7 +17,7 @@ public class DeletionTests
         var manifest = Entity.CreateTrip("New Zealand");
         var sam = Entity.Create("person", "Sam");
         var lodge = Entity.Create("place", "Aroha Lodge");
-        var stay = Entity.Create("schedule_item", "Night in Rotorua");
+        var stay = Entity.Create("schedule_item", "Night in Queenstown");
         stay.Data["default_place"] = lodge.Id.ToString();
         stay.Data["components"]!["accommodation"] = new JsonObject { ["place"] = lodge.Id.ToString(), ["rooms"] = new JsonArray("Loft") };
         var booking = Entity.Create("booking", "Booking 4711"); booking.Data["items"] = new JsonArray(stay.Id.ToString());

@@ -83,7 +83,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
     });
 
     [McpServerTool(Name = "search", Title = "Search the trip", ReadOnly = true, Idempotent = true, OpenWorld = false)]
-    [Description("Finds plans, bookings, costs, places, tasks, packing items, notes and files by words, best match first, each with its day and the field it was found in. It ignores case and accents (Wanaka finds Wānaka), takes each word as the beginning of a word (temp finds Tempel) and allows one typo in words of five letters or more. Every word must be found in the entity. Use it to answer questions such as \"on which day is the temple visit?\".")]
+    [Description("Finds plans, bookings, costs, places, tasks, packing items, notes and files by words, best match first, each with its day and the field it was found in. It ignores case and accents (Otautahi finds Ōtautahi), takes each word as the beginning of a word (temp finds Tempel) and allows one typo in words of five letters or more. Every word must be found in the entity. Use it to answer questions such as \"on which day is the temple visit?\".")]
     public Task<string> Search(
         [Description("The words to look for.")] string query,
         [Description("Optional kinds, comma-separated: plan, booking, cost, place, task, packing, note, file. Default: all.")] string? kinds = null,

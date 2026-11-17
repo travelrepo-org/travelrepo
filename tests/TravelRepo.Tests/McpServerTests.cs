@@ -304,15 +304,15 @@ public sealed class McpServerTests : IDisposable
     {
         var (repo, _) = await Trip(); var client = await Connect(repo.Root);
         Entity Place(string name, double lat, double lon) { var p = Entity.Create("place", name); p.Data["location"] = new JsonObject { ["latitude"] = lat, ["longitude"] = lon }; return p; }
-        var home = Place("Home airport", 50.03, 8.57); var hub = Place("Hub airport", 37.46, 126.44); var far = Place("Destination airport", 34.43, 135.23);
-        var first = Journey("First flight", home, hub, "2027-03-01T13:00:00", "Europe/Berlin", "2027-03-02T07:00:00", "Asia/Seoul");
-        var second = Journey("Second flight", hub, far, "2027-03-02T09:30:00", "Asia/Seoul", "2027-03-02T11:30:00", "Asia/Tokyo");
+        var home = Place("Frankfurt Airport", 50.03, 8.57); var hub = Place("Haneda Airport", 35.55, 139.78); var far = Place("Kansai Airport", 34.43, 135.23);
+        var first = Journey("First flight", home, hub, "2027-03-01T13:00:00", "Europe/Berlin", "2027-03-02T07:00:00", "Asia/Tokyo");
+        var second = Journey("Second flight", hub, far, "2027-03-02T09:30:00", "Asia/Tokyo", "2027-03-02T11:30:00", "Asia/Tokyo");
         var tour = Entity.Create("schedule_item", "Day tour"); var temple = Entity.Create("schedule_item", "Temple");
         var booking = Entity.Create("booking", "Flights");
         await repo.ApplyAsync(await repo.ReadAsync(), new[] { home, hub, far, first, second, tour, temple, booking }.Select(e => new EntityEdit(e.Id, e)).ToArray());
 
         var connection = (await Call(client, "list_connections"))["connections"]![0]!;
-        Assert.Equal(("First flight", "Second flight", "Hub airport", 150L), (connection["arriving"]!["title"]!.ToString(), connection["departing"]!["title"]!.ToString(), connection["place"]!.ToString(), connection["layover_minutes"]!.GetValue<long>()));
+        Assert.Equal(("First flight", "Second flight", "Haneda Airport", 150L), (connection["arriving"]!["title"]!.ToString(), connection["departing"]!["title"]!.ToString(), connection["place"]!.ToString(), connection["layover_minutes"]!.GetValue<long>()));
         Assert.Equal("2 h 30 min", connection["layover"]!.ToString());
 
         var linked = await Call(client, "link_booking", "{\"booking\":\"" + booking.Id + "\",\"items\":[\"" + first.Id + "\",\"" + second.Id + "\"]}");
@@ -395,11 +395,11 @@ public sealed class McpServerTests : IDisposable
         var client = await Connect(repo.Root);
         var ana = Entity.Create("person", "Ana");
         await repo.ApplyAsync(await repo.ReadAsync(), [new(ana.Id, ana)]);
-        await Call(client, "set_trip_currency", """{"currency":"chf"}""");
+        await Call(client, "set_trip_currency", """{"currency":"cad"}""");
         var ramen = (await Call(client, "add_expense", """{"title":"Ramen","amount":"3600","currency":"JPY","paid_by":["Ana"]}"""))["id"]!.ToString();
 
         var charged = await Call(client, "set_charged", "{\"expense\":\"" + ramen + "\",\"amount\":\"21,10\"}");
-        Assert.Equal("CHF", charged["converted"]!["currency"]!.ToString());
+        Assert.Equal("CAD", charged["converted"]!["currency"]!.ToString());
         Assert.Equal("21.10", charged["converted"]!["value"]!.ToString());
 
         // Another currency only when it is named.
