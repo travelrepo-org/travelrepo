@@ -77,6 +77,17 @@ Use Noda Time abstractions for travel-time semantics.
 
 Tests must cover DST transitions, ambiguous local times, invalid local times, and multi-timezone journeys.
 
+## Example data
+
+Agents: read this file again before each task; it changes.
+
+No real travel data ever appears in tests, fixtures, examples, samples, comments, code, documentation, pull requests, reviews, commit messages or release notes. That covers real trips, people, places someone went to, bookings, amounts, card charges and dates.
+
+- Use the trip to Japan that Jourfold ships as its sample trip ("Spring in Japan", in Jourfold's `src/Jourfold.Application/SampleTrip.cs`): its people (Alex and Sam), its places (Frankfurt, Tokyo, Nikko, Kyoto, Nara and the others it has) and its currencies, EUR and JPY, with USD where a third currency is needed.
+- An edge case that trip does not cover yet is set on the same trip to Japan: another place in Japan, another plan, booking or expense on it, or a USD payment for something on it.
+- When someone describes a problem or a feature with an example from a real trip, an agent translates it into the matching case on the Japan trip before writing anything down. It keeps what matters about the example, such as an odd amount, a rounding case or a time zone change, and replaces the names, places, amounts and dates.
+- The conformance fixtures listed under Testing that are older than this rule (Aachen, New Zealand and the others) stay as they are. New and changed tests and examples follow this rule.
+
 ## Testing
 
 The conformance suite is part of the product.
