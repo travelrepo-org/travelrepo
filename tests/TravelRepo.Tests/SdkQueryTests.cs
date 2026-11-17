@@ -33,10 +33,10 @@ public sealed class SdkQueryTests : IDisposable
     [Fact]
     public void WriterUsesPlainScalarsOnlyWhereEveryParserAgrees()
     {
-        var entity = Entity.Create("place", "Café Zürich, Gion");
+        var entity = Entity.Create("place", "Café Grüne Tür, Gion");
         entity.Data["extensions"]!["org.example"] = new JsonObject { ["yes"] = "yes", ["date"] = "2027-05-12", ["number"] = "0123", ["empty"] = "", ["colon"] = "a: b", ["hash"] = "a #b", ["spaces"] = "trailing " };
         var yaml = YamlCodec.Write(entity);
-        Assert.Contains("name: Café Zürich, Gion\n", yaml);
+        Assert.Contains("name: Café Grüne Tür, Gion\n", yaml);
         Assert.Contains("id: " + entity.Id + "\n", yaml);
         Assert.Contains("yes: \"yes\"", yaml);
         Assert.Contains("date: \"2027-05-12\"", yaml);

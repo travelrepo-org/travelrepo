@@ -10,7 +10,7 @@ public sealed class RepositoryTests : IDisposable
     public void Dispose() => TestFiles.Delete(root);
     private async Task<(TravelRepository, GitRepository)> Create(string folder = "trip")
     {
-        var repo = new TravelRepository(Path.Combine(root, folder), Path.Combine(root, "recovery-" + folder)); await repo.InitializeAsync(Entity.CreateTrip("Aachen")); var git = new GitRepository(repo, TestGit.Backend()); await git.InitializeAsync("Test", "test@example.invalid"); return (repo, git);
+        var repo = new TravelRepository(Path.Combine(root, folder), Path.Combine(root, "recovery-" + folder)); await repo.InitializeAsync(Entity.CreateTrip("Hamburg")); var git = new GitRepository(repo, TestGit.Backend()); await git.InitializeAsync("Test", "test@example.invalid"); return (repo, git);
     }
     [Fact]
     public async Task CopyPreservesBranchesHistoryDirtyFilesAndRemotesWithoutChangingSource()

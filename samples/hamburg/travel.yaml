@@ -2,7 +2,7 @@ schema:
   name: TravelRepo
   version: "1.0"
 id: 14baf6ed-c4f6-71f6-b95a-cb49aa2b67b4
-title: Aachen weekend
+title: Hamburg weekend
 language: en
 default_timezone: Europe/Berlin
 participants:

@@ -303,8 +303,12 @@ public class ExportTests
     public void ZoneNamesFallBackToOffsetsAndShowSummerTime()
     {
         Assert.Equal("Berlin (CET/CEST, UTC+1/+2)", ExportTimes.Describe(DateTimeZoneProviders.Tzdb["Europe/Berlin"], new LocalDate(2027, 3, 26), new LocalDate(2027, 3, 30)));
-        Assert.Equal("Sao Paulo (UTC-3)", ExportTimes.Describe(DateTimeZoneProviders.Tzdb["America/Sao_Paulo"], new LocalDate(2027, 3, 26), null));
-        Assert.Equal("UTC+5:30", ExportTimes.Abbreviation(DateTimeZoneProviders.Tzdb["Asia/Colombo"], Instant.FromUtc(2027, 1, 1, 0, 0)));
+        // A zone whose name is only its offset, not a place, falls back to the offset.
+        Assert.Equal("GMT+3 (UTC-3)", ExportTimes.Describe(DateTimeZoneProviders.Tzdb["Etc/GMT+3"], new LocalDate(2027, 3, 26), null));
+        Assert.Equal("UTC-3", ExportTimes.Abbreviation(DateTimeZoneProviders.Tzdb["Etc/GMT+3"], Instant.FromUtc(2027, 1, 1, 0, 0)));
+        // St. John's is half an hour off the hour.
+        Assert.Equal("UTC-3:30", ExportTimes.Offset(DateTimeZoneProviders.Tzdb["America/St_Johns"].GetUtcOffset(Instant.FromUtc(2027, 1, 1, 0, 0))));
+        Assert.Equal("St Johns (NST, UTC-3:30)", ExportTimes.Describe(DateTimeZoneProviders.Tzdb["America/St_Johns"], new LocalDate(2027, 1, 10), null));
     }
 
     [Fact]
@@ -377,21 +381,21 @@ public class ExportTests
     [Fact]
     public void ReadFromWestOfTheTripCalendarDaysStayAndExactTimesMove()
     {
-        // A Tokyo trip read in Los Angeles (UTC-7 in April), where every exact time falls on the day before or the same day.
+        // A Tokyo trip read in Vancouver (UTC-7 in April), where every exact time falls on the day before or the same day.
         var early = Item("Early train", "2027-04-01T06:00:00", "2027-04-01T06:30:00");
         var museum = Entity.Create("schedule_item", "Museum"); museum.Data["time"] = new JsonObject { ["precision"] = "all_day", ["date"] = "2027-04-02" };
         var market = Entity.Create("schedule_item", "Market"); market.Data["time"] = new JsonObject { ["precision"] = "day_part", ["date"] = "2027-04-03", ["day_part"] = "morning", ["timezone"] = Zone };
         var inn = Entity.Create("schedule_item", "Inn"); inn.Data["components"] = new JsonObject { ["accommodation"] = new JsonObject() };
         inn = Stays.WithSpan(inn, new ZonedTime("2027-04-01T16:00:00", Zone), new ZonedTime("2027-04-03T10:00:00", Zone));
         var trip = Trip(early, museum, market, inn);
-        var options = new ExportOptions { TimeZone = "America/Los_Angeles", Parts = ExportParts.Schedule | ExportParts.Stays };
+        var options = new ExportOptions { TimeZone = "America/Vancouver", Parts = ExportParts.Schedule | ExportParts.Stays };
         var it = TripItinerary.Build(trip, culture: Invariant, options: options);
         (LocalDate Day, ItineraryEntry Entry) Find(Func<ItineraryEntry, bool> match) => it.Days.SelectMany(d => d.Entries.Select(e => (d.Date, e))).Single(x => match(x.e));
 
         // All-day and day-part plans keep their planned day.
         Assert.Equal(new LocalDate(2027, 4, 2), Find(e => e.Item.Title == "Museum").Day);
         Assert.Equal(new LocalDate(2027, 4, 3), Find(e => e.Item.Title == "Market").Day);
-        // Exact times move to their day in Los Angeles, check-in and check-out included.
+        // Exact times move to their day in Vancouver, check-in and check-out included.
         Assert.Equal((new LocalDate(2027, 3, 31), "14:00–14:30"), (Find(e => e.Item.Title == "Early train").Day, Find(e => e.Item.Title == "Early train").Entry.Time));
         Assert.Equal((new LocalDate(2027, 4, 1), "00:00"), (Find(e => e.Role == ItineraryRole.CheckIn).Day, Find(e => e.Role == ItineraryRole.CheckIn).Entry.Time));
         Assert.Equal((new LocalDate(2027, 4, 2), "18:00"), (Find(e => e.Role == ItineraryRole.CheckOut).Day, Find(e => e.Role == ItineraryRole.CheckOut).Entry.Time));
@@ -405,7 +409,7 @@ public class ExportTests
 
         // A calendar file ignores the zone, also for its date range.
         var day = new ExportOptions { From = new LocalDate(2027, 4, 1), To = new LocalDate(2027, 4, 1) };
-        Assert.Equal(TripExport.Ics(trip, day), TripExport.Ics(trip, day with { TimeZone = "America/Los_Angeles", OtherTimeZones = ["Europe/Berlin"] }));
+        Assert.Equal(TripExport.Ics(trip, day), TripExport.Ics(trip, day with { TimeZone = "America/Vancouver", OtherTimeZones = ["Europe/Berlin"] }));
     }
 
     [Fact]

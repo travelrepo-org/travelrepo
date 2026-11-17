@@ -205,12 +205,12 @@ public sealed class SearchTests
         var flight = TripSearch.Find(tokyo, "flight nh204").Single();
         Assert.Equal(new LocalDate(2027, 5, 12), flight.Day);
         Assert.Equal("Europe/Berlin", flight.Zone);
-        Assert.Contains(TripSearch.Find(await Sample("aachen"), "aachn"), h => h.Kind == SearchKind.Plan);
+        Assert.Contains(TripSearch.Find(await Sample("hamburg"), "hambrg"), h => h.Kind == SearchKind.Plan);
         var zealand = await Sample("new-zealand");
         // Macrons: typed without, found with.
-        Assert.Equal("Wānaka", TripSearch.Find(zealand, "Wanaka").Single().Entity.Title);
-        Assert.Equal("Kaikōura", TripSearch.Find(zealand, "kaikoura").Single().Entity.Title);
-        Assert.Equal([new TextRange(0, 8)], TripSearch.Find(zealand, "KAIKOURA").Single().TitleRanges);
+        Assert.Equal("Ōtautahi", TripSearch.Find(zealand, "Otautahi").Single().Entity.Title);
+        Assert.Equal("Pōneke", TripSearch.Find(zealand, "poneke").Single().Entity.Title);
+        Assert.Equal([new TextRange(0, 6)], TripSearch.Find(zealand, "PONEKE").Single().TitleRanges);
         Assert.Contains(TripSearch.Find(zealand, "coastal"), h => h.Day is null);
         // Every fixture can be indexed, the ones with unknown extensions and nested items included.
         foreach (var manifest in Directory.EnumerateFiles(Samples(), "travel.yaml", SearchOption.AllDirectories))
@@ -238,9 +238,9 @@ public sealed class SearchTests
     [Fact]
     public void NormalizedWordsAreStableAndFindWhatTheyCameFrom()
     {
-        Assert.Equal("wanaka", TripSearch.Normalize("Wānaka"));
+        Assert.Equal("otautahi", TripSearch.Normalize("Ōtautahi"));
         Assert.Equal("strasse", TripSearch.Normalize("Straße"));
-        Assert.Equal("kobenhavn", TripSearch.Normalize("København"));
+        Assert.Equal("smorrebrod", TripSearch.Normalize("Smørrebrød"));
         Assert.Equal(["senso", "ji", "2", "3", "1"], TripSearch.Words("Sensō-ji, 2-3-1"));
         var random = new Random(20261116); const string alphabet = "aāeéöüßøłZK 東京寺-_.,:'’/()0123456789́";
         for (var i = 0; i < 400; i++)

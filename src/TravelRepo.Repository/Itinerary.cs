@@ -275,7 +275,7 @@ public static class ExportTimes
         return "UTC" + sign + (minutes / 60).ToString(CultureInfo.InvariantCulture) + (minutes % 60 == 0 ? "" : ":" + (minutes % 60).ToString("00", CultureInfo.InvariantCulture));
     }
 
-    /// <summary>A zone's city for people to read, such as "New York" for America/New_York, or UTC.</summary>
+    /// <summary>A zone's city for people to read, such as "Vancouver" for America/Vancouver, or UTC.</summary>
     public static string City(DateTimeZone zone) => zone.Id is "UTC" or "Etc/UTC" ? "UTC" : zone.Id.Split('/')[^1].Replace('_', ' ');
 
     /// <summary>
