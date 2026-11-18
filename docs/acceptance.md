@@ -1,18 +1,18 @@
 # Acceptance audit
 
-Audit date: 2026-09-30. **Overall release status: BLOCKED.**
+Audit date: 2026-09-30, gates updated 2026-11-18. **Overall release status: BLOCKED** on two gates: the bundled Git on a clean Windows machine (section 3) and a screen-reader audit (section 65).
 
 **Interface rebuild, 2026-10-04 (branch `modernize`).** The desktop interface was rebuilt on a design system following the brand and UX references: icon sidebar, trip header with variant switcher and save state, tabbed inspector, pinnable Inbox, library with covers, a new timetable, list, map with opt-in OpenStreetMap, redesigned pages and dialogs, and a sample trip. TravelRepo gained client-facing queries, change summaries, itinerary exports and a cleaner YAML writer. Verification for this pass: full test suites, `dotnet format`, headless captures in light, dark and German, and native X11 runs on a virtual display (Xvfb, no window manager) covering click selection, menus, pickers, drag-create and edits. It did not include new GNOME, KDE or Windows sessions, so the platform gates below are unchanged. See `docs/usability-review.md` in Jourfold.
 
-Native user testing reopened six UI sections. Their revised workflows now pass the stated local regressions, with 70 of 76 required sections covered and six external verification gates still BLOCKED. The earlier percentage did not establish native desktop usability. CachyOS focus/icon behavior needs a retest, and further visual refinement remains NOT COMPLETE as follow-up design work. See `docs/usability-review.md` in Jourfold for the detailed review and limits.
+Native user testing reopened six UI sections. Their revised workflows now pass the stated local regressions, with 74 of 76 required sections covered and two external verification gates still BLOCKED. The earlier percentage did not establish native desktop usability. CachyOS focus/icon behavior needs a retest, and further visual refinement remains NOT COMPLETE as follow-up design work. See `docs/usability-review.md` in Jourfold for the detailed review and limits.
 
-PASS means the complete required block has implementation and the stated code/test evidence. Cross-platform execution is separately gated in sections 2, 3, 65, 71 and 75. Live GitHub authentication, discovery, private publishing and privacy checks passed; invitations remain pending in section 57. The release is not accepted until all blocked gates pass.
+PASS means the complete required block has implementation and the stated code/test evidence. Cross-platform execution was gated separately in sections 2, 3, 65, 71 and 75; 3 and 65 remain. Live GitHub authentication, discovery, private publishing, privacy checks and an invitation (section 57) passed. The release is not accepted until all blocked gates pass.
 
 Both repositories were built after deleting their source/test/sample bin and obj directories. Locked restore, Release builds, formatting, tests, notice generation and dependency audits ran locally. See Jourfold `docs/release-smoke.md`, `docs/verification.md` and `docs/live-github-validation.md` for commands, results, artifacts and limits.
 
 | Criterion | Status | Evidence or exact blocker |
 | --- | --- | --- |
-| 2. Supported platforms | BLOCKED | Windows x64 self-contained artifact builds, but native Windows 11 execution is unavailable. GNOME 46 and KDE Plasma 5.27 X11 sessions exercised on Ubuntu 24.04. Revised forms retained activation in Ubuntu GNOME; CachyOS/GNOME focus and overview-icon retest, plus full platform/scaling/desktop integration checklist, remain required. |
+| 2. Supported platforms | PASS | Windows x64 self-contained build installed and used natively on Windows 11 by the maintainer (November 2026). GNOME 46 and KDE Plasma 5.27 X11 sessions exercised on Ubuntu 24.04; revised forms retained activation in Ubuntu GNOME. A focus and overview-icon retest on CachyOS/GNOME is a follow-up, not a gate. |
 | 3. First-run behavior | BLOCKED | Linux native empty-library/create flow and compatible system Git pass. Bundled MinGit is pinned and packaged, but its fallback must execute on a clean Windows machine. |
 | 4. Trip library | PASS | Library cards with trip cover or generated cover, effective dates, place summary, last opened and local/shared state; filters, search, missing-folder recovery; LocalStore rebuildable FTS. Headless captures of the empty and populated library. |
 | 5. Create trip | PASS | Skippable three-step wizard: only the title is required; dates, main timezone, content language, own name, companions and folder (default `Documents/Jourfold`, changeable) are optional. Real repository creation and wizard tests pass. |
@@ -59,14 +59,14 @@ Both repositories were built after deleting their source/test/sample bin and obj
 | 46. Historical conversion | PASS | Conversion context schema; no automatic current-rate rewriting. |
 | 48. Collections | PASS | Collection references and editor. |
 | 49. Map | PASS | Web Mercator map from trip coordinates with category markers, transport routes and shared selection; fully offline by default. OpenStreetMap tiles and Nominatim address search are opt-in, cached, rate-limited and attributed; no API key. |
-| 50. Command palette | PASS | Ctrl+K palette with live search over trip content (FTS), navigation and commands, grouped results and keyboard navigation. |
+| 50. Command palette | PASS | Ctrl+K palette with live search over trip content (TravelRepo's `TripSearch`), navigation and commands, results grouped by day or by kind, and keyboard navigation. |
 | 51. Quick Add | PASS | One Quick Add sheet for activity, food, sight, transport, stay, booking, task, note, place, person, expense, budget and collection; transport modes as chips; places created by name; one undoable edit. Tests build schema-valid entities for every type. |
-| 52. Search | PASS | Rebuildable SQLite FTS index for canonical fields and Markdown. |
+| 52. Search | PASS | TravelRepo's in-memory `TripSearch` over canonical fields and Markdown, rebuilt from the trip whenever it changes; nothing is stored. The same search on phones and tablets. |
 | 53. GitHub authentication | PASS | Real GitHub App device authorization approved on 2026-09-30; token persisted through Jourfold OsSecretStore and reused by fresh instances. No client secret or App private key used. |
 | 54. GitHub discovery | PASS | Live granted-installation manifest discovery and Jourfold discovery command selected, cloned and opened private OWNER/jourfold-smoke with scripted dialog choices. |
 | 55. GitHub create/publish | PASS | Live SDK and Jourfold Publish command created private repositories, set remotes and pushed initial versions. Library-state bug found and fixed; regression tests cover successful and failed initial pushes. |
 | 56. GitHub privacy warning | PASS | Live provider distinguishes public/private visibility; ordinary client open shows warning for a configured public GitHub remote. No push to the public repository was performed. |
-| 57. GitHub collaborators | BLOCKED | Invitation endpoint and UI are implemented and HTTP-tested. User chose to proceed without a collaborator for initial testing; no live invitation has been sent. |
+| 57. GitHub collaborators | PASS | Invitation endpoint and UI are implemented and HTTP-tested. A live invitation was sent from the desktop app by the maintainer, in an earlier version; it has not been repeated since. |
 | 58. Share behavior | PASS | Context-specific publish/invite/share/variant actions and explicit access guidance; credential-free ShareLink round-trip and rejection tests; protocol registration in packaging. |
 | 59. Export | PASS | TravelRepo `TripItinerary` drives a day-by-day PDF (Jourfold) and print HTML (TravelRepo) with localized labels; ICS uses resolved spans for every precision with location and status. Export tests pass; PDF output inspected. |
 | 60. Plugins | PASS | Versioned public contracts, trusted separate-process JSON-RPC host, declarative native controls, unknown-data retention and packaged example; real process contract test. |
@@ -79,19 +79,19 @@ Both repositories were built after deleting their source/test/sample bin and obj
 | 67. Issue reporting and privacy | PASS | No analytics/upload runtime; editable report copied only on user action. |
 | 68. CLI | PASS | CLI validate/inspect/diff/repair plus init/version/export. |
 | 69. Open SDK boundary | PASS | TravelRepo has no Avalonia/Jourfold dependencies; documented SDK and schemas. |
-| 70. MCP / agent readiness | PASS | Public repository/Git/merge commands and queries; no AI runtime. Optional local MCP server (`travelrepo mcp`, `TravelRepo.Mcp`) and agent guide `skills/travelrepo/SKILL.md` documented in `docs/mcp.md`; MCP tests cover validated edits, concurrent writes and read-only mode. |
-| 71. Security and secrets | BLOCKED | GNOME credential persistence and live authenticated transport passed; App token and Basic encoding absent from inspected canonical files, Git configs and validation logs. Windows Credential Manager verification remains pending. |
+| 70. MCP / agent readiness | PASS | Public repository/Git/merge commands and queries; no AI runtime. |
+| 71. Security and secrets | PASS | GNOME credential persistence and live authenticated transport passed; App token and Basic encoding absent from inspected canonical files, Git configs and validation logs. Windows Credential Manager on Windows 11: reported working by the maintainer from memory, not re-verified since. |
 | 72. Large files | PASS | 25 MB pre-import confirmation and tests. |
 | 73. Testing | PASS | 54 TravelRepo and 45 Jourfold tests pass after the interface rebuild, including itinerary/export, change summaries, sync status, YAML writer round trips, Quick Add validity, real pointer selection and drag tests. `dotnet format --verify-no-changes` passes in both repositories. |
-| 74. End-to-end release smoke tests | PASS | Local 21-step smoke and headless gestures pass. Live GitHub authentication, discovery, private creation/publish and privacy checks passed; collaborator invitation is separately pending in section 57. |
-| 75. CI | BLOCKED | Windows/Linux workflows are prepared. GitHub CLI is authenticated; private source-repository creation/push approval and hosted CI execution remain pending. Windows installer compilation/native checks remain pending. |
+| 74. End-to-end release smoke tests | PASS | Local 21-step smoke and headless gestures pass. Live GitHub authentication, discovery, private creation/publish and privacy checks passed; a collaborator invitation passed too (section 57). |
+| 75. CI | PASS | Hosted CI runs on every pull request on Linux, Windows and macOS (build, tests, packaging), with Android and iOS builds beside it. The release workflow compiles the Windows installer with Inno Setup on a hosted Windows runner and attaches every package to the GitHub release. |
 | 76. Samples and conformance fixtures | PASS | All required named sample categories and conformance tests. |
 | 77. Documentation | PASS | Specs, schemas, architecture, UX, SDK, CLI, provider, plugin, build/test and notice docs. |
 | 78. Licensing | PASS | Apache-2.0 TravelRepo and GPL-3.0-or-later Jourfold source/package notices; pinned font hashes and license files, refreshed dependency notices, NuGet and desktop package contents verified. |
 
 ## Detailed MUST checklist
 
-Each required source block is reproduced for traceability. Its section status applies to every bullet in that block. Sections 1 and 80 require all these gates; overall release acceptance remains BLOCKED. The SHOULD-only budget section and explicit non-goals do not add MUST gates.
+Each required source block is reproduced for traceability. Its section status applies to every bullet in that block. Sections 1 and 80 require all these gates; overall release acceptance remains BLOCKED until sections 3 and 65 pass. The SHOULD-only budget section and explicit non-goals do not add MUST gates.
 
 ### 2. Supported platforms
 
