@@ -1,0 +1,9 @@
+# Release notes for TravelRepo 0.13.1. They go into CHANGELOG.md and the GitHub release.
+version: 0.13.1
+date: 2026-11-18
+changes:
+  - en: "New API: `Expenses.WithAmount` sets an expense's amount and moves every paid mark with its currency: what was transferred in the new currency counts as paid, a mark in the old currency moves into the charged currency at the charge's rate, and a mark without an exact rate is refused with `expense.paid-currency` instead of turning into wrong debts. When the amount is now in the currency it was charged in, the charge is dropped."
+  - en: "New API: `Expenses.ChargeAtSameRate` is what a card would charge for a new amount at the rate its charge had so far, such as a top-up booked as one payment."
+  - en: "The conformance fixtures use only the example places, currencies and people listed in AGENTS.md: the weekend in Germany is now `samples/hamburg`, the New Zealand fixture's places with macrons are Ōtautahi and Pōneke, and the people are Alex and Sam. The Tokyo fixture has a paid expense with a corrected price."
+fixes:
+  - en: "Correcting the amount of a paid expense whose card charge stayed the same no longer turns what was paid back into debts. A mark paid back in the currency the card charged, at the card's rate, now counts with what was transferred, valued at the card's rate today, and a difference within the rounding of both currencies is the same payment. A new amount charged shows exactly what is open or owed back; cash bought before and marks without such a transfer keep the amount they were made for (specification section 34.1). This changes how data already stored reads: for the same trip, an older client can show a different who owes whom than this one."
