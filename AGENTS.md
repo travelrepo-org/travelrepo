@@ -123,6 +123,12 @@ Include fixtures for:
 
 Use property-based tests for suitable serialization, time, ID, and merge invariants.
 
+## Releases
+
+A fix or feature pull request never changes the version and never adds release notes. The version, `docs/releases/<version>.yaml`, `CHANGELOG.md` and anything else labelled with the version go into a dedicated release pull request from `release/<version>`, which contains the fix or feature branches plus one release commit. Its description says which pull requests to merge first.
+
+- Anything that can count as a patch stays a patch (0.x.y+1); a new minor version only when the change clearly is one, and only after asking.
+
 ## Documentation
 
 Keep the format specification, public SDK documentation, CLI docs, provider docs, and plugin docs consistent with code.
