@@ -372,27 +372,60 @@ public static class Expenses
             .Select(x => (decimal?)x.Charge!.Rate).FirstOrDefault();
 
     /// <summary>
-    /// A copy of <paramref name="expense"/> with a new amount. When the amount is now in the currency it was charged in,
-    /// the charge is no longer needed, and what was paid back in that currency becomes the paid amount, since the debts
-    /// are then in it; within the rounding of the new debt it pays the debt exactly. Otherwise the charge and the paid
-    /// marks stay, and a charge in another currency keeps counting as charged (see <see cref="ChargeOf"/>).
+    /// A copy of <paramref name="expense"/> with a new amount. Paid marks carry no currency: they are in the expense's,
+    /// so when the amount moves to another currency they move with it. What was transferred in the new currency counts
+    /// as paid, whatever rate it was worked out with; a transfer in the currency of a card charge that stays keeps
+    /// counting through it; a mark in the old currency moves into the charged currency at the charge's rate. Within the
+    /// rounding of the new debt a moved mark pays it exactly. When the amount is now in the currency it was charged in,
+    /// the charge is no longer needed. A mark that has no exact rate into the new currency, such as yen paid back for a
+    /// payment that moves to dollars, cannot move: then nothing changes and the error <c>expense.paid-currency</c> says why.
     /// </summary>
     public static Entity WithAmount(TripSnapshot trip, Entity expense, Money amount)
     {
         var code = ExchangeRates.Code(amount.Currency) ?? throw new DomainException("expense.currency", "A currency is a code with three letters, such as EUR.");
         var copy = expense.Copy();
         copy.Data["amount"] = new JsonObject { ["value"] = Format(amount.Amount, code), ["currency"] = code };
-        if (ChargeOf(expense) is not { } charge || charge.Currency != code) return copy;
-        copy.Data.Remove("converted");
+        var before = TripSummaries.Money(expense.Data["amount"]);
+        if (before is null || before.Currency == code || copy.Data["settled"] is not JsonArray { Count: > 0 }) return DropChargeIn(copy, code);
+        var charge = ChargeOf(expense);
+        copy = DropChargeIn(copy, code);
         var after = Split(trip with { Entities = new Dictionary<Guid, Entity>(trip.Entities) { [copy.Id] = copy } }, copy);
-        foreach (var entry in (copy.Data["settled"] as JsonArray ?? []).OfType<JsonObject>())
+        foreach (var entry in ((JsonArray)copy.Data["settled"]!).OfType<JsonObject>())
         {
-            if (entry["converted"] is not JsonObject paid || paid["currency"]?.ToString() != code || paid["source"]?.ToString() == "reference" || !TryDecimal(paid["value"], out var transferred)) continue;
+            var paid = entry["converted"] as JsonObject;
+            decimal value;
+            // What was transferred in the new currency is what was paid, whatever rate it was worked out with.
+            if (paid?["currency"]?.ToString() == code && TryDecimal(paid["value"], out var transferred)) value = transferred;
+            // A transfer in the currency of a card charge that stays keeps counting through it (see PaidBackValue).
+            else if (paid is not null && charge is { } kept && kept.Currency != code && kept.Source != Cash && paid["currency"]?.ToString() == kept.Currency && paid["source"]?.ToString() != "reference") continue;
+            // Paid in the old currency: into the charged currency at the charge's rate.
+            else if (charge is { } c && c.Currency == code && before.Amount != 0 && TryDecimal(entry["value"], out var old)) value = old * c.Value / before.Amount;
+            else throw new DomainException("expense.paid-currency", "What was paid back for this expense is in " + before.Currency + ", and there is no exact rate to " + code + ".");
             var now = after.Debts.FirstOrDefault(d => d.From == Id(entry["person"]) && d.To == Id(entry["to"]));
-            entry["value"] = Format(now is not null && Math.Abs(now.Amount - transferred) <= Unit(code) ? now.Amount : transferred, code);
-            entry.Remove("converted");
+            entry["value"] = Format(now is not null && Math.Abs(now.Amount - value) <= Unit(code) ? now.Amount : Math.Round(value, MinorDigits(code), MidpointRounding.AwayFromZero), code);
+            if (paid?["currency"]?.ToString() == code) entry.Remove("converted");
         }
         return copy;
+    }
+
+    /// <summary>The charge is no longer needed once the expense is in the currency it was charged in.</summary>
+    private static Entity DropChargeIn(Entity expense, string code)
+    {
+        if (ChargeOf(expense) is { } charge && charge.Currency == code) expense.Data.Remove("converted");
+        return expense;
+    }
+
+    /// <summary>
+    /// What a card would charge for <paramref name="amount"/> at the rate its charge for the expense had so far, such as
+    /// a top-up booked as one payment: the amount charged times the new amount over the old, rounded to the charged
+    /// currency's smallest unit. Null without a card charge (cash follows the price by itself), when the amount is in
+    /// another currency than before, or when it would not change the charge.
+    /// </summary>
+    public static decimal? ChargeAtSameRate(Entity expense, Money amount)
+    {
+        if (ChargeOf(expense) is not { } charge || charge.Source == Cash || TripSummaries.Money(expense.Data["amount"]) is not { Amount: not 0 } before || before.Currency != amount.Currency || charge.Currency == amount.Currency) return null;
+        var value = Math.Round(charge.Value * amount.Amount / before.Amount, MinorDigits(charge.Currency), MidpointRounding.AwayFromZero);
+        return value > 0 && value != charge.Value ? value : null;
     }
 
     /// <summary>A copy of the expense without its charged amount.</summary>

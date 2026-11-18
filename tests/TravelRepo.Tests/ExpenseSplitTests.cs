@@ -719,4 +719,38 @@ public class ExpenseSplitTests
         // Read as stored, without changes.
         foreach (var expense in trip.Entities.Values.Where(e => e.Type == "expense")) Assert.Equal(YamlCodec.Write(expense), YamlCodec.Write(YamlCodec.Read(YamlCodec.Write(expense))));
     }
+    [Fact]
+    public void MovingIntoTheChargedCurrencyKeepsWhatWasPaidBackInEurosAtReferenceRatesOrInYen()
+    {
+        var rates = new ExchangeRates(new DateOnly(2027, 5, 17), new Dictionary<string, decimal> { ["JPY"] = 162.70m });
+        var tickets = Expenses.WithSplit(Expense("teamLab tickets", "7600", "JPY", Sam), SplitMethod.Equal, [(Sam.Id, null), (Alex.Id, null)]);
+        // Paid back in euros before the card amount was known, then the charge was entered.
+        var byReference = Expenses.Settle(Japan(tickets), tickets, Alex.Id, new LocalDate(2027, 5, 18), "EUR", rates);
+        byReference = Expenses.WithCharge(byReference, 46.71m, "EUR", new LocalDate(2027, 5, 16));
+        // Paid back in yen, cash in Tokyo.
+        var inYen = Expenses.WithCharge(tickets, 46.71m, "EUR", new LocalDate(2027, 5, 16));
+        inYen = Expenses.Settle(Japan(inYen), inYen, Alex.Id, new LocalDate(2027, 5, 18));
+        foreach (var paid in new[] { byReference, inYen })
+        {
+            var inEuros = Expenses.WithAmount(Japan(paid), paid, new Money("46.71", "EUR"));
+            Assert.True(Expenses.Split(Japan(inEuros), inEuros).Debts.Single().IsSettled);
+            Assert.Empty(Expenses.Balances(Japan(inEuros), "EUR"));
+        }
+        // To dollars there is no exact rate for the yen paid back.
+        Assert.Equal("expense.paid-currency", Assert.Throws<DomainException>(() => Expenses.WithAmount(Japan(inYen), inYen, new Money("52.00", "USD"))).Code);
+        // Without paid marks, any currency is fine.
+        Assert.Equal("USD", Expenses.WithAmount(Japan(tickets), tickets, new Money("52.00", "USD")).Data["amount"]!["currency"]!.ToString());
+    }
+
+    [Fact]
+    public void ACardChargeAtTheSameRateFollowsTheNewPrice()
+    {
+        var tickets = Tickets("7600", "46.71");
+        Assert.Equal(49.17m, Expenses.ChargeAtSameRate(tickets, new Money("8000", "JPY")));
+        // Nothing to offer: the same price, another currency, or cash, which follows the price by itself.
+        Assert.Null(Expenses.ChargeAtSameRate(tickets, new Money("7600", "JPY")));
+        Assert.Null(Expenses.ChargeAtSameRate(tickets, new Money("52.00", "USD")));
+        var cash = Expenses.WithCash(Expense("Tea ceremony", "4400", "JPY", Sam), "EUR", 0.006146m, new LocalDate(2027, 5, 15));
+        Assert.Null(Expenses.ChargeAtSameRate(cash, new Money("5000", "JPY")));
+    }
 }
