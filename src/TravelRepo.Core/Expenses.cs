@@ -371,6 +371,30 @@ public static class Expenses
             .OrderByDescending(x => x.Charge!.Date ?? DateOf(trip, x.Expense) ?? default).ThenByDescending(x => x.Expense.Id.ToString(), StringComparer.Ordinal)
             .Select(x => (decimal?)x.Charge!.Rate).FirstOrDefault();
 
+    /// <summary>
+    /// A copy of <paramref name="expense"/> with a new amount. When the amount is now in the currency it was charged in,
+    /// the charge is no longer needed, and what was paid back in that currency becomes the paid amount, since the debts
+    /// are then in it; within the rounding of the new debt it pays the debt exactly. Otherwise the charge and the paid
+    /// marks stay, and a charge in another currency keeps counting as charged (see <see cref="ChargeOf"/>).
+    /// </summary>
+    public static Entity WithAmount(TripSnapshot trip, Entity expense, Money amount)
+    {
+        var code = ExchangeRates.Code(amount.Currency) ?? throw new DomainException("expense.currency", "A currency is a code with three letters, such as EUR.");
+        var copy = expense.Copy();
+        copy.Data["amount"] = new JsonObject { ["value"] = Format(amount.Amount, code), ["currency"] = code };
+        if (ChargeOf(expense) is not { } charge || charge.Currency != code) return copy;
+        copy.Data.Remove("converted");
+        var after = Split(trip with { Entities = new Dictionary<Guid, Entity>(trip.Entities) { [copy.Id] = copy } }, copy);
+        foreach (var entry in (copy.Data["settled"] as JsonArray ?? []).OfType<JsonObject>())
+        {
+            if (entry["converted"] is not JsonObject paid || paid["currency"]?.ToString() != code || paid["source"]?.ToString() == "reference" || !TryDecimal(paid["value"], out var transferred)) continue;
+            var now = after.Debts.FirstOrDefault(d => d.From == Id(entry["person"]) && d.To == Id(entry["to"]));
+            entry["value"] = Format(now is not null && Math.Abs(now.Amount - transferred) <= Unit(code) ? now.Amount : transferred, code);
+            entry.Remove("converted");
+        }
+        return copy;
+    }
+
     /// <summary>A copy of the expense without its charged amount.</summary>
     public static Entity WithoutCharge(Entity expense) { var copy = expense.Copy(); copy.Data.Remove("converted"); return copy; }
 
@@ -886,17 +910,24 @@ public static class Expenses
     /// What a paid mark is worth in the expense's currency now. Paid back in the currency a card charged, at the card's
     /// rate, what counts is what was transferred: its value at the card's rate today. So correcting the price while the
     /// amount charged stays the same changes nothing that was paid back, and a new amount charged shows exactly what is
-    /// still open or owed back. Otherwise the mark keeps the amount it was made for. <paramref name="owed"/> is what is
-    /// still owed for the debt before this mark; when the transfer covers it exactly in the charged currency, the mark
-    /// covers it exactly too, without a cent lost to rounding.
+    /// still open or owed back. Cash bought before follows the price at its own rate, so a mark keeps the amount it was
+    /// made for, as every other mark does.
+    /// <paramref name="owed"/> is what is still owed for the debt before this mark; when the transfer covers it within
+    /// the rounding of both currencies, the mark covers it exactly, without a cent left over either way.
     /// </summary>
     private static decimal PaidBackValue(Entity expense, Money? money, Charge? charge, SettledMark mark, decimal owed)
     {
-        if (mark.PaidIn is not { Reference: false } paid || charge is null || money is null || charge.Currency != paid.Currency || charge.Value <= 0) return mark.Value;
+        if (mark.PaidIn is not { Reference: false } paid || charge is null || charge.Source == Cash || money is null || charge.Currency != paid.Currency || charge.Value <= 0) return mark.Value;
         var (owedThere, code, _) = Convert(expense, owed, money.Currency, paid.Currency);
-        if (code == paid.Currency && owedThere == paid.Value) return owed;
+        // Both sides are rounded: the debt to the expense's smallest unit, the transfer to the charged currency's. A
+        // difference no larger than that rounding is the same payment.
+        var rounding = Unit(paid.Currency) + Unit(money.Currency) * charge.Value / money.Amount;
+        if (code == paid.Currency && Math.Abs(owedThere - paid.Value) <= rounding) return owed;
         return Math.Round(paid.Value * money.Amount / charge.Value, Digits(money.Value, money.Currency), MidpointRounding.AwayFromZero);
     }
+
+    /// <summary>The smallest unit of <paramref name="currency"/>, such as 0.01 for EUR and 1 for JPY.</summary>
+    private static decimal Unit(string currency) => MinorDigits(currency) switch { 0 => 1m, 3 => 0.001m, _ => 0.01m };
 
     private static IEnumerable<SettledMark> ReadSettled(Entity expense)
     {

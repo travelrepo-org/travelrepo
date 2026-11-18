@@ -2,6 +2,13 @@
 
 All notable changes to TravelRepo. Generated from `docs/releases` by `python eng/changelog.py`; do not edit by hand.
 
+## 0.13.1
+
+### Fixes
+
+- Correcting the amount of a paid expense whose card charge stayed the same no longer turns what was paid back into debts. A mark paid back in the currency the card charged, at the card's rate, now counts with what was transferred, valued at the card's rate today, and a difference within the rounding of both currencies is the same payment. A new amount charged shows exactly what is open or owed back; cash bought before and marks without such a transfer keep the amount they were made for (specification section 34.1). This changes how data already stored reads: for the same trip, an older client can show a different who owes whom than this one.
+- New API: Expenses.WithAmount sets an expense's amount. When the amount is now in the currency it was charged in, the charge is dropped and what was paid back in that currency becomes the paid amount, so the debts stay right.
+
 ## 0.13.0 – 2026-11-16
 
 ### Changes

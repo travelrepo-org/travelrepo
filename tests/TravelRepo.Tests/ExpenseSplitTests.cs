@@ -604,39 +604,119 @@ public class ExpenseSplitTests
         Assert.Null(Budgets.ForTrip(trip));
         Assert.Throws<DomainException>(() => Budgets.WithFilters(trip, budget, new BudgetFilters(null, dinner.Id, null)));
     }
-    [Fact]
-    public void CorrectingThePriceOfAPaidExpenseKeepsWhatWasPaidBackInTheChargedCurrency()
+    // The sample trip "Spring in Japan": Alex and Sam, and Mia where a third traveller is needed.
+    private static readonly Entity Alex = Entity.Create("person", "Alex"), Sam = Entity.Create("person", "Sam"), Mia = Entity.Create("person", "Mia");
+
+    private static TripSnapshot Japan(params Entity[] entities)
     {
-        // Ana paid 340 NZD for herself and Ben; her card charged 190.40 EUR, and Ben paid back his half in euros.
-        var tour = Expenses.WithSplit(Expense("Hobbiton", "340.00", "NZD", Ana), SplitMethod.Equal, [(Ana.Id, null), (Ben.Id, null)]);
-        tour = Expenses.WithCharge(tour, 190.40m, "EUR", new NodaTime.LocalDate(2026, 11, 10));
-        tour = Expenses.Settle(Trip(tour), tour, Ben.Id, new NodaTime.LocalDate(2026, 11, 12), "EUR");
-        Assert.Equal(95.20m, Expenses.Split(Trip(tour), tour).Debts.Single().PaidIn!.Value);
-        Assert.Empty(Expenses.Balances(Trip(tour), "EUR"));
+        var manifest = Entity.CreateTrip("Spring in Japan", "en", "Asia/Tokyo");
+        manifest.Data["participants"] = new JsonArray(Alex.Id.ToString(), Sam.Id.ToString(), Mia.Id.ToString());
+        manifest.Data["currency"] = "EUR";
+        return new(manifest, entities.Concat([Alex, Sam, Mia]).DistinctBy(e => e.Id).ToDictionary(e => e.Id));
+    }
 
-        // The price is corrected to 400 NZD or 300 NZD, but the card still charged 190.40 EUR: nothing changes for Ben.
-        foreach (var price in new[] { "400.00", "300.00", "333.33" })
-        {
-            var corrected = tour.Copy(); corrected.Data["amount"]!["value"] = price;
-            var trip = Trip(corrected);
-            var debt = Expenses.Split(trip, corrected).Debts.Single();
-            Assert.True(debt.IsSettled, price + ": " + debt);
-            Assert.Empty(Expenses.Balances(trip, "EUR"));
-            Assert.Empty(Expenses.Balances(trip));
-            Assert.Empty(Expenses.Open(trip));
-        }
+    /// <summary>teamLab tickets in Tokyo, paid by Sam on a card that charged euros; Alex paid back his part in euros.</summary>
+    private static Entity Tickets(string price, string charged, params Entity[] sharing)
+    {
+        var tickets = Expenses.WithSplit(Expense("teamLab tickets", price, "JPY", Sam), SplitMethod.Equal, (sharing.Length > 0 ? sharing : [Sam, Alex]).Select(p => (p.Id, (decimal?)null)));
+        tickets = Expenses.WithCharge(tickets, decimal.Parse(charged, System.Globalization.CultureInfo.InvariantCulture), "EUR", new LocalDate(2027, 5, 16));
+        return Expenses.Settle(Japan(tickets), tickets, Alex.Id, new LocalDate(2027, 5, 18), "EUR");
+    }
 
-        // The card charged more as well: Ben owes exactly half the difference, in either currency.
-        var dearer = tour.Copy(); dearer.Data["amount"]!["value"] = "400.00";
-        dearer = Expenses.WithCharge(dearer, 224.00m, "EUR", new NodaTime.LocalDate(2026, 11, 10));
-        var open = Expenses.Split(Trip(dearer), dearer).Debts.Single();
-        Assert.Equal((200m, 170m, 30m), (open.Amount, open.Settled, open.Open));
-        Assert.Equal([new Transfer(Ben.Id, Ana.Id, "EUR", 16.80m)], Expenses.SettleUp(Trip(dearer), "EUR"));
+    private static Entity WithPrice(Entity expense, string price) { var copy = expense.Copy(); copy.Data["amount"]!["value"] = price; return copy; }
 
-        // Without an amount charged, the paid mark keeps the amount it was made for, as before.
-        var plain = Expenses.WithSplit(Expense("Ferry", "100.00", "NZD", Ana), SplitMethod.Equal, [(Ana.Id, null), (Ben.Id, null)]);
-        plain = Expenses.Settle(Trip(plain), plain, Ben.Id);
-        var raised = plain.Copy(); raised.Data["amount"]!["value"] = "120.00";
-        Assert.Equal(10m, Expenses.Split(Trip(raised), raised).Debts.Single().Open);
+    [Theory]
+    [InlineData("7600", "46.71", "7601")]
+    [InlineData("7600", "46.71", "7599")]
+    [InlineData("7600", "46.71", "8001")]
+    [InlineData("7600", "46.71", "6999")]
+    [InlineData("4400", "27.13", "4999")]
+    [InlineData("46800", "287.33", "46801")]
+    public void CorrectingThePriceOfAPaidExpenseKeepsWhatWasPaidBackInTheChargedCurrency(string price, string charged, string corrected)
+    {
+        var tickets = Tickets(price, charged);
+        Assert.Empty(Expenses.Balances(Japan(tickets), "EUR"));
+        // The card still charged the same euros, so nothing changes for Alex, also after rounding to whole yen.
+        var trip = Japan(WithPrice(tickets, corrected));
+        Assert.True(Expenses.Split(trip, trip.Find(tickets.Id)!).Debts.Single().IsSettled);
+        Assert.Empty(Expenses.Balances(trip, "EUR"));
+        Assert.Empty(Expenses.Open(trip));
+    }
+
+    [Fact]
+    public void ANewAmountChargedShowsTheDifferenceAndOtherSplitsAgree()
+    {
+        // The card charged more as well: Alex owes half the difference, 2.46 EUR / 2, within the rounding to whole yen of
+        // what he paid back (23.36 EUR are 3801 yen at the new rate, so 199 yen, 1.22 EUR, are open).
+        var tickets = Tickets("7600", "46.71");
+        var dearer = Expenses.WithCharge(WithPrice(tickets, "8000"), 49.17m, "EUR", new LocalDate(2027, 5, 16));
+        Assert.Equal([new Transfer(Alex.Id, Sam.Id, "EUR", 1.22m)], Expenses.SettleUp(Japan(dearer), "EUR"));
+
+        // Three travellers, Alex and Mia paid back: a corrected price changes nothing for either.
+        var three = Tickets("7600", "46.71", Sam, Alex, Mia);
+        three = Expenses.Settle(Japan(three), three, Mia.Id, new LocalDate(2027, 5, 18), "EUR");
+        Assert.Empty(Expenses.Balances(Japan(WithPrice(three, "7601")), "EUR"));
+        Assert.Empty(Expenses.Balances(Japan(WithPrice(three, "6999")), "EUR"));
+
+        // Split by amounts: Alex's 5000 yen paid back in euros stay paid when Sam's part and the price are corrected.
+        var byAmount = Expenses.WithSplit(Expense("teamLab tickets", "7600", "JPY", Sam), SplitMethod.Amount, [(Alex.Id, 5000m), (Sam.Id, 2600m)]);
+        byAmount = Expenses.WithCharge(byAmount, 46.71m, "EUR", new LocalDate(2027, 5, 16));
+        byAmount = Expenses.Settle(Japan(byAmount), byAmount, Alex.Id, new LocalDate(2027, 5, 18), "EUR");
+        var corrected = Expenses.WithSplit(WithPrice(byAmount, "7601"), SplitMethod.Amount, [(Alex.Id, 5000m), (Sam.Id, 2601m)]);
+        Assert.Empty(Expenses.Balances(Japan(corrected), "EUR"));
+
+        // Without an amount charged, a mark keeps the amount it was made for: a higher price leaves the rest open.
+        var plain = Expenses.WithSplit(Expense("Ramen", "3000", "JPY", Sam), SplitMethod.Equal, [(Sam.Id, null), (Alex.Id, null)]);
+        plain = Expenses.Settle(Japan(plain), plain, Alex.Id);
+        Assert.Equal(100m, Expenses.Split(Japan(WithPrice(plain, "3200")), WithPrice(plain, "3200")).Debts.Single().Open);
+    }
+
+    [Fact]
+    public void CashFollowsThePriceAtItsRateSoAHigherPriceLeavesTheRestOpen()
+    {
+        // Yen from a cash machine at 0.006146 EUR each; Alex paid back his half in euros.
+        var tickets = Expenses.WithSplit(Expense("teamLab tickets", "7600", "JPY", Sam), SplitMethod.Equal, [(Sam.Id, null), (Alex.Id, null)]);
+        tickets = Expenses.WithCash(tickets, "EUR", 0.006146m, new LocalDate(2027, 5, 15));
+        tickets = Expenses.Settle(Japan(tickets), tickets, Alex.Id, new LocalDate(2027, 5, 18), "EUR");
+        Assert.Empty(Expenses.Balances(Japan(tickets), "EUR"));
+        // More yen were paid: what they cost in euros grows with the price, and Alex owes his half of the difference.
+        var debt = Expenses.Split(Japan(WithPrice(tickets, "8000")), WithPrice(tickets, "8000")).Debts.Single();
+        Assert.Equal((4000m, 3800m, 200m), (debt.Amount, debt.Settled, debt.Open));
+    }
+
+    [Theory]
+    [InlineData("46.71", 0)]
+    [InlineData("46.72", 0)]
+    [InlineData("50.00", 1.64)]
+    public void AnExpenseChangedIntoTheChargedCurrencyTakesWhatWasPaidBack(string euros, double open)
+    {
+        var tickets = Tickets("7600", "46.71");
+        var trip = Japan(tickets);
+        var inEuros = Expenses.WithAmount(trip, tickets, new Money(euros, "EUR"));
+        Assert.Null(Expenses.ChargeOf(inEuros));
+        // The mark now holds euros: the 23.36 EUR transferred, or Alex's part where that is within a cent of it.
+        Assert.Equal("EUR", inEuros.Data["amount"]!["currency"]!.ToString());
+        Assert.Null(inEuros.Data["settled"]![0]!["converted"]);
+        var debt = Expenses.Split(Japan(inEuros), inEuros).Debts.Single();
+        Assert.Equal((decimal)open, debt.Open);
+        Assert.Equal(open == 0 ? debt.Amount : 23.36m, debt.Settled);
+        Assert.Empty(SchemaValidation.Validate(inEuros));
+        // Another currency keeps the charge and the marks.
+        var inDollars = Expenses.WithAmount(trip, tickets, new Money("52.00", "USD"));
+        Assert.Equal(46.71m, Expenses.ChargeOf(inDollars)!.Value);
+    }
+    [Fact]
+    public async Task TheTokyoFixtureKeepsWhatWasPaidBackAfterTheCorrectedPrice()
+    {
+        var d = new DirectoryInfo(AppContext.BaseDirectory); while (d is not null && !Directory.Exists(Path.Combine(d.FullName, "samples"))) d = d.Parent;
+        var state = await new TravelRepository(Path.Combine(d!.FullName, "samples", "tokyo")).ReadAsync();
+        Assert.DoesNotContain(state.Diagnostics, x => x.Severity == Severity.Error);
+        var trip = state.Trip;
+        var tickets = Expenses.All(trip).Single(s => s.Expense.Title == "teamLab tickets");
+        Assert.True(tickets.IsSettled);
+        Assert.Empty(Expenses.Balances(trip, "EUR"));
+        Assert.Empty(Expenses.Balances(trip));
+        // Read as stored, without changes.
+        foreach (var expense in trip.Entities.Values.Where(e => e.Type == "expense")) Assert.Equal(YamlCodec.Write(expense), YamlCodec.Write(YamlCodec.Read(YamlCodec.Write(expense))));
     }
 }
