@@ -1,0 +1,32 @@
+id: 0196a3c1-7d2e-7a41-9b6c-3e5f7a8d9c01
+type: expense
+title: teamLab tickets
+amount:
+  value: "8001"
+  currency: JPY
+estimated: false
+paid_by:
+- c20217c5-c564-7e91-8fc0-4f5dc957a80d
+split:
+  method: equal
+  parts:
+  - person: c3416734-e021-7185-91a7-0d5e9bf6aa7c
+  - person: c20217c5-c564-7e91-8fc0-4f5dc957a80d
+converted:
+  value: "46.71"
+  currency: EUR
+  rate: "0.006146"
+  rate_date: "2027-05-16"
+  source: card
+settled:
+- person: c3416734-e021-7185-91a7-0d5e9bf6aa7c
+  to: c20217c5-c564-7e91-8fc0-4f5dc957a80d
+  value: "3800"
+  date: "2027-05-18"
+  converted:
+    value: "23.36"
+    currency: EUR
+    rate: "0.006147"
+    rate_date: "2027-05-16"
+    source: card
+extensions: {}
