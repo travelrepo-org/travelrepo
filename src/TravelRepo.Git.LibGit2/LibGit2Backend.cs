@@ -45,7 +45,7 @@ public sealed class LibGit2Backend(ICredentialBroker? credentialBroker = null) :
             case "init": return Init(directory, args);
             case "clone": return Clone(directory, args, credential);
         }
-        using var repo = new GitRepo(GitRepo.Discover(directory) ?? throw new RepositoryNotFoundException(directory));
+        using var repo = new GitRepo(Discover(directory) ?? throw new RepositoryNotFoundException(directory));
         return args[0] switch
         {
             "merge" or "rebase" or "cherry-pick" or "revert" when args.Contains("--abort") => Abort(repo, args[0]),
@@ -83,6 +83,17 @@ public sealed class LibGit2Backend(ICredentialBroker? credentialBroker = null) :
     private static GitResult Fail(string error, int exitCode = 128) => new(exitCode, "", [], error + "\n");
     private static GitResult Quiet(int exitCode = 1) => new(exitCode, "", [], "");
     private static GitResult Usage() => Fail("usage: this command is not supported by the libgit2 backend", 129);
+    /// <summary>
+    /// The repository that contains <paramref name="directory"/>. Not Repository.Discover: compiled with NativeAOT,
+    /// LibGit2Sharp 0.32 returns an empty path from it.
+    /// </summary>
+    private static string? Discover(string directory)
+    {
+        for (var folder = new DirectoryInfo(Path.GetFullPath(directory)); folder is not null; folder = folder.Parent)
+            if (GitRepo.IsValid(folder.FullName)) return folder.FullName;
+        return null;
+    }
+
     private static string LibGit2Version() => typeof(GitRepo).Assembly.GetName().Version + " (libgit2 " + GlobalSettings.Version.LibGit2CommitSha + ")";
     /// <summary>The operands after options; a <c>--</c> ends option parsing.</summary>
     private static List<string> Operands(IReadOnlyList<string> args)
@@ -174,8 +185,26 @@ public sealed class LibGit2Backend(ICredentialBroker? credentialBroker = null) :
         var message = args.IndexOf("-m") is var m and >= 0 ? args[m + 1] : input ?? "";
         var signature = repo.Config.BuildSignature(DateTimeOffset.Now);
         if (signature is null) return Fail("Author identity unknown\n*** Please tell me who you are.");
-        try { repo.Commit(message, signature, signature, new CommitOptions { PrettifyMessage = true, AllowEmptyCommit = false }); return Ok(""); }
+        try { repo.Commit(Prettify(message), signature, signature, new CommitOptions { PrettifyMessage = false, AllowEmptyCommit = false }); return Ok(""); }
         catch (EmptyCommitException) { return Fail("nothing to commit, working tree clean", 1); }
+    }
+
+    /// <summary>
+    /// Cleans up a commit message as git commit does (and git_message_prettify without comments): no trailing spaces,
+    /// no blank lines at the start or end or twice in a row, one final newline. Done here because compiled with NativeAOT,
+    /// LibGit2Sharp 0.32 gets an empty text back from git_message_prettify, as from every libgit2 call that fills a git_buf.
+    /// </summary>
+    internal static string Prettify(string message)
+    {
+        var lines = new List<string>();
+        foreach (var raw in message.Replace("\r\n", "\n").Split('\n'))
+        {
+            var line = raw.TrimEnd(' ', '\t', '\r', '\v', '\f');
+            if (line.Length == 0 && (lines.Count == 0 || lines[^1].Length == 0)) continue;
+            lines.Add(line);
+        }
+        while (lines.Count > 0 && lines[^1].Length == 0) lines.RemoveAt(lines.Count - 1);
+        return lines.Count == 0 ? "" : string.Join('\n', lines) + "\n";
     }
 
     private static GitResult StagedPaths(GitRepo repo)
@@ -190,7 +219,7 @@ public sealed class LibGit2Backend(ICredentialBroker? credentialBroker = null) :
         for (var i = 2; i < args.Count - 1; i++) if (args[i] == "-p") parents.Add(repo.Lookup<Commit>(args[i + 1]));
         var signature = repo.Config.BuildSignature(DateTimeOffset.Now);
         if (signature is null) return Fail("Author identity unknown");
-        return Ok(repo.ObjectDatabase.CreateCommit(signature, signature, input ?? "", tree, parents, prettifyMessage: true).Sha + "\n");
+        return Ok(repo.ObjectDatabase.CreateCommit(signature, signature, Prettify(input ?? ""), tree, parents, prettifyMessage: false).Sha + "\n");
     }
 
     // ---- references --------------------------------------------------------------------------------------------

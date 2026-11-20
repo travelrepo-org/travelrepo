@@ -150,7 +150,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
             // Items are listed on the day they start; on the first listed day also those still running from before.
             var entries = items.Where(x => x.Span.Start >= dayStart && x.Span.Start < dayEnd || day == first && x.Span.Start < dayStart && x.Span.End > dayStart)
                 .Select(x => (JsonNode)Summary(trip, x.Item, withParent: true)).ToArray();
-            days.Add(new JsonObject { ["date"] = Date(day), ["weekday"] = day.DayOfWeek.ToString(), ["items"] = new JsonArray(entries) });
+            days.Add((JsonNode)new JsonObject { ["date"] = Date(day), ["weekday"] = day.DayOfWeek.ToString(), ["items"] = new JsonArray(entries) });
         }
         var ideas = trip.Entities.Values.Where(e => ScheduleQueries.IsUnscheduled(trip, e)).OrderBy(e => e.Title, StringComparer.Ordinal)
             .Select(e => (JsonNode)Summary(trip, e).Also(o => o["duration"] = e.Data["duration"]?.DeepClone())).ToArray();
@@ -1044,7 +1044,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
                 // Expenses that named nobody were shared by the travellers so far; they keep that.
                 edits.AddRange(Expenses.FixShares(state.Trip).Select(e => new EntityEdit(e.Id, e)));
                 var manifest = state.Trip.Manifest.Copy(); var participants = manifest.Data["participants"] as JsonArray ?? [];
-                manifest.Data["participants"] = participants; participants.Add(entity.Id.ToString()); edits.Add(new(manifest.Id, manifest));
+                manifest.Data["participants"] = participants; participants.Add((JsonNode)entity.Id.ToString()); edits.Add(new(manifest.Id, manifest));
             }
             return (edits, null);
         }, ct);
@@ -1157,7 +1157,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
         {
             var entity = Find(state.Trip, id).Copy(); target = entity.Id;
             var content = entity.Data["content"] as JsonArray ?? []; entity.Data["content"] = content;
-            content.Add(new JsonObject { ["type"] = "markdown", ["file"] = file });
+            content.Add((JsonNode)new JsonObject { ["type"] = "markdown", ["file"] = file });
             return ([new(entity.Id, entity)], [new(file, Encoding.UTF8.GetBytes(markdown.Trim() + "\n"))]);
         }, ct);
         return new JsonObject { ["id"] = target.ToString(), ["file"] = file };
@@ -1179,8 +1179,8 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
     {
         await gate.WaitAsync();
         try { return (await action()).ToJsonString(Output); }
-        catch (DomainException ex) { throw new McpException(Explain(ex)); }
-        catch (IOException ex) { throw new McpException("The trip files could not be read or written: " + ex.Message); }
+        catch (DomainException ex) { throw new TripToolException(ex.Code, Explain(ex)); }
+        catch (IOException ex) { throw new TripToolException("io.failed", "The trip files could not be read or written: " + ex.Message); }
         finally { gate.Release(); }
     }
 
@@ -1190,7 +1190,7 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
     /// </summary>
     private async Task<RepositoryState> Write(Func<RepositoryState, (IReadOnlyList<EntityEdit> Entities, IReadOnlyList<ResourceEdit>? Resources)> plan, CancellationToken ct)
     {
-        if (readOnly) throw new McpException("This server is read-only.");
+        if (readOnly) throw new TripToolException("session.read_only", "This server is read-only.");
         for (var attempt = 0; ; attempt++)
         {
             var state = await repository.ReadAsync(ct);
@@ -1294,4 +1294,10 @@ internal sealed class TripTools(TravelRepository repository, IGitBackend git, bo
 internal static class JsonNodeExtensions
 {
     public static T Also<T>(this T value, Action<T> action) { action(value); return value; }
+}
+
+/// <summary>A tool error that keeps its TravelRepo error code, for hosts other than MCP such as TravelRepo.Native.</summary>
+internal sealed class TripToolException(string code, string message) : McpException(message)
+{
+    public string Code { get; } = code;
 }
