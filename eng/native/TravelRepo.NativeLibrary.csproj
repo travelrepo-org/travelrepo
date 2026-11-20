@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Compiles TravelRepo.Native with NativeAOT into a native library for one platform. Used by eng/build-native.sh, not
+    part of TravelRepo.sln. The runtime identifier is set here, not on the command line, so the TravelRepo projects
+    restore as usual and their lock files stay as they are.
+  -->
+  <PropertyGroup>
+    <AssemblyName>TravelRepoNative</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <RuntimeIdentifier>$(NativeRuntime)</RuntimeIdentifier>
+    <PublishAot>true</PublishAot>
+    <NativeLib Condition="'$(NativeLib)' == ''">Static</NativeLib>
+    <PublishAotUsingRuntimePack Condition="$(NativeRuntime.StartsWith('ios'))">true</PublishAotUsingRuntimePack>
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
+    <TrimmerSingleWarn>false</TrimmerSingleWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/TravelRepo.Native/TravelRepo.Native.csproj" />
+    <UnmanagedEntryPointsAssembly Include="TravelRepo.Native" />
+  </ItemGroup>
+</Project>

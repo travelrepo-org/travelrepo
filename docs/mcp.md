@@ -4,6 +4,8 @@ TravelRepo can serve one trip to an AI assistant through the [Model Context Prot
 
 There is also an agent guide, [`skills/travelrepo/SKILL.md`](../skills/travelrepo/SKILL.md). It explains the file format and the editing rules to assistants. The MCP server hands it out through its `read_guide` tool, and assistants that work on files directly can use it as a skill or as project instructions.
 
+Native apps can call the same tools without a server process, through the C interface of `TravelRepo.Native` ([native clients](native.md)).
+
 ## Starting the server
 
 ```sh
