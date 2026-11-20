@@ -14,6 +14,12 @@ Tests use temporary real repositories with local identities. They never modify g
 
 The CLI and libraries target `net10.0`. Consumers may reference NuGet packages independently of Jourfold. To develop both projects locally, place this repository beside `jourfold`; Jourfold uses project references when that sibling exists and package references otherwise.
 
+## NativeAOT
+
+The libraries are marked `IsAotCompatible`, so clients without a JIT, such as a native iOS app, can compile them with NativeAOT. The build reports trim and AOT problems as IL2xxx and IL3xxx warnings; keep it at none. In practice that means JSON through a source-generated `JsonSerializerContext` instead of `JsonSerializer.Serialize<T>` with reflection, and `JsonArray.Add((JsonNode)value)` instead of the generic overload. The contexts use `GenerationMode = JsonSourceGenerationMode.Metadata`: the faster generated writer of .NET 10 writes a null `byte[]` as `""`, and the files must stay exactly as they were (`JsonFormatTests`). `TravelRepo.Cli` and `TravelRepo.Mcp` are not marked; the MCP server finds its tools by reflection.
+
+`python3 eng/aot-smoke.py` compiles `tests/TravelRepo.AotSmoke` with NativeAOT for the current machine and runs it on the samples: reading, validation, YAML round trip, merge, a journalled write, exchange rates, the weather cache, a plugin manifest, a GitHub request, mail, PDF text and libgit2. It fails on any IL warning, also from a dependency. CI runs it on Linux. It needs clang on Linux, Xcode on macOS or the Visual Studio C++ tools on Windows.
+
 Canonical YAML is converted into a safe JSON-compatible tree, validated against embedded JSON Schema 2020-12, and then checked by `SemanticValidation`. YAML comments are non-semantic and are not preserved. Unknown fields, namespaces and compatible custom types are retained.
 
 ## Versions

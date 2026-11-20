@@ -13,7 +13,7 @@ public static class TripCommands
         if (document.Type != "document") throw new DomainException("document.type", "Only a document can be attached.");
         var copy = owner.Copy(); var content = copy.Data["content"] as JsonArray ?? new JsonArray(); copy.Data["content"] = content;
         var id = document.Id.ToString();
-        if (!content.OfType<JsonObject>().Any(c => c["document"]?.ToString() == id || c["entity"]?.ToString() == id)) content.Add(ContentEntry(document));
+        if (!content.OfType<JsonObject>().Any(c => c["document"]?.ToString() == id || c["entity"]?.ToString() == id)) content.Add((JsonNode)ContentEntry(document));
         return copy;
     }
 
@@ -55,7 +55,7 @@ public static class TripCommands
             changed.Add(WithoutChild(previous, step));
         }
         var copy = parent.Copy(); var children = copy.Data["children"] as JsonArray ?? new JsonArray(); copy.Data["children"] = children;
-        children.Add(step.ToString()); changed.Add(copy);
+        children.Add((JsonNode)step.ToString()); changed.Add(copy);
         if (child.Data["participants"] is null)
         {
             var inherits = child.Copy(); inherits.Data["participants"] = new JsonObject { ["inherit"] = true, ["values"] = new JsonArray() };

@@ -11,6 +11,12 @@
           "LibGit2Sharp.NativeBinaries": "[2.0.324]"
         }
       },
+      "Microsoft.NET.ILLink.Tasks": {
+        "type": "Direct",
+        "requested": "[10.0.12, )",
+        "resolved": "10.0.12",
+        "contentHash": "xi+BDjFpW+Sb+MHFHaH6Y/gV9I8BluFwRXc1QyCdoZbIK26eNiBeFuMTe/FMwc33G1wdHCyDg7CVTmb8OdQrMQ=="
+      },
       "Humanizer.Core": {
         "type": "Transitive",
         "resolved": "2.14.1",
@@ -62,21 +68,21 @@
       "travelrepo.git": {
         "type": "Project",
         "dependencies": {
-          "TravelRepo.Repository": "[0.6.0, )"
+          "TravelRepo.Repository": "[0.13.1, )"
         }
       },
       "travelrepo.repository": {
         "type": "Project",
         "dependencies": {
-          "TravelRepo.Core": "[0.6.0, )",
-          "TravelRepo.Serialization": "[0.6.0, )"
+          "TravelRepo.Core": "[0.13.1, )",
+          "TravelRepo.Serialization": "[0.13.1, )"
         }
       },
       "travelrepo.serialization": {
         "type": "Project",
         "dependencies": {
           "JsonSchema.Net": "[7.3.4, )",
-          "TravelRepo.Core": "[0.6.0, )",
+          "TravelRepo.Core": "[0.13.1, )",
           "YamlDotNet": "[16.3.0, )"
         }
       }

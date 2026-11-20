@@ -55,12 +55,12 @@ public static class TripPeople
         if (githubLogin is { Length: > 0 } && !GitHubLogins(copy).Contains(githubLogin, StringComparer.OrdinalIgnoreCase))
         {
             if (identities["github"] is not JsonArray github) identities["github"] = github = new JsonArray();
-            github.Add(new JsonObject { ["username"] = githubLogin });
+            github.Add((JsonNode)new JsonObject { ["username"] = githubLogin });
         }
         if (gitEmail is { Length: > 0 } && !Emails(copy).Contains(gitEmail, StringComparer.OrdinalIgnoreCase))
         {
             if (identities["git"] is not JsonArray git) identities["git"] = git = new JsonArray();
-            git.Add(new JsonObject { ["name"] = gitName ?? person.Title, ["email"] = gitEmail });
+            git.Add((JsonNode)new JsonObject { ["name"] = gitName ?? person.Title, ["email"] = gitEmail });
         }
         return copy;
     }

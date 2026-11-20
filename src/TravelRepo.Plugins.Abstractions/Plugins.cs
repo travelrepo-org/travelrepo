@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 namespace TravelRepo.Plugins;
 
 /// <summary>Version 1 plugin contract. Hosts exchange JSON-RPC 2.0 messages over standard input/output.</summary>
@@ -30,14 +31,12 @@ public sealed record PluginManifest(string Id, string Version, int MinimumApiVer
     /// <summary>The manifest file name inside a plugin package directory.</summary>
     public const string FileName = "jourfold.plugin.json";
 
-    private static readonly JsonSerializerOptions Options = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, PropertyNameCaseInsensitive = true };
-
     /// <summary>Parses manifest JSON and checks the required members.</summary>
     /// <exception cref="FormatException">The JSON is not a usable manifest.</exception>
     public static PluginManifest Parse(string json)
     {
         PluginManifest? manifest;
-        try { manifest = JsonSerializer.Deserialize<PluginManifest>(json, Options); }
+        try { manifest = JsonSerializer.Deserialize(json, PluginJson.Default.PluginManifest); }
         catch (JsonException ex) { throw new FormatException("The plugin manifest is not valid JSON.", ex); }
         if (manifest is null || string.IsNullOrWhiteSpace(manifest.Id) || string.IsNullOrWhiteSpace(manifest.Version) || string.IsNullOrWhiteSpace(manifest.EntryAssembly))
             throw new FormatException("The plugin manifest needs id, version and entryAssembly.");
@@ -68,3 +67,7 @@ public sealed record ComponentDefinition(string Type, string Title, JsonObject S
 public sealed record PluginDescription(int ApiVersion, string Id, ComponentDefinition[] Components, string[] Commands);
 public sealed record RpcRequest(string Jsonrpc, int Id, string Method, JsonNode? Params);
 public sealed record RpcError(int Code, string Message);
+
+[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, PropertyNameCaseInsensitive = true)]
+[JsonSerializable(typeof(PluginManifest))]
+internal sealed partial class PluginJson : JsonSerializerContext;
