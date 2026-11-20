@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Http.Headers;
-using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json.Nodes;
 using TravelRepo.Core;
@@ -18,7 +17,7 @@ namespace TravelRepo.Providers.GitHub;
 public sealed class GitHubProvider(HttpClient http, ISecretStore secrets, string clientId, string? appSlug = null) : IProviderAuthentication, IProviderAccount, IRepositoryDiscoveryProvider, IRepositoryAccessProvider, IRepositoryCreationProvider, IRepositoryPrivacyProvider, ICollaboratorProvider, IUserSearchProvider, IShareProvider
 {
     private const string TokenKey = "github.user-token";
-    private async Task<JsonNode> Send(HttpMethod method, string uri, object? body = null, bool authenticated = true, CancellationToken ct = default)
+    private async Task<JsonNode> Send(HttpMethod method, string uri, JsonObject? body = null, bool authenticated = true, CancellationToken ct = default)
     {
         using var request = new HttpRequestMessage(method, uri.StartsWith("https://", StringComparison.Ordinal) ? uri : "https://api.github.com/" + uri);
         request.Headers.UserAgent.ParseAdd("TravelRepo/" + TravelRepoInfo.Version); request.Headers.Accept.ParseAdd("application/json"); request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
@@ -27,7 +26,7 @@ public sealed class GitHubProvider(HttpClient http, ISecretStore secrets, string
             var token = await secrets.ReadAsync(TokenKey, ct) ?? throw new DomainException("github.authentication", "Connect GitHub first.");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         }
-        if (body is not null) request.Content = JsonContent.Create(body);
+        if (body is not null) request.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
         using var response = await http.SendAsync(request, ct);
         if (!response.IsSuccessStatusCode) throw new DomainException("github.http." + (int)response.StatusCode, "GitHub request failed. Check authorization and repository permissions.");
         var text = await response.Content.ReadAsStringAsync(ct); return string.IsNullOrWhiteSpace(text) ? new JsonObject() : JsonNode.Parse(text)!;
@@ -59,7 +58,7 @@ public sealed class GitHubProvider(HttpClient http, ISecretStore secrets, string
     public async Task<DeviceAuthorization> BeginAsync(CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(clientId)) throw new DomainException("github.setup", "A GitHub App client ID must be configured. See provider setup documentation.");
-        var n = await Send(HttpMethod.Post, "https://github.com/login/device/code", new { client_id = clientId }, false, ct);
+        var n = await Send(HttpMethod.Post, "https://github.com/login/device/code", new JsonObject { ["client_id"] = clientId }, false, ct);
         return new(n["device_code"]!.ToString(), n["user_code"]!.ToString(), n["verification_uri"]!.ToString(), (int)n["expires_in"]!, (int)n["interval"]!);
     }
     /// <summary>
@@ -94,7 +93,7 @@ public sealed class GitHubProvider(HttpClient http, ISecretStore secrets, string
     /// <exception cref="DomainException">The user declined, or the code expired.</exception>
     public async Task<DeviceSignIn> PollAsync(DeviceAuthorization authorization, CancellationToken ct = default)
     {
-        var n = await Send(HttpMethod.Post, "https://github.com/login/oauth/access_token", new { client_id = clientId, device_code = authorization.DeviceCode, grant_type = "urn:ietf:params:oauth:grant-type:device_code" }, false, ct);
+        var n = await Send(HttpMethod.Post, "https://github.com/login/oauth/access_token", new JsonObject { ["client_id"] = clientId, ["device_code"] = authorization.DeviceCode, ["grant_type"] = "urn:ietf:params:oauth:grant-type:device_code" }, false, ct);
         if (n["access_token"] is { } token) { await secrets.WriteAsync(TokenKey, token.ToString(), ct); return DeviceSignIn.Connected; }
         return n["error"]?.ToString() switch
         {
@@ -163,9 +162,9 @@ public sealed class GitHubProvider(HttpClient http, ISecretStore secrets, string
         }
         catch (DomainException ex) when (ex.Code == "github.http.404" || ex.Code.StartsWith("yaml.", StringComparison.Ordinal)) { return false; }
     }
-    public async Task<RemoteRepository> CreateAsync(string name, CancellationToken ct = default) => Parse(await Send(HttpMethod.Post, "user/repos", new { name, @private = true, auto_init = false }, ct: ct));
+    public async Task<RemoteRepository> CreateAsync(string name, CancellationToken ct = default) => Parse(await Send(HttpMethod.Post, "user/repos", new JsonObject { ["name"] = name, ["private"] = true, ["auto_init"] = false }, ct: ct));
     public async Task<RemoteRepository> InspectAsync(string fullName, CancellationToken ct = default) => Parse(await Send(HttpMethod.Get, "repos/" + EscapeName(fullName), authenticated: await secrets.ReadAsync(TokenKey, ct) is not null, ct: ct));
-    public async Task InviteAsync(string fullName, string username, CancellationToken ct = default) => await Send(HttpMethod.Put, "repos/" + EscapeName(fullName) + "/collaborators/" + Uri.EscapeDataString(username), new { permission = "push" }, ct: ct);
+    public async Task InviteAsync(string fullName, string username, CancellationToken ct = default) => await Send(HttpMethod.Put, "repos/" + EscapeName(fullName) + "/collaborators/" + Uri.EscapeDataString(username), new JsonObject { ["permission"] = "push" }, ct: ct);
     public async Task<IReadOnlyList<string>> SearchUsersAsync(string query, CancellationToken ct = default)
     { var n = await Send(HttpMethod.Get, "search/users?q=" + Uri.EscapeDataString(query), ct: ct); return n["items"]!.AsArray().Select(x => x!["login"]!.ToString()).ToArray(); }
     public Uri ShareUri(RemoteRepository repository, string? branch = null) => new(repository.WebUrl + (branch is null ? "" : "/tree/" + Uri.EscapeDataString(branch)));

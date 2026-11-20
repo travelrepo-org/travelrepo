@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Xml.Linq;
 
 namespace TravelRepo.Core;
@@ -46,7 +47,7 @@ public sealed record ExchangeRates(DateOnly Date, IReadOnlyDictionary<string, de
         try
         {
             if (!File.Exists(path)) return null;
-            var saved = JsonSerializer.Deserialize<Saved>(File.ReadAllText(path));
+            var saved = JsonSerializer.Deserialize(File.ReadAllText(path), ExchangeRatesJson.Default.Saved);
             return saved is null ? null : new(DateOnly.ParseExact(saved.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture), saved.PerEuro);
         }
         catch (Exception ex) when (ex is JsonException or FormatException or IOException) { return null; }
@@ -74,7 +75,11 @@ public sealed record ExchangeRates(DateOnly Date, IReadOnlyDictionary<string, de
         return decimal.TryParse(t, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var value) ? value : null;
     }
 
-    public void Save(string path) => File.WriteAllText(path, JsonSerializer.Serialize(new Saved(Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), PerEuro.ToDictionary())));
+    public void Save(string path) => File.WriteAllText(path, JsonSerializer.Serialize(new Saved(Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), PerEuro.ToDictionary()), ExchangeRatesJson.Default.Saved));
 
-    private sealed record Saved(string Date, Dictionary<string, decimal> PerEuro);
+    internal sealed record Saved(string Date, Dictionary<string, decimal> PerEuro);
 }
+
+[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]
+[JsonSerializable(typeof(ExchangeRates.Saved))]
+internal sealed partial class ExchangeRatesJson : JsonSerializerContext;

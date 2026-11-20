@@ -116,6 +116,11 @@ public static class SchemaValidation
         EvaluationResults result;
         lock (schema) result = schema.Evaluate(entity.Data, new EvaluationOptions { OutputFormat = OutputFormat.List });
         if (result.IsValid) return [];
-        return [new("schema.invalid", Severity.Error, entity.Data["id"]?.ToString() ?? "travel.yaml", System.Text.Json.JsonSerializer.Serialize(result))];
+        return [new("schema.invalid", Severity.Error, entity.Data["id"]?.ToString() ?? "travel.yaml", System.Text.Json.JsonSerializer.Serialize(result, SchemaResultJson.Default.EvaluationResults))];
     }
 }
+
+// JsonSchema.Net keeps its own serializer context internal; EvaluationResults carries its converter as an attribute.
+[System.Text.Json.Serialization.JsonSourceGenerationOptions(GenerationMode = System.Text.Json.Serialization.JsonSourceGenerationMode.Metadata)]
+[System.Text.Json.Serialization.JsonSerializable(typeof(EvaluationResults))]
+internal sealed partial class SchemaResultJson : System.Text.Json.Serialization.JsonSerializerContext;

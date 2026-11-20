@@ -40,3 +40,17 @@ jobs:
         with:
           name: travelrepo-${{ matrix.os }}
           path: artifacts/
+  # The libraries are marked IsAotCompatible. This compiles them with NativeAOT, as for iOS, and runs them on the samples.
+  native-aot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use the pinned SDK
+        shell: bash
+        run: cp eng/sdk.json global.json
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: eng/sdk.json
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+      - run: python3 eng/aot-smoke.py
