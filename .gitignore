@@ -40,3 +40,7 @@ coverage.*
 # Packaging output
 dist/
 packages-out/
+
+# Swift package
+.build/
+.swiftpm/

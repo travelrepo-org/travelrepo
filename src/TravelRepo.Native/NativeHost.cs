@@ -57,7 +57,7 @@ internal static class NativeHost
             catch (TripToolException ex) { response = Error(ex.Code, ex.Message); }
             catch (McpException ex) { response = Error("command.invalid", ex.Message); }
             catch (DomainException ex) { response = Error(ex.Code, ex.Message); }
-            catch (Exception ex) { response = Error("internal", ex.GetType().Name + ": " + ex.Message); }
+            catch (Exception ex) { response = Error("internal", ex.GetType().Name + ": " + ex.Message + (ex.InnerException is { } inner ? " (" + inner.GetType().Name + ": " + inner.Message + ")" : "")); }
             finally { Calls.TryRemove(id, out _); cancellation.Dispose(); }
             try { respond(response); } catch { /* The host's callback must not take the runtime down. */ }
         });
@@ -74,9 +74,25 @@ internal static class NativeHost
     /// <summary>Closes a session. Calls already running finish.</summary>
     public static void Close(ulong session) => Sessions.TryRemove(session, out _);
 
-    private static IGitBackend Git
+    /// <summary>
+    /// Git for every session. libgit2 is loaded on the first Git command, not when a trip opens: a failed load would
+    /// stay failed for the whole process, so an app that calls configure after opening a trip still gets working Git.
+    /// </summary>
+    private static readonly IGitBackend Git = new DeferredGit();
+
+    private sealed class DeferredGit : IGitBackend
     {
-        get { lock (GitGate) return git ??= new LibGit2Backend(Credentials); }
+        public Task<GitResult> ExecuteAsync(string directory, IReadOnlyList<string> arguments, string? input = null, CancellationToken cancellationToken = default)
+        {
+            IGitBackend backend;
+            lock (GitGate)
+            {
+                try { backend = git ??= new LibGit2Backend(Credentials); }
+                catch (TypeInitializationException ex) when (ex.InnerException is DllNotFoundException or BadImageFormatException)
+                { throw new DomainException("git.library", "libgit2 could not be loaded; call configure with its path before the first Git command. " + ex.InnerException.Message); }
+            }
+            return backend.ExecuteAsync(directory, arguments, input, cancellationToken);
+        }
     }
 
     private static async Task<JsonNode?> Global(string command, Arguments args, CancellationToken ct)
