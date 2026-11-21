@@ -111,6 +111,15 @@ With a session:
 | `rollback` | `revision`: a commit from `list_versions` | `{}` |
 | `merge_preview` | `branch`: a variant, or a remote branch such as `origin/main` after `sync` reported `diverged`; optional `resolutions` | `can_apply`, `conflicts` (`key`, `entity`, `path`, `kind`, `base`, `current`, `incoming`), `changes`, `diagnostics` |
 | `merge_apply` | `branch`, `resolutions`: `{"<key>": value}` for every conflict, optional `message` | `commit`; merges into the current variant and records the merge in Git |
+| `costs` | optional `currency` (converted with the saved exchange rates) | `expenses` (amount, method, payers, shares, debts, issues), `open_debts`, `balances`, `totals` per currency, `categories`, `budgets` |
+| `packing` | – | `lists` with their items (`group`, `quantity`, `everyone`, `assignees`, `packed_by`) |
+| `bookings` | – | every booking with its plans (`items`), paid and planned expenses and `coverage` |
+| `stays` | – | every stay with `first_night`, `nights`, `zone`, `check_in`, `check_out` and `issues` |
+| `reminders` | optional `now` (ISO 8601 instant, default the current time) | what is due: `kind`, `entity`, `title`, `moment`, `urgent`, `dates` |
+| `export` | `kind` (`plan`, `costs`, `packing`), `format` (`text`, `html` and `ics` for plans; `text` and `csv` for costs and packing), optional `person` | `text`, written in the session's culture |
+| `import_document_data` | `name`, `base64`, optional `media_type` (from the name otherwise), `attach_to` | the new document's `id`, `media_type` and the new `revision` |
+| `fetch_exchange_rates` | – | `date` and `currencies` of the European Central Bank's reference rates, saved to the session's `exchange_rates` file |
+| `fetch_weather` | optional `refresh` | the weather by `days` and plan `items`, `sources` to credit and `problems` of services that failed; needs `weather_cache` |
 | `initialize_git` | `name`, `email` | `{}`; starts Git history for a trip that has none |
 | `sync_status` | optional `remote` | `branch`, `ahead`, `behind`, `has_local_changes`, `state` (`local_only`, `synced`, `local_changes`, `diverged`, `remote_changes`) |
 | `sync` | optional `remote` (default `origin`) | `state`; fetches, takes fast-forwards and sends own versions |
@@ -140,7 +149,7 @@ Edits go through `apply` with the revision they were based on. If the trip chang
 
 To answer a merge conflict, put the value that should win under the conflict's `key` in `resolutions`. That is `current`, `incoming` or a value the user edited. Ask `merge_preview` again until `can_apply` is true, then call `merge_apply` with the same `resolutions`. After a `sync` that reports `diverged`, merge the remote branch the same way and `sync` again.
 
-TravelRepo does not send change notifications. Apps ask for `revision` when they come to the foreground or after a sync, and read again when it differs.
+TravelRepo does not send change notifications, and `clone` reports no progress. Both would need a second callback in the C interface; until then apps show an indeterminate progress indicator while cloning. Apps ask for `revision` when they come to the foreground or after a sync, and read again when it differs.
 
 ## GitHub
 

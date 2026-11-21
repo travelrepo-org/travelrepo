@@ -261,6 +261,77 @@ public sealed class NativeTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task AppsReadCostsPackingStaysRemindersAndExports()
+    {
+        var trip = Trip();
+        var session = (await Ok(0, "open", new JsonObject
+        {
+            ["root"] = trip,
+            ["recovery_root"] = Path.Combine(root, "recovery"),
+            ["culture"] = "de-DE",
+            ["exchange_rates"] = Path.Combine(root, "rates.json"),
+            ["weather_cache"] = Path.Combine(root, "weather")
+        }))["session"]!.GetValue<ulong>();
+        await Ok(session, "add_expense", new JsonObject { ["title"] = "Sushi at Tsukiji", ["amount"] = "6000", ["currency"] = "JPY", ["paid_by"] = new JsonArray("Alex") });
+        var list = (await Ok(session, "create_packing_list", new JsonObject { ["title"] = "Kyoto" }))["id"]!.GetValue<string>();
+        await Ok(session, "add_packing_item", new JsonObject { ["list"] = list, ["title"] = "Rail pass", ["everyone"] = true });
+
+        var costs = await Ok(session, "costs");
+        var sushi = costs["expenses"]!.AsArray().Single(e => e!["title"]!.GetValue<string>() == "Sushi at Tsukiji")!;
+        Assert.Equal("6000", sushi["amount"]!["value"]!.GetValue<string>());
+        Assert.Contains(costs["open_debts"]!.AsArray(), d => d!["currency"]!.GetValue<string>() == "JPY" && d["open"]!.GetValue<decimal>() == 3000);
+        Assert.Contains(costs["totals"]!.AsArray(), t => t!["currency"]!.GetValue<string>() == "JPY");
+
+        var packing = (await Ok(session, "packing"))["lists"]!.AsArray().Single(l => l!["id"]!.GetValue<string>() == list)!;
+        Assert.True(Assert.Single(packing["items"]!.AsArray())!["everyone"]!.GetValue<bool>());
+        Assert.NotNull((await Ok(session, "bookings"))["bookings"]);
+        Assert.NotNull((await Ok(session, "stays"))["stays"]);
+        Assert.NotNull((await Ok(session, "reminders", new JsonObject { ["now"] = "2027-05-01T08:00:00Z" }))["reminders"]);
+        Assert.Equal("argument.invalid", await Failure(session, "reminders", new JsonObject { ["now"] = "tomorrow" }));
+
+        Assert.Contains("Mai", (await Ok(session, "export"))["text"]!.GetValue<string>());
+        Assert.Contains("<html", (await Ok(session, "export", new JsonObject { ["format"] = "html" }))["text"]!.GetValue<string>(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("BEGIN:VCALENDAR", (await Ok(session, "export", new JsonObject { ["format"] = "ics" }))["text"]!.GetValue<string>());
+        Assert.Contains("Sushi at Tsukiji", (await Ok(session, "export", new JsonObject { ["kind"] = "costs", ["format"] = "csv" }))["text"]!.GetValue<string>());
+        Assert.Contains("Rail pass", (await Ok(session, "export", new JsonObject { ["kind"] = "packing" }))["text"]!.GetValue<string>());
+        Assert.Equal("argument.invalid", await Failure(session, "export", new JsonObject { ["kind"] = "packing", ["format"] = "ics" }));
+
+        // A document from bytes, as the share sheet hands it over, attached to the flight.
+        const string flight = "669afb3f-38b4-7df8-9f47-910f4e1b17d5";
+        var imported = await Ok(session, "import_document_data", new JsonObject { ["name"] = "seat.txt", ["base64"] = Convert.ToBase64String(Encoding.UTF8.GetBytes("Window seat 23A")), ["attach_to"] = flight });
+        var document = imported["id"]!.GetValue<string>();
+        Assert.Contains(document, (await Ok(session, "get_entity", new JsonObject { ["id"] = flight }))["entity"]!["content"]!.ToJsonString());
+        Assert.Equal("argument.invalid", await Failure(session, "import_document_data", new JsonObject { ["name"] = "seat.txt", ["base64"] = "not base64!" }));
+    }
+
+    [Fact]
+    public async Task ExchangeRatesAndWeatherAreFetchedThroughTheInterface()
+    {
+        var ecb = """<gesmes:Envelope xmlns:gesmes="http://www.gesmes.org/xml/2002-08-01" xmlns="http://www.ecb.int/vocabulary/2002-08-01/eurofxref"><Cube><Cube time="2027-05-10"><Cube currency="JPY" rate="160"/><Cube currency="NZD" rate="1.85"/></Cube></Cube></gesmes:Envelope>""";
+        AppCommands.Http = new HttpClient(new FakeGitHub(r => r.RequestUri!.Host.Contains("ecb.europa.eu")
+            ? new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(ecb, Encoding.UTF8, "application/xml") }
+            : new HttpResponseMessage(System.Net.HttpStatusCode.ServiceUnavailable)));
+        try
+        {
+            var trip = Trip(); var rates = Path.Combine(root, "rates.json");
+            var plain = (await Ok(0, "open", new JsonObject { ["root"] = trip, ["recovery_root"] = Path.Combine(root, "recovery") }))["session"]!.GetValue<ulong>();
+            Assert.Equal("weather.cache", await Failure(plain, "fetch_weather"));
+            var session = (await Ok(0, "open", new JsonObject { ["root"] = trip, ["recovery_root"] = Path.Combine(root, "recovery"), ["exchange_rates"] = rates, ["weather_cache"] = Path.Combine(root, "weather") }))["session"]!.GetValue<ulong>();
+
+            var fetched = await Ok(session, "fetch_exchange_rates");
+            Assert.Equal("2027-05-10", fetched["date"]!.GetValue<string>());
+            Assert.True(fetched["saved"]!.GetValue<bool>());
+            Assert.Equal(160m, TravelRepo.Core.ExchangeRates.Load(rates)!.PerEuro["JPY"]);
+
+            // Every weather service is down here: the result says so instead of failing the call.
+            var weather = await Ok(session, "fetch_weather");
+            Assert.NotNull(weather["days"]);
+            Assert.NotNull(weather["problems"]);
+        }
+        finally { AppCommands.Http = new HttpClient(); }
+    }
+
     private sealed class FakeGitHub(Func<HttpRequestMessage, HttpResponseMessage> answer) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => Task.FromResult(answer(request));
