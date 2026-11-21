@@ -75,12 +75,21 @@ public final class TravelRepoSession: Sendable {
         struct Synced: Decodable { let state: String }
         return try await call("sync", ["remote": .string(remote)], as: Synced.self).state
     }
-    public func mergePreview(branch: String, resolutions: [String: JSONValue] = [:]) async throws -> MergePreview {
-        try await call("merge_preview", ["branch": .string(branch), "resolutions": .object(resolutions)])
+    /// Watches the trip folder and sends `trip_changed` events when its revision changes (see `TravelRepo.setEventHandler`).
+    @discardableResult
+    public func watch(every seconds: Int = 5, enabled: Bool = true) async throws -> Bool {
+        struct Watching: Decodable { let watching: Bool }
+        return try await call("watch", ["enabled": .bool(enabled), "interval_seconds": .number(Double(seconds))], as: Watching.self).watching
+    }
+
+    /// The merge of `branch` into the current variant. `keepBoth` lists entities whose conflicts keep the current
+    /// entity and add the incoming one as a copy.
+    public func mergePreview(branch: String, resolutions: [String: JSONValue] = [:], keepBoth: [String] = []) async throws -> MergePreview {
+        try await call("merge_preview", ["branch": .string(branch), "resolutions": .object(resolutions), "keep_both": .array(keepBoth.map(JSONValue.string))])
     }
     @discardableResult
-    public func mergeApply(branch: String, resolutions: [String: JSONValue], message: String? = nil) async throws -> String {
-        var arguments: [String: JSONValue] = ["branch": .string(branch), "resolutions": .object(resolutions)]
+    public func mergeApply(branch: String, resolutions: [String: JSONValue], keepBoth: [String] = [], message: String? = nil) async throws -> String {
+        var arguments: [String: JSONValue] = ["branch": .string(branch), "resolutions": .object(resolutions), "keep_both": .array(keepBoth.map(JSONValue.string))]
         if let message { arguments["message"] = .string(message) }
         struct Merged: Decodable { let commit: String }
         return try await call("merge_apply", arguments, as: Merged.self).commit

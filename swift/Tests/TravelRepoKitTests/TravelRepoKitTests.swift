@@ -81,6 +81,23 @@ final class TravelRepoKitTests: XCTestCase {
         XCTAssertTrue(snapshot.entities.contains { $0.data["id"]?.string == note })
     }
 
+    func testWatchedSessionsReportChanges() async throws {
+        let session = try await openTrip()
+        let changed = expectation(description: "trip_changed")
+        let id = session.id
+        TravelRepo.setEventHandler { event in
+            if event["type"]?.string == "trip_changed", event["session"]?.number == Double(id) { changed.fulfill() }
+        }
+        defer { TravelRepo.setEventHandler(nil) }
+        let watching = try await session.watch(every: 1)
+        XCTAssertTrue(watching)
+        // A change made outside this session, as a sync or another app would.
+        let other = try await TravelRepoSession.open(root: root.appendingPathComponent("trip"), recoveryRoot: root.appendingPathComponent("recovery-other"))
+        try await other.call("create_entity", ["type": "place", "data": ["title": "Fushimi Inari"]])
+        await fulfillment(of: [changed], timeout: 15)
+        try await session.watch(enabled: false)
+    }
+
     func testErrorsCarryTravelRepoCodes() async throws {
         let session = try await openTrip()
         do { try await session.call("fly_to_the_moon"); XCTFail("unknown command accepted") }

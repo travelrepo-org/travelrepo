@@ -72,6 +72,24 @@ public enum TravelRepo {
     }
 }
 
+extension TravelRepo {
+    /// Receives TravelRepo's events: `clone_progress` while cloning (with the call's objects and checked-out files)
+    /// and `trip_changed` for sessions that `watch` (with the session id and new revision). Called on a TravelRepo
+    /// thread; hand the event over to the main actor before touching the UI. Nil stops it.
+    public static func setEventHandler(_ handler: (@Sendable (JSONValue) -> Void)?) {
+        Events.handler = handler
+        if handler == nil { tr_set_event_handler(nil, nil); return }
+        tr_set_event_handler({ _, event in
+            guard let event, let value = try? JSONDecoder().decode(JSONValue.self, from: Data(String(cString: event).utf8)) else { return }
+            Events.handler?(value)
+        }, nil)
+    }
+}
+
+private enum Events {
+    nonisolated(unsafe) static var handler: (@Sendable (JSONValue) -> Void)?
+}
+
 private enum Credentials {
     nonisolated(unsafe) static var provider: (@Sendable (URL) async -> (username: String, password: String)?)?
 }
