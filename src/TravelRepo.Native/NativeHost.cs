@@ -229,7 +229,7 @@ internal static class NativeHost
                 await session.Git.InitializeAsync(args.Required("name"), args.Required("email"), ct);
                 return new JsonObject();
             case "watch":
-                if (args.Bool("enabled", true)) session.Watch(TimeSpan.FromSeconds(Math.Clamp(args.Int("interval_seconds", 5), 1, 3600)), session.Id);
+                if (args.Bool("enabled", true)) await session.WatchAsync(TimeSpan.FromSeconds(Math.Clamp(args.Int("interval_seconds", 5), 1, 3600)), session.Id, ct);
                 else session.StopWatching();
                 return new JsonObject { ["watching"] = session.IsWatching };
             case "add_remote":
@@ -276,14 +276,18 @@ internal sealed class NativeSession(TravelRepository repository, GitRepository g
     /// example after a sync or an edit in another app. Comparing file sizes and times first keeps it cheap; the trip is
     /// only read again when one of them changed.
     /// </summary>
-    public void Watch(TimeSpan interval, ulong session)
+    /// <remarks>
+    /// The starting point is taken before this returns, so a change made right after <c>watch</c> answers is always
+    /// reported, never mistaken for the starting point.
+    /// </remarks>
+    public async Task WatchAsync(TimeSpan interval, ulong session, CancellationToken ct)
     {
+        var fingerprint = Fingerprint(); string? revision = null;
+        try { revision = ClientCommands.Revision(await ReadAsync(ct)); } catch (Exception ex) when (ex is not OperationCanceledException) { }
         CancellationToken token;
         lock (gate) { watching?.Cancel(); watching = new(); token = watching.Token; }
         _ = Task.Run(async () =>
         {
-            var fingerprint = Fingerprint(); string? revision = null;
-            try { revision = ClientCommands.Revision(await ReadAsync(token)); } catch (Exception ex) when (ex is not OperationCanceledException) { }
             while (!token.IsCancellationRequested)
             {
                 try
