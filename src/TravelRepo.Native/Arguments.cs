@@ -32,6 +32,9 @@ internal sealed class Arguments(JsonObject values)
     public string[]? OptionalStrings(string name) => Record(name, "string[]", null, false) ? null : Value(name, false, StringArray, "an array of strings");
     public JsonElement Json(string name) => Record(name, "json", null, true) ? default : Value<JsonElement?>(name, true, n => JsonDocument.Parse(n.ToJsonString()).RootElement.Clone(), "a JSON value")!.Value;
 
+    public JsonObject? Object(string name) => Record(name, "object", null, false) ? null : Value(name, false, n => n.AsObject(), "a JSON object");
+    public JsonArray? Array(string name) => Record(name, "array", null, false) ? null : Value(name, false, n => n.AsArray(), "a JSON array");
+
     private bool Record(string name, string type, object? fallback, bool required)
     {
         if (Recorder is null) return false;

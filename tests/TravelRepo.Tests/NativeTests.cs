@@ -115,6 +115,92 @@ public sealed class NativeTests : IDisposable
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => credentials.GetAsync(new Uri("https://github.com/alex-travels/trip.git"), cancel.Token));
     }
 
+    [Fact]
+    public async Task AppsEditWithRevisionsAndGetConflictsWhenTheTripChanged()
+    {
+        var created = await Ok(0, "create_trip", new JsonObject { ["root"] = Path.Combine(root, "spring"), ["recovery_root"] = Path.Combine(root, "recovery"), ["title"] = "Spring in Japan", ["timezone"] = "Asia/Tokyo" });
+        Assert.Equal("trip.exists", await Failure(0, "create_trip", new JsonObject { ["root"] = Path.Combine(root, "spring"), ["title"] = "Again" }));
+        var session = (await Ok(0, "open", new JsonObject { ["root"] = created["root"]!.GetValue<string>(), ["recovery_root"] = Path.Combine(root, "recovery") }))["session"]!.GetValue<ulong>();
+        var revision = (await Ok(session, "snapshot"))["revision"]!.GetValue<string>();
+
+        var alex = TravelRepo.Core.Entity.Create("person", "Alex"); var sam = TravelRepo.Core.Entity.Create("person", "Sam");
+        var applied = await Ok(session, "apply", new JsonObject
+        {
+            ["revision"] = revision,
+            ["edits"] = new JsonArray(new JsonObject { ["id"] = alex.Id.ToString(), ["data"] = alex.Data.DeepClone() }, new JsonObject { ["id"] = sam.Id.ToString(), ["data"] = sam.Data.DeepClone() }),
+            ["resources"] = new JsonArray(new JsonObject { ["path"] = "documents/" + alex.Id + ".md", ["base64"] = Convert.ToBase64String(Encoding.UTF8.GetBytes("Window seat to Kyoto.")) })
+        });
+        var after = applied["revision"]!.GetValue<string>();
+        Assert.NotEqual(revision, after);
+        Assert.Equal(after, (await Ok(session, "revision"))["revision"]!.GetValue<string>());
+        Assert.Equal("Window seat to Kyoto.", Encoding.UTF8.GetString(Convert.FromBase64String((await Ok(session, "read_resource", new JsonObject { ["path"] = "documents/" + alex.Id + ".md" }))["base64"]!.GetValue<string>())));
+        Assert.Equal("resource.missing", await Failure(session, "read_resource", new JsonObject { ["path"] = "documents/none.md" }));
+
+        // An edit based on the old revision must not overwrite what happened since.
+        Assert.Equal("repository.changed", await Failure(session, "apply", new JsonObject { ["revision"] = revision, ["edits"] = new JsonArray(new JsonObject { ["id"] = sam.Id.ToString(), ["data"] = null }) }));
+        Assert.Equal("repository.changed", await Failure(session, "apply", new JsonObject { ["revision"] = "0000000000000000", ["edits"] = new JsonArray(new JsonObject { ["id"] = sam.Id.ToString(), ["data"] = null }) }));
+        await Ok(session, "apply", new JsonObject { ["revision"] = after, ["edits"] = new JsonArray(new JsonObject { ["id"] = sam.Id.ToString(), ["data"] = null }) });
+        Assert.DoesNotContain((await Ok(session, "snapshot"))["entities"]!.AsArray(), e => e!["data"]!["id"]!.GetValue<string>() == sam.Id.ToString());
+
+        var readOnly = (await Ok(0, "open", new JsonObject { ["root"] = created["root"]!.GetValue<string>(), ["recovery_root"] = Path.Combine(root, "recovery"), ["read_only"] = true }))["session"]!.GetValue<ulong>();
+        Assert.Equal("session.read_only", await Failure(readOnly, "apply", new JsonObject { ["revision"] = after, ["edits"] = new JsonArray() }));
+    }
+
+    [Fact]
+    public async Task AgendaAndSearchGiveStructuredResults()
+    {
+        var session = (await Ok(0, "open", new JsonObject { ["root"] = Trip(), ["recovery_root"] = Path.Combine(root, "recovery") }))["session"]!.GetValue<ulong>();
+        var agenda = await Ok(session, "agenda");
+        var flight = agenda["days"]!.AsArray().SelectMany(d => d!["entries"]!.AsArray()).First(e => e!["title"]!.GetValue<string>() == "Flight to Tokyo")!;
+        Assert.Equal("2027-05-12T11:20:00Z", flight["start"]!.GetValue<string>());
+        Assert.Equal("Europe/Berlin", flight["zone"]!.GetValue<string>());
+        Assert.Equal("Asia/Tokyo", flight["end_zone"]!.GetValue<string>());
+        Assert.Equal("transport", flight["kind"]!.GetValue<string>());
+
+        var hit = Assert.Single((await Ok(session, "find", new JsonObject { ["query"] = "fligh tok", ["kinds"] = new JsonArray("plan") }))["hits"]!.AsArray())!;
+        Assert.Equal("plan", hit["kind"]!.GetValue<string>());
+        var match = hit["matches"]![0]!;
+        Assert.Equal("title", match["field"]!.GetValue<string>());
+        Assert.Equal("Fligh", match["text"]!.GetValue<string>().Substring(match["ranges"]![0]!["start"]!.GetValue<int>(), match["ranges"]![0]!["length"]!.GetValue<int>()));
+        Assert.Equal("argument.invalid", await Failure(session, "find", new JsonObject { ["query"] = "x", ["kinds"] = new JsonArray("spaceship") }));
+    }
+
+    [Fact]
+    public async Task VariantsAreMergedWithAnsweredConflicts()
+    {
+        var created = await Ok(0, "create_trip", new JsonObject { ["root"] = Path.Combine(root, "kyoto"), ["recovery_root"] = Path.Combine(root, "recovery"), ["title"] = "Kyoto", ["git_name"] = "Alex", ["git_email"] = "alex@example.invalid" });
+        var session = (await Ok(0, "open", new JsonObject { ["root"] = created["root"]!.GetValue<string>(), ["recovery_root"] = Path.Combine(root, "recovery") }))["session"]!.GetValue<ulong>();
+        var temple = (await Ok(session, "create_entity", new JsonObject { ["type"] = "place", ["data"] = new JsonObject { ["title"] = "Kiyomizu-dera" } }))["id"]!.GetValue<string>();
+        await Ok(session, "create_version", new JsonObject { ["message"] = "Add the temple" });
+
+        async Task Rename(string title, string message)
+        {
+            var entity = (await Ok(session, "get_entity", new JsonObject { ["id"] = temple }))["entity"]!.AsObject(); entity["title"] = title;
+            await Ok(session, "apply", new JsonObject { ["revision"] = (await Ok(session, "revision"))["revision"]!.DeepClone(), ["edits"] = new JsonArray(new JsonObject { ["id"] = temple, ["data"] = entity.DeepClone() }) });
+            await Ok(session, "create_version", new JsonObject { ["message"] = message });
+        }
+        await Ok(session, "create_variant", new JsonObject { ["branch"] = "variants/early-start", ["title"] = "Early start" });
+        await Rename("Kiyomizu-dera at dawn", "Go early");
+        var variants = (await Ok(session, "variants"))["variants"]!.AsArray();
+        Assert.Contains(variants, v => v!["branch"]!.GetValue<string>() == "variants/early-start" && v["current"]!.GetValue<bool>());
+        var primary = variants.First(v => v!["primary"]!.GetValue<bool>())!["branch"]!.GetValue<string>();
+        await Ok(session, "switch_variant", new JsonObject { ["branch"] = primary });
+        await Rename("Kiyomizu-dera at sunset", "Go late");
+
+        var preview = await Ok(session, "merge_preview", new JsonObject { ["branch"] = "variants/early-start" });
+        Assert.False(preview["can_apply"]!.GetValue<bool>());
+        var conflict = Assert.Single(preview["conflicts"]!.AsArray())!;
+        Assert.Equal("Kiyomizu-dera at sunset", conflict["current"]!.GetValue<string>());
+        Assert.Equal("Kiyomizu-dera at dawn", conflict["incoming"]!.GetValue<string>());
+        Assert.Equal("merge.unresolved", await Failure(session, "merge_apply", new JsonObject { ["branch"] = "variants/early-start" }));
+
+        var resolutions = new JsonObject { [conflict["key"]!.GetValue<string>()] = "Kiyomizu-dera at dawn" };
+        Assert.True((await Ok(session, "merge_preview", new JsonObject { ["branch"] = "variants/early-start", ["resolutions"] = resolutions.DeepClone() }))["can_apply"]!.GetValue<bool>());
+        Assert.NotEmpty((await Ok(session, "merge_apply", new JsonObject { ["branch"] = "variants/early-start", ["resolutions"] = resolutions.DeepClone() }))["commit"]!.GetValue<string>());
+        Assert.Equal("Kiyomizu-dera at dawn", (await Ok(session, "get_entity", new JsonObject { ["id"] = temple }))["entity"]!["title"]!.GetValue<string>());
+        Assert.Contains((await Ok(session, "list_versions"))["versions"]!.AsArray(), v => v!["message"]!.GetValue<string>().StartsWith("Merge Early start", StringComparison.Ordinal));
+    }
+
     private string Trip()
     {
         var trip = Path.Combine(root, "trip-" + Guid.NewGuid().ToString("N")[..8]);

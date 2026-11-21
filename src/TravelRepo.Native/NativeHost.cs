@@ -21,7 +21,7 @@ namespace TravelRepo.Native;
 internal static class NativeHost
 {
     private static readonly JsonSerializerOptions Output = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
-    private static readonly ConcurrentDictionary<ulong, Session> Sessions = new();
+    private static readonly ConcurrentDictionary<ulong, NativeSession> Sessions = new();
     private static readonly ConcurrentDictionary<ulong, CancellationTokenSource> Calls = new();
     private static readonly Lock GitGate = new();
     private static long lastSession, lastCall;
@@ -30,13 +30,11 @@ internal static class NativeHost
     /// <summary>Asks the host for Git credentials. Set through <see cref="NativeApi"/>.</summary>
     public static HostCredentials Credentials { get; } = new();
 
+    /// <summary>The version of the C ABI and of the JSON it carries. It grows when something changes incompatibly.</summary>
+    public const int AbiVersion = 1;
+
     /// <summary>The commands that need no session (session 0).</summary>
-    public static readonly IReadOnlyList<string> GlobalCommands = ["info", "configure", "open", "clone"];
-
-    /// <summary>The commands of a session in addition to <see cref="Tools"/>.</summary>
-    public static readonly IReadOnlyList<string> SessionCommands = ["snapshot", "initialize_git", "sync_status", "sync", "add_remote"];
-
-    private sealed record Session(TravelRepository Repository, GitRepository Git, TripTools Tools, CultureInfo? Culture);
+    public static readonly IReadOnlyList<string> GlobalCommands = ["info", "configure", "create_trip", "open", "clone"];
 
     /// <summary>Starts a call and returns its id for <see cref="Cancel"/>. <paramref name="respond"/> runs exactly once.</summary>
     public static ulong Call(ulong session, string command, string? arguments, Action<string> respond)
@@ -50,7 +48,7 @@ internal static class NativeHost
             try
             {
                 var args = Arguments.Parse(arguments);
-                Session? open = null;
+                NativeSession? open = null;
                 if (session != 0 && !Sessions.TryGetValue(session, out open)) throw new DomainException("session.unknown", "There is no open session " + session + ".");
                 if (open?.Culture is { } culture) { CultureInfo.CurrentCulture = culture; CultureInfo.CurrentUICulture = culture; }
                 response = Ok(await (open is null ? Global(command, args, cancellation.Token) : Run(open, command, args, cancellation.Token)));
@@ -89,14 +87,15 @@ internal static class NativeHost
                 AppContext.TryGetSwitch("System.Globalization.Invariant", out var invariant);
                 return new JsonObject
                 {
+                    ["abi_version"] = AbiVersion,
                     ["version"] = TravelRepoInfo.Version,
                     ["format_version"] = TravelRepoInfo.FormatVersion,
                     ["invariant_globalization"] = invariant,
                     ["commands"] = new JsonObject
                     {
                         ["global"] = new JsonArray(GlobalCommands.Select(c => (JsonNode)c).ToArray()),
-                        ["session"] = new JsonArray(SessionCommands.Concat(Tools.All.Select(t => t.Name)).Select(c => (JsonNode)c).ToArray()),
-                        ["read_only"] = new JsonArray(Tools.All.Where(t => t.ReadOnly).Select(t => (JsonNode)t.Name).Concat(["snapshot", "sync_status"]).ToArray())
+                        ["session"] = new JsonArray(ClientCommands.Names.Concat(Tools.All.Select(t => t.Name)).Select(c => (JsonNode)c).ToArray()),
+                        ["read_only"] = new JsonArray(ClientCommands.ReadOnly.Concat(Tools.All.Where(t => t.ReadOnly).Select(t => t.Name)).Select(c => (JsonNode)c).ToArray())
                     }
                 };
             case "configure":
@@ -106,6 +105,16 @@ internal static class NativeHost
                     catch (Exception ex) when (ex is DllNotFoundException or InvalidOperationException) { throw new DomainException("git.library", ex.Message); }
                 }
                 return new JsonObject();
+            case "create_trip":
+                {
+                    var root = Path.GetFullPath(args.Required("root"));
+                    if (Directory.Exists(root) && Directory.EnumerateFileSystemEntries(root).Any()) throw new DomainException("trip.exists", "The folder " + root + " is not empty.");
+                    var repository = new TravelRepository(root, args.String("recovery_root"));
+                    var manifest = Entity.CreateTrip(args.Required("title"), args.String("language", "en"), args.String("timezone"));
+                    await repository.InitializeAsync(manifest, ct);
+                    if (args.String("git_name") is { } name) await new GitRepository(repository, Git).InitializeAsync(name, args.Required("git_email"), ct);
+                    return new JsonObject { ["root"] = root, ["id"] = manifest.Id.ToString() };
+                }
             case "open":
                 return new JsonObject { ["session"] = Open(args) };
             case "clone":
@@ -115,7 +124,7 @@ internal static class NativeHost
                     return new JsonObject { ["destination"] = destination };
                 }
             default:
-                throw Unknown(command, Tools.ByName.ContainsKey(command) || SessionCommands.Contains(command) ? "It needs the session that open returns." : null);
+                throw Unknown(command, Tools.ByName.ContainsKey(command) || ClientCommands.Names.Contains(command) ? "It needs the session that open returns." : null);
         }
     }
 
@@ -131,27 +140,18 @@ internal static class NativeHost
         }
         var repository = new TravelRepository(root, args.String("recovery_root"));
         var weatherCache = args.String("weather_cache"); var weatherProvider = args.String("weather_provider"); var rates = args.String("exchange_rates");
-        var tools = new TripTools(repository, Git, args.Bool("read_only", false),
+        var readOnly = args.Bool("read_only", false);
+        var tools = new TripTools(repository, Git, readOnly,
             weatherCache is null ? null : () => new CachedWeatherSource(weatherCache, weatherProvider), args.String("client_name"), rates is null ? null : () => rates);
         var id = (ulong)Interlocked.Increment(ref lastSession);
-        Sessions[id] = new(repository, new GitRepository(repository, Git), tools, culture);
+        Sessions[id] = new(repository, new GitRepository(repository, Git), tools, culture, readOnly);
         return id;
     }
 
-    private static async Task<JsonNode?> Run(Session session, string command, Arguments args, CancellationToken ct)
+    private static async Task<JsonNode?> Run(NativeSession session, string command, Arguments args, CancellationToken ct)
     {
         switch (command)
         {
-            case "snapshot":
-                {
-                    var state = await session.Repository.ReadAsync(ct);
-                    return new JsonObject
-                    {
-                        ["entities"] = new JsonArray(state.Files.Values.OrderBy(f => f.Path, StringComparer.Ordinal)
-                            .Select(f => (JsonNode)new JsonObject { ["path"] = f.Path, ["hash"] = f.Hash, ["data"] = f.Entity.Data.DeepClone() }).ToArray()),
-                        ["diagnostics"] = Diagnostics(state.Diagnostics)
-                    };
-                }
             case "sync_status":
                 {
                     var status = await session.Git.SyncStatusAsync(args.String("remote"), ct);
@@ -163,40 +163,27 @@ internal static class NativeHost
                         ["remote_branch_exists"] = status.RemoteBranchExists,
                         ["ahead"] = status.Ahead,
                         ["behind"] = status.Behind,
-                        ["state"] = State(status.State)
+                        ["state"] = ClientCommands.Snake(status.State.ToString())
                     };
                 }
             case "sync":
-                return new JsonObject { ["state"] = State(await session.Git.SyncAsync(args.String("remote", "origin"), ct)) };
+                if (session.ReadOnly) throw new DomainException("session.read_only", "This session is read-only.");
+                return new JsonObject { ["state"] = ClientCommands.Snake((await session.Git.SyncAsync(args.String("remote", "origin"), ct)).ToString()) };
             case "initialize_git":
+                if (session.ReadOnly) throw new DomainException("session.read_only", "This session is read-only.");
                 await session.Git.InitializeAsync(args.Required("name"), args.Required("email"), ct);
                 return new JsonObject();
             case "add_remote":
+                if (session.ReadOnly) throw new DomainException("session.read_only", "This session is read-only.");
                 await session.Git.AddRemoteAsync(args.Required("name"), args.Required("url"), ct);
                 return new JsonObject();
         }
+        var (found, result) = await ClientCommands.RunAsync(session, command, args, ct);
+        if (found) return result;
         if (!Tools.ByName.TryGetValue(command, out var tool)) throw Unknown(command, null);
         var text = await tool.Run(session.Tools, args, ct);
         return tool.Name == "read_guide" ? JsonValue.Create(text) : JsonNode.Parse(text);
     }
-
-    private static JsonArray Diagnostics(IEnumerable<Diagnostic> diagnostics) => new(diagnostics.Select(d => (JsonNode)new JsonObject
-    {
-        ["code"] = d.Code,
-        ["severity"] = d.Severity.ToString().ToLowerInvariant(),
-        ["path"] = d.Path,
-        ["message"] = d.Message
-    }).ToArray());
-
-    private static string State(SyncState state) => state switch
-    {
-        SyncState.LocalOnly => "local_only",
-        SyncState.Synced => "synced",
-        SyncState.LocalChanges => "local_changes",
-        SyncState.Diverged => "diverged",
-        SyncState.RemoteChanges => "remote_changes",
-        _ => state.ToString()
-    };
 
     private static DomainException Unknown(string command, string? hint) =>
         new("command.unknown", "There is no command " + command + " here." + (hint is null ? "" : " " + hint));
@@ -205,6 +192,36 @@ internal static class NativeHost
 
     private static string Error(string code, string message) =>
         new JsonObject { ["ok"] = false, ["error"] = new JsonObject { ["code"] = code, ["message"] = message } }.ToJsonString(Output);
+}
+
+/// <summary>An open trip: its repository and Git, the MCP tools, and the last states read, by revision.</summary>
+internal sealed class NativeSession(TravelRepository repository, GitRepository git, TripTools tools, CultureInfo? culture, bool readOnly)
+{
+    private readonly Lock gate = new();
+    private readonly List<(string Revision, RepositoryState State)> recent = [];
+
+    public TravelRepository Repository { get; } = repository;
+    public GitRepository Git { get; } = git;
+    public TripTools Tools { get; } = tools;
+    public CultureInfo? Culture { get; } = culture;
+    public bool ReadOnly { get; } = readOnly;
+
+    public Task<RepositoryState> ReadAsync(CancellationToken ct) => Repository.ReadAsync(ct);
+
+    /// <summary>Keeps <paramref name="state"/> for a later <c>apply</c> and returns its revision.</summary>
+    public string Remember(RepositoryState state)
+    {
+        var revision = ClientCommands.Revision(state);
+        lock (gate)
+        {
+            recent.RemoveAll(r => r.Revision == revision);
+            recent.Add((revision, state));
+            if (recent.Count > 8) recent.RemoveAt(0);
+        }
+        return revision;
+    }
+
+    public RepositoryState? Recall(string revision) { lock (gate) return recent.LastOrDefault(r => r.Revision == revision).State; }
 }
 
 /// <summary>Git credentials from the host: each request is answered with <see cref="Reply"/>, or cancelled.</summary>

@@ -64,6 +64,8 @@ A response is either of these:
 | `session.unknown` | The session id is not open. |
 | `session.not_trip` | The folder given to `open` is not a trip. |
 | `session.read_only` | A change was asked of a read-only session. |
+| `repository.changed` | The trip changed since the revision given to `apply`. Read it again. |
+| `merge.unresolved` | `merge_apply` got no answer for some conflicts. |
 | `internal` | An unexpected failure. |
 
 ## Commands
@@ -72,8 +74,9 @@ Without a session (pass 0):
 
 | Command | Arguments | Result |
 | --- | --- | --- |
-| `info` | – | `version`, `format_version`, `invariant_globalization`, the command names |
+| `info` | – | `abi_version`, `version`, `format_version`, `invariant_globalization`, the command names |
 | `configure` | `libgit2`: path of the libgit2 library, for example `…/Frameworks/git2.framework/git2` | `{}` |
+| `create_trip` | `root` (an empty or new folder), `title`, optional `language`, `timezone`, `recovery_root`, `git_name` and `git_email` to start Git history | `root`, `id` |
 | `open` | `root`, optional `recovery_root`, `read_only`, `culture` (such as `de-DE`), `client_name`, `weather_cache`, `weather_provider`, `exchange_rates` | `session` |
 | `clone` | `url`, `destination` | `destination` |
 
@@ -81,7 +84,19 @@ With a session:
 
 | Command | Arguments | Result |
 | --- | --- | --- |
-| `snapshot` | – | every entity file (`path`, `hash`, `data`) and the validation `diagnostics` |
+| `snapshot` | – | `revision`, every entity file (`path`, `hash`, `data`), the resource files (`path`, `size`, `hash`) and the validation `diagnostics` |
+| `revision` | – | `revision`; cheap to ask for, to notice changes made by a sync or another app |
+| `apply` | `revision` from `snapshot`, `revision` or an earlier `apply`; `edits`: `[{"id", "data"}]` with the whole entity, `null` to delete; `resources`: `[{"path", "base64"}]`, `null` to delete | the new `revision` and `diagnostics`; all edits are validated and written as one transaction, or none is |
+| `read_resource` | `path` | `base64`, `size` |
+| `agenda` | – | `days` (`date`, `number`, `entries`, `nights`) and `unscheduled`; entries have `start` and `end` as instants, `zone`, `end_zone`, `kind`, `precision`, `role`, `status` and nested `steps` |
+| `find` | `query`, optional `kinds` (`plan`, `booking`, `cost`, `place`, `task`, `packing`, `note`, `file`), `notes`, `limit` | `hits` with `kind`, `day`, `start`, `zone` and `matches` (`field`, `text`, `ranges` in UTF-16 code units) |
+| `variants` | optional `remote` | every variant with its branch, title and state against the remote and the primary variant |
+| `create_variant` | `branch` (such as `variants/early-start`), `title` | `{}`; creates it from the current one and switches to it |
+| `switch_variant` | `branch` | `{}` |
+| `delete_variant` | `branch`, optional `delete_remote`, `remote` | the deleted variant, which can be restored |
+| `rollback` | `revision`: a commit from `list_versions` | `{}` |
+| `merge_preview` | `branch`: a variant, or a remote branch such as `origin/main` after `sync` reported `diverged`; optional `resolutions` | `can_apply`, `conflicts` (`key`, `entity`, `path`, `kind`, `base`, `current`, `incoming`), `changes`, `diagnostics` |
+| `merge_apply` | `branch`, `resolutions`: `{"<key>": value}` for every conflict, optional `message` | `commit`; merges into the current variant and records the merge in Git |
 | `initialize_git` | `name`, `email` | `{}`; starts Git history for a trip that has none |
 | `sync_status` | optional `remote` | `branch`, `ahead`, `behind`, `has_local_changes`, `state` (`local_only`, `synced`, `local_changes`, `diverged`, `remote_changes`) |
 | `sync` | optional `remote` (default `origin`) | `state`; fetches, takes fast-forwards and sends own versions |
@@ -106,6 +121,12 @@ func call(_ session: UInt64, _ command: String, _ arguments: String?) async -> S
     }
 }
 ```
+
+Edits go through `apply` with the revision they were based on. If the trip changed in the meantime, because of a sync, another app or a second window, `apply` fails with `repository.changed` and nothing is written. Resources can be written under `documents/` and `assets/sha256/`. Entity files are written as entities, never as resources.
+
+To answer a merge conflict, put the value that should win under the conflict's `key` in `resolutions`. That is `current`, `incoming` or a value the user edited. Ask `merge_preview` again until `can_apply` is true, then call `merge_apply` with the same `resolutions`. After a `sync` that reports `diverged`, merge the remote branch the same way and `sync` again.
+
+TravelRepo does not send change notifications. Apps ask for `revision` when they come to the foreground or after a sync, and read again when it differs.
 
 ## Git credentials
 
