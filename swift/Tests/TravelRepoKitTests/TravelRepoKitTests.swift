@@ -98,6 +98,17 @@ final class TravelRepoKitTests: XCTestCase {
         try await session.watch(enabled: false)
     }
 
+    func testMeAndClaimPerson() async throws {
+        let session = try await openTrip()
+        let sam = try await session.call("create_entity", ["type": "person", "data": ["title": "Sam"]])["id"]!.string!
+        let before = try await session.me(githubLogin: "sam-travels")
+        XCTAssertNil(before.person)
+        try await session.claimPerson(sam, githubLogin: "sam-travels", gitName: "Sam", gitEmail: "sam@example.invalid")
+        let after = try await session.me(githubLogin: "sam-travels")
+        XCTAssertEqual(after.person, sam)
+        XCTAssertEqual(after.source, "github")
+    }
+
     func testErrorsCarryTravelRepoCodes() async throws {
         let session = try await openTrip()
         do { try await session.call("fly_to_the_moon"); XCTFail("unknown command accepted") }

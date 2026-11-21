@@ -401,6 +401,23 @@ public sealed class NativeTests : IDisposable
         Assert.Contains("Lunch by the deer park", titles);
     }
 
+    [Fact]
+    public async Task ThePersonUsingTheAppIsFoundAndClaimed()
+    {
+        var session = (await Ok(0, "open", new JsonObject { ["root"] = Trip(), ["recovery_root"] = Path.Combine(root, "recovery") }))["session"]!.GetValue<ulong>();
+        var nobody = await Ok(session, "me", new JsonObject { ["github_login"] = "sam-travels" });
+        Assert.Null(nobody["person"]);
+        var sam = nobody["travelers"]!.AsArray().Single(t => t!["name"]!.GetValue<string>() == "Sam")!["id"]!.GetValue<string>();
+        await Ok(session, "claim_person", new JsonObject { ["person"] = sam, ["github_login"] = "sam-travels", ["git_name"] = "Sam", ["git_email"] = "sam@example.invalid" });
+        var me = await Ok(session, "me", new JsonObject { ["github_login"] = "sam-travels" });
+        Assert.Equal(sam, me["person"]!.GetValue<string>());
+        Assert.Equal("github", me["source"]!.GetValue<string>());
+        Assert.Equal(sam, (await Ok(session, "me", new JsonObject { ["git_email"] = "sam@example.invalid" }))["person"]!.GetValue<string>());
+        // Someone else signing in sees that Sam is already taken by another account.
+        var other = await Ok(session, "me", new JsonObject { ["github_login"] = "alex-travels" });
+        Assert.True(other["travelers"]!.AsArray().Single(t => t!["id"]!.GetValue<string>() == sam)!["claimed_by_someone_else"]!.GetValue<bool>());
+    }
+
     private sealed class FakeGitHub(Func<HttpRequestMessage, HttpResponseMessage> answer) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => Task.FromResult(answer(request));

@@ -15,9 +15,9 @@ namespace TravelRepo.Native;
 internal static class AppCommands
 {
     public static readonly IReadOnlyList<string> Names =
-        ["costs", "packing", "bookings", "stays", "reminders", "fetch_exchange_rates", "fetch_weather", "export", "import_document_data"];
+        ["costs", "packing", "bookings", "stays", "reminders", "fetch_exchange_rates", "fetch_weather", "export", "import_document_data", "me", "claim_person"];
 
-    public static readonly IReadOnlyList<string> ReadOnly = ["costs", "packing", "bookings", "stays", "reminders", "export"];
+    public static readonly IReadOnlyList<string> ReadOnly = ["costs", "packing", "bookings", "stays", "reminders", "export", "me"];
 
     /// <summary>The HTTP client for weather services and exchange rates. Tests replace it.</summary>
     public static HttpClient Http { get; set; } = new();
@@ -66,6 +66,37 @@ internal static class AppCommands
                     return (true, Weather(await service.UpdateAsync(trip, args.Bool("refresh", false), ct)));
                 }
             case "export": return (true, Export(trip, args));
+            case "me":
+                {
+                    // Who the person using the app is in this trip, from their GitHub login or Git e-mail address.
+                    var match = TripPeople.Match(trip, args.String("github_login"), args.String("git_email"));
+                    return (true, new JsonObject
+                    {
+                        ["person"] = match?.Person.Id.ToString(),
+                        ["name"] = match?.Person.Title,
+                        ["source"] = match?.Source switch { PersonMatchSource.GitHub => "github", PersonMatchSource.Email => "email", _ => null },
+                        ["travelers"] = Array(TripPeople.Travelers(trip).Select(p => (JsonNode)new JsonObject
+                        {
+                            ["id"] = p.Id.ToString(),
+                            ["name"] = p.Title,
+                            ["claimed_by_someone_else"] = TripPeople.HasOtherIdentity(p, args.String("github_login"), args.String("git_email"))
+                        }))
+                    });
+                }
+            case "claim_person":
+                {
+                    // "That's me": the person gets the user's GitHub login and Git identity, so the next match finds them.
+                    var id = args.Required("person");
+                    for (var attempt = 0; ; attempt++)
+                    {
+                        var state = await session.ReadAsync(ct);
+                        var person = Guid.TryParse(id, out var guid) ? state.Trip.Find(guid) : null;
+                        if (person is not { Type: "person" }) throw new DomainException("entity.missing", "There is no person " + id + ".");
+                        var claimed = TripPeople.WithIdentity(person, args.String("github_login"), args.String("git_name"), args.String("git_email"));
+                        try { session.Remember(await session.Repository.ApplyAsync(state, [new(person.Id, claimed)], ct)); return (true, new JsonObject { ["person"] = id }); }
+                        catch (DomainException ex) when (ex.Code == "repository.changed" && attempt < 2) { }
+                    }
+                }
             case "import_document_data": return (true, await ImportAsync(session, args, ct));
         }
         return (false, null);
