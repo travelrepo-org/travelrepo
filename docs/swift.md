@@ -80,6 +80,6 @@ Git uses that token for `github.com` unless the app sets a credential provider o
   Check the list again after updating TravelRepo with `nm -u` on the app binary. An app that does more, such as GitHub sign-in, declares that in its own manifest.
 - **Encryption.** TravelRepo uses only standard HTTPS through Apple's Security framework and stores nothing encrypted itself. That is the usual exempt case (`ITSAppUsesNonExemptEncryption` = `NO`), but the export compliance answer is the app's.
 - **Size.** The whole interface adds about 24 MB to the app binary on a device after stripping, and `git2.framework` about 1.4 MB.
-- **Runtime.** Build releases with an SDK whose .NET runtime is 10.0.14 or later; 10.0.12 is affected by GHSA-p3jp-9v83-76w9.
+- **Runtime.** The pinned SDK 10.0.404 brings .NET runtime 10.0.15. Do not build releases with an SDK whose runtime is older than 10.0.14: 10.0.12 is affected by GHSA-p3jp-9v83-76w9.
 - **Plugins.** Jourfold plugins are .NET assemblies loaded at run time, which NativeAOT cannot do, so they are not available in Swift apps.
 
