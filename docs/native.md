@@ -113,7 +113,7 @@ With a session:
 | `merge_preview` | `branch`: a variant, or a remote branch such as `origin/main` after `sync` reported `diverged`; optional `resolutions` and `keep_both` (entity ids whose conflicts keep the current entity and add the incoming one as a copy, with everything nested below it) | `can_apply`, `conflicts` (`key`, `entity`, `path`, `kind`, `base`, `current`, `incoming`), `changes`, `diagnostics` |
 | `watch` | optional `interval_seconds` (default 5), `enabled` (`false` stops it) | `watching`; sends `trip_changed` events (below) |
 | `merge_apply` | `branch`, `resolutions`: `{"<key>": value}` for every conflict, optional `keep_both` and `message` | `commit`; merges into the current variant and records the merge in Git |
-| `costs` | optional `currency` (converted with the saved exchange rates) | `expenses` (amount, method, payers, shares, debts, issues), `open_debts`, `balances`, `settle_up` (the fewest payments that settle everything), `totals` per currency, `categories`, `budgets` |
+| `costs` | optional `currency` (converted with the saved exchange rates); amounts are decimal strings such as `"198.92"`, as in trip files | `expenses` (amount, method, payers, shares, debts, issues), `open_debts`, `balances`, `settle_up` (the fewest payments that settle everything), `totals` per currency, `categories`, `budgets` |
 | `packing` | – | `lists` with their items (`group`, `quantity`, `everyone`, `assignees`, `packed_by`) |
 | `bookings` | – | every booking with its plans (`items`), paid and planned expenses and `coverage` |
 | `stays` | – | every stay with `first_night`, `nights`, `zone`, `check_in`, `check_out` and `issues` |

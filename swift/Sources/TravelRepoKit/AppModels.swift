@@ -1,7 +1,39 @@
 import Foundation
 
 // Results of the app commands of TravelRepo.Native (docs/native.md): costs, packing, bookings, stays, reminders.
-// Amounts are decimals as TravelRepo computes them; money values from the trip files keep their decimal string.
+// Amounts come as decimal strings, as money is written in trip files, and decode into exact Decimals (DecimalText):
+// JSONDecoder would read a JSON number through Double and lose digits.
+
+/// A Decimal that TravelRepo sends as a string, such as "198.92".
+@propertyWrapper
+public struct DecimalText: Decodable, Sendable, Hashable {
+    public var wrappedValue: Decimal
+    public init(wrappedValue: Decimal) { self.wrappedValue = wrappedValue }
+    public init(from decoder: Decoder) throws {
+        let text = try decoder.singleValueContainer().decode(String.self)
+        guard let value = Decimal(string: text, locale: Locale(identifier: "en_US_POSIX")) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Not a decimal: \(text)"))
+        }
+        wrappedValue = value
+    }
+}
+
+/// An optional Decimal sent as a string or null.
+@propertyWrapper
+public struct OptionalDecimalText: Decodable, Sendable, Hashable {
+    public var wrappedValue: Decimal?
+    public init(wrappedValue: Decimal?) { self.wrappedValue = wrappedValue }
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        wrappedValue = container.decodeNil() ? nil : try DecimalText(from: decoder).wrappedValue
+    }
+}
+
+extension KeyedDecodingContainer {
+    public func decode(_ type: OptionalDecimalText.Type, forKey key: Key) throws -> OptionalDecimalText {
+        try decodeIfPresent(type, forKey: key) ?? OptionalDecimalText(wrappedValue: nil)
+    }
+}
 
 public struct Money: Decodable, Sendable, Hashable {
     public let value: String; public let currency: String
@@ -9,24 +41,24 @@ public struct Money: Decodable, Sendable, Hashable {
 }
 
 public struct Costs: Decodable, Sendable {
-    public struct Share: Decodable, Sendable { public let person: String; public let amount: Decimal; public let value: Decimal? }
+    public struct Share: Decodable, Sendable { public let person: String; @DecimalText public var amount: Decimal; @OptionalDecimalText public var value: Decimal? }
     public struct Debt: Decodable, Sendable {
         public let expense: String; public let from: String; public let to: String; public let currency: String
-        public let amount: Decimal; public let settled: Decimal; public let open: Decimal; public let settledOn: String?
+        @DecimalText public var amount: Decimal; @DecimalText public var settled: Decimal; @DecimalText public var open: Decimal; public let settledOn: String?
         enum CodingKeys: String, CodingKey { case expense, from, to, currency, amount, settled, open, settledOn = "settled_on" }
     }
     public struct Expense: Decodable, Sendable {
         public let id: String; public let title: String; public let amount: Money?; public let method: String?; public let planned: Bool; public let category: String
         public let payers: [String]; public let shares: [Share]; public let debts: [Debt]; public let issues: [String]
     }
-    public struct Balance: Decodable, Sendable { public let person: String; public let currency: String; public let net: Decimal }
+    public struct Balance: Decodable, Sendable { public let person: String; public let currency: String; @DecimalText public var net: Decimal }
     /// A payment that settles open debts; together they settle everything with as few payments as TravelRepo finds.
-    public struct Transfer: Decodable, Sendable { public let from: String; public let to: String; public let currency: String; public let amount: Decimal }
-    public struct Total: Decodable, Sendable { public let currency: String; public let paid: Decimal; public let estimated: Decimal; public let budget: Decimal }
-    public struct CategoryTotal: Decodable, Sendable { public let category: String; public let currency: String; public let amount: Decimal; public let estimated: Bool }
+    public struct Transfer: Decodable, Sendable { public let from: String; public let to: String; public let currency: String; @DecimalText public var amount: Decimal }
+    public struct Total: Decodable, Sendable { public let currency: String; @DecimalText public var paid: Decimal; @DecimalText public var estimated: Decimal; @DecimalText public var budget: Decimal }
+    public struct CategoryTotal: Decodable, Sendable { public let category: String; public let currency: String; @DecimalText public var amount: Decimal; public let estimated: Bool }
     public struct Budget: Decodable, Sendable {
         public let id: String; public let title: String; public let scope: String; public let target: String?; public let amount: Money
-        public let spent: Decimal; public let planned: Decimal; public let approximate: Bool; public let notIncluded: [Money]
+        @DecimalText public var spent: Decimal; @DecimalText public var planned: Decimal; public let approximate: Bool; public let notIncluded: [Money]
         enum CodingKeys: String, CodingKey { case id, title, scope, target, amount, spent, planned, approximate, notIncluded = "not_included" }
     }
     public let expenses: [Expense]; public let openDebts: [Debt]; public let balances: [Balance]; public let settleUp: [Transfer]; public let totals: [Total]
