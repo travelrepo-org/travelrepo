@@ -102,6 +102,7 @@ internal static class AppCommands
             })),
             ["open_debts"] = Array(Expenses.Open(trip).Select(Debt)),
             ["balances"] = Array(Expenses.Balances(trip, currency, rates).Select(b => (JsonNode)new JsonObject { ["person"] = b.Person.ToString(), ["currency"] = b.Currency, ["net"] = b.Net })),
+            ["settle_up"] = Array(Expenses.SettleUp(trip, currency, rates).Select(t => (JsonNode)new JsonObject { ["from"] = t.From.ToString(), ["to"] = t.To.ToString(), ["currency"] = t.Currency, ["amount"] = t.Amount })),
             ["totals"] = Array(TripSummaries.Costs(trip).Select(t => (JsonNode)new JsonObject { ["currency"] = t.Currency, ["paid"] = t.Paid, ["estimated"] = t.Estimated, ["budget"] = t.Budget })),
             ["categories"] = Array(ExpenseCategories.Totals(trip, currency, rates).Select(c => (JsonNode)new JsonObject { ["category"] = c.Category, ["currency"] = c.Currency, ["amount"] = c.Amount, ["estimated"] = c.Estimated })),
             ["budgets"] = Array(Budgets.All(trip, rates).Select(b => (JsonNode)new JsonObject

@@ -20,6 +20,8 @@ public struct Costs: Decodable, Sendable {
         public let payers: [String]; public let shares: [Share]; public let debts: [Debt]; public let issues: [String]
     }
     public struct Balance: Decodable, Sendable { public let person: String; public let currency: String; public let net: Decimal }
+    /// A payment that settles open debts; together they settle everything with as few payments as TravelRepo finds.
+    public struct Transfer: Decodable, Sendable { public let from: String; public let to: String; public let currency: String; public let amount: Decimal }
     public struct Total: Decodable, Sendable { public let currency: String; public let paid: Decimal; public let estimated: Decimal; public let budget: Decimal }
     public struct CategoryTotal: Decodable, Sendable { public let category: String; public let currency: String; public let amount: Decimal; public let estimated: Bool }
     public struct Budget: Decodable, Sendable {
@@ -27,9 +29,9 @@ public struct Costs: Decodable, Sendable {
         public let spent: Decimal; public let planned: Decimal; public let approximate: Bool; public let notIncluded: [Money]
         enum CodingKeys: String, CodingKey { case id, title, scope, target, amount, spent, planned, approximate, notIncluded = "not_included" }
     }
-    public let expenses: [Expense]; public let openDebts: [Debt]; public let balances: [Balance]; public let totals: [Total]
+    public let expenses: [Expense]; public let openDebts: [Debt]; public let balances: [Balance]; public let settleUp: [Transfer]; public let totals: [Total]
     public let categories: [CategoryTotal]; public let budgets: [Budget]
-    enum CodingKeys: String, CodingKey { case expenses, openDebts = "open_debts", balances, totals, categories, budgets }
+    enum CodingKeys: String, CodingKey { case expenses, openDebts = "open_debts", balances, settleUp = "settle_up", totals, categories, budgets }
 }
 
 public struct PackingList: Decodable, Sendable {

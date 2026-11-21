@@ -282,6 +282,9 @@ public sealed class NativeTests : IDisposable
         Assert.Equal("6000", sushi["amount"]!["value"]!.GetValue<string>());
         Assert.Contains(costs["open_debts"]!.AsArray(), d => d!["currency"]!.GetValue<string>() == "JPY" && d["open"]!.GetValue<decimal>() == 3000);
         Assert.Contains(costs["totals"]!.AsArray(), t => t!["currency"]!.GetValue<string>() == "JPY");
+        var transfer = Assert.Single(costs["settle_up"]!.AsArray())!;
+        Assert.Equal(3000m, transfer["amount"]!.GetValue<decimal>());
+        Assert.Equal("c3416734-e021-7185-91a7-0d5e9bf6aa7c", transfer["to"]!.GetValue<string>()); // Alex paid, so Alex is paid back.
 
         var packing = (await Ok(session, "packing"))["lists"]!.AsArray().Single(l => l!["id"]!.GetValue<string>() == list)!;
         Assert.True(Assert.Single(packing["items"]!.AsArray())!["everyone"]!.GetValue<bool>());
