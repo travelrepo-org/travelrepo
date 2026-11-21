@@ -9,8 +9,14 @@ public final class TravelRepoSession: Sendable {
     deinit { tr_close(id) }
 
     /// Opens the trip in `root`. `culture` (such as `de-DE`) sets the language of sorting and exports.
-    public static func open(root: URL, recoveryRoot: URL? = nil, culture: String? = nil, readOnly: Bool = false, clientName: String? = nil) async throws -> TravelRepoSession {
+    /// `exchangeRates` is the file `fetchExchangeRates` saves to and `costs` converts with; `weatherCache` the folder
+    /// `fetchWeather` fills.
+    public static func open(root: URL, recoveryRoot: URL? = nil, culture: String? = nil, readOnly: Bool = false, clientName: String? = nil,
+                            exchangeRates: URL? = nil, weatherCache: URL? = nil, weatherProvider: String? = nil) async throws -> TravelRepoSession {
         var arguments: [String: JSONValue] = ["root": .string(root.path), "read_only": .bool(readOnly)]
+        if let exchangeRates { arguments["exchange_rates"] = .string(exchangeRates.path) }
+        if let weatherCache { arguments["weather_cache"] = .string(weatherCache.path) }
+        if let weatherProvider { arguments["weather_provider"] = .string(weatherProvider) }
         if let recoveryRoot { arguments["recovery_root"] = .string(recoveryRoot.path) }
         if let culture { arguments["culture"] = .string(culture) }
         if let clientName { arguments["client_name"] = .string(clientName) }
