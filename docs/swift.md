@@ -23,6 +23,20 @@ TEST_RUNNER_TRAVELREPO_LIBGIT2=/path/to/git2.xcframework/ios-arm64_x86_64-simula
 
 Call `TravelRepo.configure(libgit2:)` before the first Git command. libgit2 is loaded only then, and if it is missing, Git commands fail with `git.library`.
 
+## Using a released version
+
+Every release has `TravelRepo.xcframework.zip` and `git2.xcframework.zip` attached. For each release tag `vX.Y.Z`, the release workflow also tags a commit `X.Y.Z` whose `Package.swift` downloads that zip (url and checksum). SwiftPM picks the tag without "v" when both exist, so a Swift app depends on a version as usual:
+
+```swift
+.package(url: "https://github.com/travelrepo-org/travelrepo", from: "0.14.0")   // product: TravelRepoKit
+```
+
+Unzip `git2.xcframework` into the app project and embed it (Embed & Sign) without linking it. TravelRepo loads it by path through `TravelRepo.configure(libgit2:)`.
+
+On `main` and in feature branches, `Package.swift` uses the local `artifacts/native/TravelRepo.xcframework`. `eng/swift-release.py` is the step that swaps that line on the tagged commit.
+
+`TravelRepo.Native` is also published to nuget.org with the other packages, for apps that build their own native library from it.
+
 ## Using it
 
 ```swift

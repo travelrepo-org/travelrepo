@@ -82,8 +82,52 @@ jobs:
       - run: dotnet build TravelRepo.sln -c Release --no-restore
       - run: dotnet test TravelRepo.sln -c Release --no-build
       - run: python eng/verify.py
-  publish:
+  # TravelRepo.xcframework for Swift apps (docs/swift.md#using-a-released-version): attached to the release as a zip, and a commit of its
+  # own whose Package.swift points at that zip with its checksum, tagged with the version without "v" (v1.2.3 → 1.2.3).
+  # SwiftPM resolves 1.2.3 to that commit, because it prefers the tag without "v" when both exist.
+  swift-package:
     needs: verify
+    runs-on: macos-15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - name: Use the pinned SDK
+        shell: bash
+        run: cp eng/sdk.json global.json
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: eng/sdk.json
+      - name: Install the NativeAOT runtime for iOS
+        run: dotnet workload install mobile-librarybuilder --skip-manifest-update
+      - run: eng/build-native-xcframework.sh artifacts/native
+      - name: Attach the xcframework to the release
+        run: |
+          ditto -c -k --keepParent artifacts/native/TravelRepo.xcframework TravelRepo.xcframework.zip
+          echo "CHECKSUM=$(swift package compute-checksum TravelRepo.xcframework.zip)" >> "$GITHUB_ENV"
+          gh release upload "$TAG" TravelRepo.xcframework.zip --clobber --repo "$GITHUB_REPOSITORY"
+      - name: Attach libgit2 for iOS to the release
+        run: |
+          git clone --quiet --filter=blob:none https://github.com/libgit2/libgit2.git "$RUNNER_TEMP/libgit2"
+          git -C "$RUNNER_TEMP/libgit2" checkout --quiet 5853918
+          eng/build-libgit2-ios.sh "$RUNNER_TEMP/libgit2" "$RUNNER_TEMP/libgit2-ios"
+          ditto -c -k --keepParent "$RUNNER_TEMP/libgit2-ios/git2.xcframework" git2.xcframework.zip
+          gh release upload "$TAG" git2.xcframework.zip --clobber --repo "$GITHUB_REPOSITORY"
+      - name: Tag the Swift package for this version
+        run: |
+          VERSION="${TAG#v}"
+          git checkout --quiet .
+          python3 eng/swift-release.py "$TAG" "$CHECKSUM" --repository "$GITHUB_REPOSITORY"
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit --quiet -am "TravelRepoKit $VERSION: use the released TravelRepo.xcframework"
+          git tag --force "$VERSION"
+          git push --force origin "refs/tags/$VERSION"
+  publish:
+    needs: [verify, swift-package]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -135,7 +179,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release edit "$TAG" --prerelease=false --latest --repo "$GITHUB_REPOSITORY"
   return-to-draft:
-    needs: [version, verify, publish]
+    needs: [version, verify, swift-package, publish]
     if: failure() && github.event_name == 'release'
     runs-on: ubuntu-latest
     permissions:
