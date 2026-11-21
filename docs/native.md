@@ -120,6 +120,8 @@ With a session:
 | `reminders` | optional `now` (ISO 8601 instant, default the current time) | what is due: `kind`, `entity`, `title`, `moment`, `urgent`, `dates` |
 | `export` | `kind` (`plan`, `costs`, `packing`), `format` (`text`, `html` and `ics` for plans; `text` and `csv` for costs and packing), optional `person` | `text`, written in the session's culture |
 | `import_document_data` | `name`, `base64`, optional `media_type` (from the name otherwise), `attach_to` | the new document's `id`, `media_type` and the new `revision` |
+| `me` | optional `github_login`, `git_email` | the matching `person` and `name` with the `source` of the match (`github` or `email`), or `person: null`; all `travelers` with `claimed_by_someone_else` |
+| `claim_person` | `person`, optional `github_login`, `git_name`, `git_email` | `{}`; "That's me": stores these identities on the person, so `me` finds them next time |
 | `fetch_exchange_rates` | – | `date` and `currencies` of the European Central Bank's reference rates, saved to the session's `exchange_rates` file |
 | `fetch_weather` | optional `refresh` | the weather by `days` and plan `items`, `sources` to credit and `problems` of services that failed; needs `weather_cache` |
 | `initialize_git` | `name`, `email` | `{}`; starts Git history for a trip that has none |
