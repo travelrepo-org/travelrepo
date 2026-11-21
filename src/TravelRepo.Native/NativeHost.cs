@@ -109,7 +109,7 @@ internal static class NativeHost
                     ["invariant_globalization"] = invariant,
                     ["commands"] = new JsonObject
                     {
-                        ["global"] = new JsonArray(GlobalCommands.Select(c => (JsonNode)c).ToArray()),
+                        ["global"] = new JsonArray(GlobalCommands.Concat(GitHubCommands.Names).Select(c => (JsonNode)c).ToArray()),
                         ["session"] = new JsonArray(ClientCommands.Names.Concat(Tools.All.Select(t => t.Name)).Select(c => (JsonNode)c).ToArray()),
                         ["read_only"] = new JsonArray(ClientCommands.ReadOnly.Concat(Tools.All.Where(t => t.ReadOnly).Select(t => t.Name)).Select(c => (JsonNode)c).ToArray())
                     }
@@ -140,6 +140,8 @@ internal static class NativeHost
                     return new JsonObject { ["destination"] = destination };
                 }
             default:
+                var (found, result) = await GitHubCommands.RunAsync(command, args, ct);
+                if (found) return result;
                 throw Unknown(command, Tools.ByName.ContainsKey(command) || ClientCommands.Names.Contains(command) ? "It needs the session that open returns." : null);
         }
     }
@@ -251,7 +253,9 @@ internal sealed class HostCredentials : ICredentialBroker
 
     public async Task<GitCredential?> GetAsync(Uri origin, CancellationToken ct = default)
     {
-        if (Request is not { } request) return null;
+        // Without a handler of its own, the app's GitHub sign-in is used for github.com.
+        if (Request is not { } request)
+            return origin.Host == "github.com" && await GitHubCommands.Secrets.ReadAsync(GitHubCommands.TokenKey, ct) is { } token ? new GitCredential("x-access-token", token) : null;
         var id = (ulong)Interlocked.Increment(ref lastRequest);
         var answer = new TaskCompletionSource<GitCredential?>(TaskCreationOptions.RunContinuationsAsynchronously);
         pending[id] = answer;
