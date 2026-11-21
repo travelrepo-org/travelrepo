@@ -74,6 +74,11 @@ public final class TravelRepoSession: Sendable {
         return try await call("find", arguments, as: Found.self).hits
     }
 
+    /// The Git author of versions made in this trip, for example after cloning it.
+    public func setIdentity(name: String, email: String) async throws {
+        try await call("set_identity", ["name": .string(name), "email": .string(email)])
+    }
+
     public func syncStatus(remote: String? = nil) async throws -> SyncStatus {
         try await call("sync_status", remote.map { ["remote": .string($0)] } ?? [:])
     }

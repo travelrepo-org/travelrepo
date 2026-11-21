@@ -220,6 +220,10 @@ internal static class NativeHost
             case "sync":
                 if (session.ReadOnly) throw new DomainException("session.read_only", "This session is read-only.");
                 return new JsonObject { ["state"] = ClientCommands.Snake((await session.Git.SyncAsync(args.String("remote", "origin"), ct)).ToString()) };
+            case "set_identity":
+                if (session.ReadOnly) throw new DomainException("session.read_only", "This session is read-only.");
+                await session.Git.SetIdentityAsync(args.Required("name"), args.Required("email"), ct);
+                return new JsonObject();
             case "initialize_git":
                 if (session.ReadOnly) throw new DomainException("session.read_only", "This session is read-only.");
                 await session.Git.InitializeAsync(args.Required("name"), args.Required("email"), ct);

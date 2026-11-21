@@ -358,6 +358,8 @@ public sealed class NativeTests : IDisposable
 
             // An edit by someone else, here a second session on the clone, reaches a session that watches.
             var sam = (await Ok(0, "open", new JsonObject { ["root"] = Path.Combine(root, "sam"), ["recovery_root"] = Path.Combine(root, "recovery-sam") }))["session"]!.GetValue<ulong>();
+            // A clone has no Git identity of its own until the app sets one.
+            await Ok(sam, "set_identity", new JsonObject { ["name"] = "Sam", ["email"] = "sam@example.invalid" });
             Assert.True((await Ok(sam, "watch", new JsonObject { ["interval_seconds"] = 1 }))["watching"]!.GetValue<bool>());
             var editor = new TravelRepo.Repository.TravelRepository(Path.Combine(root, "sam"), Path.Combine(root, "recovery-editor"));
             var nara = TravelRepo.Core.Entity.Create("place", "Nara Park");
@@ -367,6 +369,8 @@ public sealed class NativeTests : IDisposable
             var changed = Assert.Single(events, e => e["type"]!.GetValue<string>() == "trip_changed" && e["session"]!.GetValue<ulong>() == sam)!;
             Assert.Equal((await Ok(sam, "revision"))["revision"]!.GetValue<string>(), changed["revision"]!.GetValue<string>());
             Assert.False((await Ok(sam, "watch", new JsonObject { ["enabled"] = false }))["watching"]!.GetValue<bool>());
+            await Ok(sam, "create_version", new JsonObject { ["message"] = "Add Nara Park" });
+            Assert.Equal("Sam", (await Ok(sam, "list_versions"))["versions"]![0]!["author"]!.GetValue<string>());
         }
         finally { NativeHost.Events = null; }
     }

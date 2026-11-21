@@ -123,6 +123,7 @@ With a session:
 | `fetch_exchange_rates` | – | `date` and `currencies` of the European Central Bank's reference rates, saved to the session's `exchange_rates` file |
 | `fetch_weather` | optional `refresh` | the weather by `days` and plan `items`, `sources` to credit and `problems` of services that failed; needs `weather_cache` |
 | `initialize_git` | `name`, `email` | `{}`; starts Git history for a trip that has none |
+| `set_identity` | `name`, `email` | `{}`; the Git author for versions, for example after `clone` |
 | `sync_status` | optional `remote` | `branch`, `ahead`, `behind`, `has_local_changes`, `state` (`local_only`, `synced`, `local_changes`, `diverged`, `remote_changes`) |
 | `sync` | optional `remote` (default `origin`) | `state`; fetches, takes fast-forwards and sends own versions |
 | `add_remote` | `name`, `url` | `{}` |
