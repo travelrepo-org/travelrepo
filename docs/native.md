@@ -41,6 +41,7 @@ void tr_cancel(uint64_t call);
 void tr_close(uint64_t session);
 void tr_set_credential_handler(tr_credential_handler handler, void *context);
 void tr_credential_reply(uint64_t request, const char *credential_json);
+void tr_set_event_handler(tr_callback handler, void *context);
 ```
 
 - Strings are UTF-8 and end with a zero byte. TravelRepo copies them before `tr_call` returns.
@@ -109,8 +110,9 @@ With a session:
 | `switch_variant` | `branch` | `{}` |
 | `delete_variant` | `branch`, optional `delete_remote`, `remote` | the deleted variant, which can be restored |
 | `rollback` | `revision`: a commit from `list_versions` | `{}` |
-| `merge_preview` | `branch`: a variant, or a remote branch such as `origin/main` after `sync` reported `diverged`; optional `resolutions` | `can_apply`, `conflicts` (`key`, `entity`, `path`, `kind`, `base`, `current`, `incoming`), `changes`, `diagnostics` |
-| `merge_apply` | `branch`, `resolutions`: `{"<key>": value}` for every conflict, optional `message` | `commit`; merges into the current variant and records the merge in Git |
+| `merge_preview` | `branch`: a variant, or a remote branch such as `origin/main` after `sync` reported `diverged`; optional `resolutions` and `keep_both` (entity ids whose conflicts keep the current entity and add the incoming one as a copy, with everything nested below it) | `can_apply`, `conflicts` (`key`, `entity`, `path`, `kind`, `base`, `current`, `incoming`), `changes`, `diagnostics` |
+| `watch` | optional `interval_seconds` (default 5), `enabled` (`false` stops it) | `watching`; sends `trip_changed` events (below) |
+| `merge_apply` | `branch`, `resolutions`: `{"<key>": value}` for every conflict, optional `keep_both` and `message` | `commit`; merges into the current variant and records the merge in Git |
 | `costs` | optional `currency` (converted with the saved exchange rates) | `expenses` (amount, method, payers, shares, debts, issues), `open_debts`, `balances`, `totals` per currency, `categories`, `budgets` |
 | `packing` | – | `lists` with their items (`group`, `quantity`, `everyone`, `assignees`, `packed_by`) |
 | `bookings` | – | every booking with its plans (`items`), paid and planned expenses and `coverage` |
@@ -149,7 +151,12 @@ Edits go through `apply` with the revision they were based on. If the trip chang
 
 To answer a merge conflict, put the value that should win under the conflict's `key` in `resolutions`. That is `current`, `incoming` or a value the user edited. Ask `merge_preview` again until `can_apply` is true, then call `merge_apply` with the same `resolutions`. After a `sync` that reports `diverged`, merge the remote branch the same way and `sync` again.
 
-TravelRepo does not send change notifications, and `clone` reports no progress. Both would need a second callback in the C interface; until then apps show an indeterminate progress indicator while cloning. Apps ask for `revision` when they come to the foreground or after a sync, and read again when it differs.
+## Events
+
+`tr_set_event_handler(handler, context)` sets a second callback for events, as JSON, on a TravelRepo thread:
+
+- `{"type":"clone_progress","call":…,"total_objects":…,"received_objects":…,"indexed_objects":…,"received_bytes":…,"checkout_completed":…,"checkout_total":…}` while `clone` runs, about ten times a second and always at the end of each phase. A clone from a local path copies objects without a transfer and reports only the checkout.
+- `{"type":"trip_changed","session":…,"revision":…}` for a session that `watch`es, when its files changed, for example through a sync or another app. TravelRepo compares file sizes and times every interval and only reads the trip again when they changed. Apps ask for `revision` when they come to the foreground or after a sync, and read again when it differs.
 
 ## GitHub
 

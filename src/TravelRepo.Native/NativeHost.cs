@@ -27,6 +27,16 @@ internal static class NativeHost
     private static long lastSession, lastCall;
     private static IGitBackend? git;
 
+    /// <summary>Receives events (clone progress, trip changes) as JSON. Set through <see cref="NativeApi"/>.</summary>
+    public static Action<string>? Events { get; set; }
+
+    /// <summary>Sends an event to the host, if it listens. A failing handler never affects TravelRepo.</summary>
+    public static void Emit(JsonObject @event)
+    {
+        if (Events is not { } handler) return;
+        try { handler(@event.ToJsonString(Output)); } catch { }
+    }
+
     /// <summary>Asks the host for Git credentials. Set through <see cref="NativeApi"/>.</summary>
     public static HostCredentials Credentials { get; } = new();
 
@@ -51,7 +61,7 @@ internal static class NativeHost
                 NativeSession? open = null;
                 if (session != 0 && !Sessions.TryGetValue(session, out open)) throw new DomainException("session.unknown", "There is no open session " + session + ".");
                 if (open?.Culture is { } culture) { CultureInfo.CurrentCulture = culture; CultureInfo.CurrentUICulture = culture; }
-                response = Ok(await (open is null ? Global(command, args, cancellation.Token) : Run(open, command, args, cancellation.Token)));
+                response = Ok(await (open is null ? Global(command, args, id, cancellation.Token) : Run(open, command, args, cancellation.Token)));
             }
             catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { response = Error("call.cancelled", "The call was cancelled."); }
             catch (TripToolException ex) { response = Error(ex.Code, ex.Message); }
@@ -72,7 +82,10 @@ internal static class NativeHost
     }
 
     /// <summary>Closes a session. Calls already running finish.</summary>
-    public static void Close(ulong session) => Sessions.TryRemove(session, out _);
+    public static void Close(ulong session)
+    {
+        if (Sessions.TryRemove(session, out var closed)) closed.StopWatching();
+    }
 
     /// <summary>
     /// Git for every session. libgit2 is loaded on the first Git command, not when a trip opens: a failed load would
@@ -95,7 +108,7 @@ internal static class NativeHost
         }
     }
 
-    private static async Task<JsonNode?> Global(string command, Arguments args, CancellationToken ct)
+    private static async Task<JsonNode?> Global(string command, Arguments args, ulong call, CancellationToken ct)
     {
         switch (command)
         {
@@ -136,7 +149,27 @@ internal static class NativeHost
             case "clone":
                 {
                     var url = args.Required("url"); var destination = args.Required("destination");
-                    await GitRepository.CloneAsync(Git, url, destination, ct);
+                    var last = DateTime.MinValue;
+                    using (LibGit2Backend.ReportProgress(p =>
+                    {
+                        // About ten reports a second, and always the last one of each phase.
+                        var now = DateTime.UtcNow;
+                        var final = p.CheckoutTotal > 0 ? p.CheckoutCompleted == p.CheckoutTotal : p.TotalObjects > 0 && p.ReceivedObjects == p.TotalObjects;
+                        if (!final && now - last < TimeSpan.FromMilliseconds(100)) return;
+                        last = now;
+                        Emit(new JsonObject
+                        {
+                            ["type"] = "clone_progress",
+                            ["call"] = call,
+                            ["total_objects"] = p.TotalObjects,
+                            ["received_objects"] = p.ReceivedObjects,
+                            ["indexed_objects"] = p.IndexedObjects,
+                            ["received_bytes"] = p.ReceivedBytes,
+                            ["checkout_completed"] = p.CheckoutCompleted,
+                            ["checkout_total"] = p.CheckoutTotal
+                        });
+                    }))
+                        await GitRepository.CloneAsync(Git, url, destination, ct);
                     return new JsonObject { ["destination"] = destination };
                 }
             default:
@@ -162,7 +195,7 @@ internal static class NativeHost
         var tools = new TripTools(repository, Git, readOnly,
             weatherCache is null ? null : () => new CachedWeatherSource(weatherCache, weatherProvider), args.String("client_name"), rates is null ? null : () => rates);
         var id = (ulong)Interlocked.Increment(ref lastSession);
-        Sessions[id] = new(repository, new GitRepository(repository, Git), tools, culture, readOnly) { ExchangeRatesPath = rates, WeatherCache = weatherCache, WeatherProvider = weatherProvider };
+        Sessions[id] = new(repository, new GitRepository(repository, Git), tools, culture, readOnly) { Id = id, ExchangeRatesPath = rates, WeatherCache = weatherCache, WeatherProvider = weatherProvider };
         return id;
     }
 
@@ -191,6 +224,10 @@ internal static class NativeHost
                 if (session.ReadOnly) throw new DomainException("session.read_only", "This session is read-only.");
                 await session.Git.InitializeAsync(args.Required("name"), args.Required("email"), ct);
                 return new JsonObject();
+            case "watch":
+                if (args.Bool("enabled", true)) session.Watch(TimeSpan.FromSeconds(Math.Clamp(args.Int("interval_seconds", 5), 1, 3600)), session.Id);
+                else session.StopWatching();
+                return new JsonObject { ["watching"] = session.IsWatching };
             case "add_remote":
                 if (session.ReadOnly) throw new DomainException("session.read_only", "This session is read-only.");
                 await session.Git.AddRemoteAsync(args.Required("name"), args.Required("url"), ct);
@@ -225,6 +262,57 @@ internal sealed class NativeSession(TravelRepository repository, GitRepository g
     public TripTools Tools { get; } = tools;
     public CultureInfo? Culture { get; } = culture;
     public bool ReadOnly { get; } = readOnly;
+    public ulong Id { get; init; }
+    private CancellationTokenSource? watching;
+
+    public bool IsWatching { get { lock (gate) return watching is not null; } }
+
+    /// <summary>
+    /// Checks the trip folder every <paramref name="interval"/> and sends trip_changed when its revision changed, for
+    /// example after a sync or an edit in another app. Comparing file sizes and times first keeps it cheap; the trip is
+    /// only read again when one of them changed.
+    /// </summary>
+    public void Watch(TimeSpan interval, ulong session)
+    {
+        CancellationToken token;
+        lock (gate) { watching?.Cancel(); watching = new(); token = watching.Token; }
+        _ = Task.Run(async () =>
+        {
+            var fingerprint = Fingerprint(); string? revision = null;
+            try { revision = ClientCommands.Revision(await ReadAsync(token)); } catch (Exception ex) when (ex is not OperationCanceledException) { }
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(interval, token);
+                    var now = Fingerprint();
+                    if (now == fingerprint) continue;
+                    fingerprint = now;
+                    var state = await ReadAsync(token); var current = ClientCommands.Revision(state);
+                    if (current == revision) continue;
+                    revision = current; Remember(state);
+                    NativeHost.Emit(new JsonObject { ["type"] = "trip_changed", ["session"] = session, ["revision"] = current });
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception) { /* A half-written file or a moved folder: try again at the next tick. */ }
+            }
+        }, token);
+    }
+
+    public void StopWatching() { lock (gate) { watching?.Cancel(); watching = null; } }
+
+    private string Fingerprint()
+    {
+        var text = new System.Text.StringBuilder();
+        try
+        {
+            foreach (var file in new DirectoryInfo(Repository.Root).EnumerateFiles("*", SearchOption.AllDirectories)
+                .Where(f => !f.FullName.Contains(Path.DirectorySeparatorChar + ".git" + Path.DirectorySeparatorChar, StringComparison.Ordinal)).OrderBy(f => f.FullName, StringComparer.Ordinal))
+                text.Append(file.FullName).Append('|').Append(file.Length).Append('|').Append(file.LastWriteTimeUtc.Ticks).Append('\n');
+        }
+        catch (IOException) { }
+        return text.ToString();
+    }
     public string? ExchangeRatesPath { get; init; }
     public string? WeatherCache { get; init; }
     public string? WeatherProvider { get; init; }

@@ -48,6 +48,18 @@ public static unsafe class NativeApi
         };
     }
 
+    /// <summary>
+    /// Sets the function that receives events as JSON, on a TravelRepo thread: <c>clone_progress</c> during
+    /// <c>clone</c> and <c>trip_changed</c> for sessions that <c>watch</c>. Null removes it.
+    /// </summary>
+    [UnmanagedCallersOnly(EntryPoint = "tr_set_event_handler")]
+    public static void SetEventHandler(delegate* unmanaged<nint, byte*, void> handler, nint context)
+    {
+        if (handler is null) { NativeHost.Events = null; return; }
+        var target = (nint)handler;
+        NativeHost.Events = text => Respond(target, context, text);
+    }
+
     /// <summary>Answers a credential request with <c>{"username":…,"password":…}</c>, or null for none.</summary>
     [UnmanagedCallersOnly(EntryPoint = "tr_credential_reply")]
     public static void CredentialReply(ulong request, byte* credential) => NativeHost.Credentials.Reply(request, Text(credential));

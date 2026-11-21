@@ -19,6 +19,20 @@ public sealed class LibGit2Backend(ICredentialBroker? credentialBroker = null) :
 {
     static LibGit2Backend() => ManagedHttpTransport.Register();
 
+    private static readonly AsyncLocal<Action<GitTransferProgress>?> progress = new();
+
+    /// <summary>
+    /// Reports the progress of clones started on this asynchronous flow to <paramref name="report"/>, until the result
+    /// is disposed. Reports come on the thread that runs libgit2.
+    /// </summary>
+    public static IDisposable ReportProgress(Action<GitTransferProgress> report)
+    {
+        var previous = progress.Value; progress.Value = report;
+        return new Restore(() => progress.Value = previous);
+    }
+
+    private sealed class Restore(Action restore) : IDisposable { public void Dispose() => restore(); }
+
     public async Task<GitResult> ExecuteAsync(string directory, IReadOnlyList<string> arguments, string? input = null, CancellationToken cancellationToken = default)
     {
         if (!Directory.Exists(directory)) throw new DomainException("git.folder_missing", "The trip folder no longer exists: " + directory);
@@ -119,6 +133,12 @@ public sealed class LibGit2Backend(ICredentialBroker? credentialBroker = null) :
     {
         var operands = Operands(args); var url = operands[0]; var destination = operands.Count > 1 ? operands[1] : Path.Combine(directory, Path.GetFileNameWithoutExtension(url.TrimEnd('/')));
         var options = new CloneOptions(); options.FetchOptions.CredentialsProvider = Credentials(credential);
+        if (progress.Value is { } report)
+        {
+            var transfer = new GitTransferProgress(0, 0, 0, 0, 0, 0);
+            options.FetchOptions.OnTransferProgress = p => { report(transfer = transfer with { TotalObjects = p.TotalObjects, ReceivedObjects = p.ReceivedObjects, IndexedObjects = p.IndexedObjects, ReceivedBytes = p.ReceivedBytes }); return true; };
+            options.OnCheckoutProgress = (_, completed, total) => report(transfer = transfer with { CheckoutCompleted = completed, CheckoutTotal = total });
+        }
         try { GitRepo.Clone(url, destination, options); return Ok(""); }
         catch (LibGit2SharpException ex) { return Fail(Transport(url, ex)); }
     }
@@ -636,3 +656,6 @@ internal static class GitObjects
     /// <summary>The commit an object stands for: itself, or the commit an annotated tag points to.</summary>
     public static Commit? AsCommit(this GitObject? value) => value switch { Commit c => c, TagAnnotation t => t.Target.AsCommit(), _ => null };
 }
+
+/// <summary>How far a clone is: objects received and indexed, bytes received, and files checked out.</summary>
+public sealed record GitTransferProgress(int TotalObjects, int ReceivedObjects, int IndexedObjects, long ReceivedBytes, int CheckoutCompleted, int CheckoutTotal);
