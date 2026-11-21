@@ -54,3 +54,30 @@ jobs:
           cache: true
           cache-dependency-path: '**/packages.lock.json'
       - run: python3 eng/aot-smoke.py
+  # TravelRepo.Native as TravelRepo.xcframework for iOS, and the Swift package TravelRepoKit tested on an iOS simulator.
+  ios:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use the pinned SDK
+        shell: bash
+        run: cp eng/sdk.json global.json
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: eng/sdk.json
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+      - name: Install the NativeAOT runtime for iOS
+        run: dotnet workload install mobile-librarybuilder --skip-manifest-update
+      - run: eng/build-native-xcframework.sh artifacts/native
+      - name: Build libgit2 for iOS, for the Git tests
+        run: |
+          git clone --quiet --filter=blob:none https://github.com/libgit2/libgit2.git "$RUNNER_TEMP/libgit2"
+          git -C "$RUNNER_TEMP/libgit2" checkout --quiet 5853918
+          eng/build-libgit2-ios.sh "$RUNNER_TEMP/libgit2" "$RUNNER_TEMP/libgit2-ios"
+      - name: Test TravelRepoKit on an iOS simulator
+        env:
+          TEST_RUNNER_TRAVELREPO_LIBGIT2: ${{ runner.temp }}/libgit2-ios/git2.xcframework/ios-arm64_x86_64-simulator/git2.framework/git2
+        run: |
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k, v in sorted(d.items(), reverse=True) if 'iOS' in k for x in v if x['name'].startswith('iPhone')))")
+          xcodebuild test -scheme TravelRepoKit -destination "platform=iOS Simulator,id=$DEVICE"

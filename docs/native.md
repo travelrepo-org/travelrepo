@@ -31,6 +31,8 @@ On iOS, `git2.framework` from `eng/build-libgit2-ios.sh` goes into the app's `Fr
 
 Cultures, sorting and date formats use the system's ICU (`libicucore`), so no ICU data ships with the app. A trip opened with `"culture": "de-DE"` sorts and exports in German.
 
+For iOS apps, `eng/build-native-xcframework.sh` builds all of this as `TravelRepo.xcframework`, which the Swift package `TravelRepoKit` uses ([Swift apps](swift.md)).
+
 ## Calling it
 
 ```c
@@ -134,4 +136,4 @@ Git asks the app for credentials through the handler set with `tr_set_credential
 
 ## Checks
 
-`tests/TravelRepo.Tests/NativeTests.cs` calls the exported functions through function pointers. It also checks that every MCP tool is a command with the same arguments. `eng/aot-smoke.py` (see [development](development.md#nativeaot)) compiles the C interface with NativeAOT and runs it, including Git versions and a sync through libgit2. The iOS build itself is not part of CI.
+`tests/TravelRepo.Tests/NativeTests.cs` calls the exported functions through function pointers. It also checks that every MCP tool is a command with the same arguments. `eng/aot-smoke.py` (see [development](development.md#nativeaot)) compiles the C interface with NativeAOT and runs it, including Git versions and a sync through libgit2. The CI job `ios` builds `TravelRepo.xcframework` on macOS and runs the `TravelRepoKit` tests on an iOS simulator.
