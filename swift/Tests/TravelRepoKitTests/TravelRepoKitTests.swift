@@ -60,6 +60,27 @@ final class TravelRepoKitTests: XCTestCase {
         XCTAssertTrue(text.contains("Mai"), text)
     }
 
+    func testCostsPackingExportsAndDocuments() async throws {
+        let session = try await openTrip(culture: "de-DE")
+        try await session.call("create_entity", ["type": "person", "data": ["title": "Alex"]])
+        try await session.call("create_entity", ["type": "person", "data": ["title": "Sam"]])
+        try await session.call("add_expense", ["title": "Okonomiyaki in Osaka", "amount": "3000", "currency": "JPY", "paid_by": ["Alex"]])
+        let costs = try await session.costs()
+        XCTAssertEqual(costs.expenses.first?.amount, Money(value: "3000", currency: "JPY"))
+        XCTAssertEqual(costs.openDebts.first?.open, 1500)
+
+        let list = try await session.call("create_packing_list", ["title": "Osaka"])["id"]!.string!
+        try await session.call("add_packing_item", ["list": .string(list), "title": "Umbrella", "everyone": true])
+        let lists = try await session.packingLists()
+        XCTAssertEqual(lists.first { $0.id == list }?.items.first?.title, "Umbrella")
+
+        let csv = try await session.export("costs", format: "csv")
+        XCTAssertTrue(csv.contains("Okonomiyaki in Osaka"), csv)
+        let note = try await session.importDocument(Data("Seats 7 and 8".utf8), name: "seats.txt")
+        let snapshot = try await session.snapshot()
+        XCTAssertTrue(snapshot.entities.contains { $0.data["id"]?.string == note })
+    }
+
     func testErrorsCarryTravelRepoCodes() async throws {
         let session = try await openTrip()
         do { try await session.call("fly_to_the_moon"); XCTFail("unknown command accepted") }

@@ -110,8 +110,8 @@ internal static class NativeHost
                     ["commands"] = new JsonObject
                     {
                         ["global"] = new JsonArray(GlobalCommands.Concat(GitHubCommands.Names).Select(c => (JsonNode)c).ToArray()),
-                        ["session"] = new JsonArray(ClientCommands.Names.Concat(Tools.All.Select(t => t.Name)).Select(c => (JsonNode)c).ToArray()),
-                        ["read_only"] = new JsonArray(ClientCommands.ReadOnly.Concat(Tools.All.Where(t => t.ReadOnly).Select(t => t.Name)).Select(c => (JsonNode)c).ToArray())
+                        ["session"] = new JsonArray(ClientCommands.Names.Concat(AppCommands.Names).Concat(Tools.All.Select(t => t.Name)).Select(c => (JsonNode)c).ToArray()),
+                        ["read_only"] = new JsonArray(ClientCommands.ReadOnly.Concat(AppCommands.ReadOnly).Concat(Tools.All.Where(t => t.ReadOnly).Select(t => t.Name)).Select(c => (JsonNode)c).ToArray())
                     }
                 };
             case "configure":
@@ -142,7 +142,7 @@ internal static class NativeHost
             default:
                 var (found, result) = await GitHubCommands.RunAsync(command, args, ct);
                 if (found) return result;
-                throw Unknown(command, Tools.ByName.ContainsKey(command) || ClientCommands.Names.Contains(command) ? "It needs the session that open returns." : null);
+                throw Unknown(command, Tools.ByName.ContainsKey(command) || ClientCommands.Names.Contains(command) || AppCommands.Names.Contains(command) ? "It needs the session that open returns." : null);
         }
     }
 
@@ -162,7 +162,7 @@ internal static class NativeHost
         var tools = new TripTools(repository, Git, readOnly,
             weatherCache is null ? null : () => new CachedWeatherSource(weatherCache, weatherProvider), args.String("client_name"), rates is null ? null : () => rates);
         var id = (ulong)Interlocked.Increment(ref lastSession);
-        Sessions[id] = new(repository, new GitRepository(repository, Git), tools, culture, readOnly);
+        Sessions[id] = new(repository, new GitRepository(repository, Git), tools, culture, readOnly) { ExchangeRatesPath = rates, WeatherCache = weatherCache, WeatherProvider = weatherProvider };
         return id;
     }
 
@@ -198,6 +198,8 @@ internal static class NativeHost
         }
         var (found, result) = await ClientCommands.RunAsync(session, command, args, ct);
         if (found) return result;
+        (found, result) = await AppCommands.RunAsync(session, command, args, ct);
+        if (found) return result;
         if (!Tools.ByName.TryGetValue(command, out var tool)) throw Unknown(command, null);
         var text = await tool.Run(session.Tools, args, ct);
         return tool.Name == "read_guide" ? JsonValue.Create(text) : JsonNode.Parse(text);
@@ -223,6 +225,12 @@ internal sealed class NativeSession(TravelRepository repository, GitRepository g
     public TripTools Tools { get; } = tools;
     public CultureInfo? Culture { get; } = culture;
     public bool ReadOnly { get; } = readOnly;
+    public string? ExchangeRatesPath { get; init; }
+    public string? WeatherCache { get; init; }
+    public string? WeatherProvider { get; init; }
+
+    /// <summary>The exchange rates saved at <see cref="ExchangeRatesPath"/>, or null.</summary>
+    public ExchangeRates? ExchangeRates() => ExchangeRatesPath is null ? null : TravelRepo.Core.ExchangeRates.Load(ExchangeRatesPath);
 
     public Task<RepositoryState> ReadAsync(CancellationToken ct) => Repository.ReadAsync(ct);
 
