@@ -53,4 +53,33 @@ let state = try await trip.sync()
 - `JSONValue` keeps entity data as it is, including unknown fields and extensions. Write the whole entity back through `apply`.
 - A session closes when the `TravelRepoSession` is released.
 
+GitHub sign-in uses a device code:
+
+```swift
+try await GitHub.configure(clientId: "Iv1.example", appSlug: "your-github-app")
+try await GitHub.setToken(Keychain.token)             // on every start
+let authorization = try await GitHub.beginSignIn()   // show authorization.userCode, open verificationUri
+while true {
+    try await Task.sleep(for: .seconds(authorization.interval))
+    if case .connected(let token) = try await GitHub.poll(authorization) { Keychain.token = token; break }
+}
+let trips = try await GitHub.tripRepositories()
+```
+
+Git uses that token for `github.com` unless the app sets a credential provider of its own.
+
 `apply` writes only when the trip is still at the revision it was based on. After a sync, or when the app comes back to the foreground, compare `revision()` with the one shown and read again if it differs.
+
+## App Store
+
+- **Privacy manifest.** `TravelRepoKit` brings its own (`PrivacyInfo.xcprivacy`), and Xcode merges it into the app's privacy report. TravelRepo tracks nobody and collects no data. The linked binary calls these required-reason APIs:
+  - file timestamps (`stat`, `fstat`, `lstat`): reasons `C617.1` (files in the app's container) and `3B52.1` (trip folders the user picks);
+  - system boot time (`clock_gettime`): reason `35F9.1` (the .NET runtime measures elapsed time);
+  - disk space (`statfs`, `fstatfs`): reason `E174.1` (the runtime checks the file system before writing).
+
+  Check the list again after updating TravelRepo with `nm -u` on the app binary. An app that does more, such as GitHub sign-in, declares that in its own manifest.
+- **Encryption.** TravelRepo uses only standard HTTPS through Apple's Security framework and stores nothing encrypted itself. That is the usual exempt case (`ITSAppUsesNonExemptEncryption` = `NO`), but the export compliance answer is the app's.
+- **Size.** The whole interface adds about 24 MB to the app binary on a device after stripping, and `git2.framework` about 1.4 MB.
+- **Runtime.** Build releases with an SDK whose .NET runtime is 10.0.14 or later; 10.0.12 is affected by GHSA-p3jp-9v83-76w9.
+- **Plugins.** Jourfold plugins are .NET assemblies loaded at run time, which NativeAOT cannot do, so they are not available in Swift apps.
+

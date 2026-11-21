@@ -86,6 +86,28 @@ final class TravelRepoKitTests: XCTestCase {
         XCTAssertEqual(state, "local_only")
     }
 
+    /// Real HTTPS on iOS: GitHub's API through .NET's HttpClient and a clone through libgit2's managed transport.
+    /// Both only read libgit2's public test repository. Opt in with TRAVELREPO_NETWORK_TESTS=1.
+    func testHttpsToGitHub() async throws {
+        guard ProcessInfo.processInfo.environment["TRAVELREPO_NETWORK_TESTS"] == "1" else { throw XCTSkip("TRAVELREPO_NETWORK_TESTS is not 1") }
+        let repository = try await TravelRepo.call("github_inspect_repository", ["full_name": "libgit2/TestGitRepository"], as: JSONValue.self)
+        XCTAssertEqual(repository["private"]?.bool, false)
+
+        try await configureGit()
+        let destination = root.appendingPathComponent("clone")
+        try await TravelRepo.call("clone", ["url": "https://github.com/libgit2/TestGitRepository.git", "destination": .string(destination.path)], as: JSONValue.self)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.appendingPathComponent(".git").path))
+    }
+
+    func testGitHubWithoutSignIn() async throws {
+        try await GitHub.configure(clientId: "")
+        try await GitHub.setToken(nil)
+        let account = try await GitHub.account()
+        XCTAssertNil(account)
+        do { _ = try await GitHub.beginSignIn(); XCTFail("sign-in without client id") }
+        catch let error as TravelRepoError { XCTAssertEqual(error.code, "github.setup") }
+    }
+
     func testCredentialsComeFromTheAppAndCallsCanBeCancelled() async throws {
         try await configureGit()
         let asked = expectation(description: "credentials asked")

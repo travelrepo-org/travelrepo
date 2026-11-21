@@ -159,6 +159,13 @@
           "TravelRepo.Core": "[0.13.1, )"
         }
       },
+      "travelrepo.providers.github": {
+        "type": "Project",
+        "dependencies": {
+          "TravelRepo.Providers.Abstractions": "[0.13.1, )",
+          "TravelRepo.Serialization": "[0.13.1, )"
+        }
+      },
       "travelrepo.providers.weather": {
         "type": "Project",
         "dependencies": {
