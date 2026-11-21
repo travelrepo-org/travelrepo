@@ -135,6 +135,64 @@ final class TravelRepoKitTests: XCTestCase {
         XCTAssertEqual(state, "local_only")
     }
 
+    func testHistoryRestoreAndDeletedVariants() async throws {
+        try await configureGit()
+        try await TravelRepoSession.createTrip(root: root.appendingPathComponent("trip"), title: "Spring in Japan", gitName: "Alex", gitEmail: "alex@example.invalid")
+        let session = try await TravelRepoSession.open(root: root.appendingPathComponent("trip"), recoveryRoot: root.appendingPathComponent("recovery"))
+        let first = try await session.history()[0].commit
+        try await session.call("create_entity", ["type": "place", "data": ["title": "Nara Park"]])
+        try await session.call("create_version", ["message": "Add Nara Park"])
+        let health = try await session.gitHealth()
+        XCTAssertNil(health.staleLock)
+        XCTAssertEqual(health.tripChanges, 0)
+        let preview = try await session.restorePreview(commit: first)
+        XCTAssertTrue(preview.changes.contains { $0.kind == "removed" && $0.path.hasPrefix("places/") })
+        try await session.restoreApply(commit: first, plan: preview.plan)
+        try await session.call("create_version", ["message": "Back to the start"])
+        let newest = try await session.history().first?.title
+        XCTAssertEqual(newest, "Back to the start")
+
+        try await session.call("create_variant", ["branch": "variants/deer", "title": "Deer first"])
+        let primary = try await session.call("variants")["variants"]?.array?.first { $0["primary"]?.bool == true }?["branch"]?.string
+        try await session.call("switch_variant", ["branch": .string(primary ?? "main")])
+        try await session.call("delete_variant", ["branch": "variants/deer"])
+        let deleted = try await session.deletedVariants()
+        XCTAssertEqual(deleted.first?.title, "Deer first")
+        let restored = try await session.restoreVariant(deleted[0])
+        XCTAssertEqual(restored, "variants/deer")
+        let bin = try await session.deletedVariants()
+        XCTAssertTrue(bin.isEmpty)
+    }
+
+    func testPlanEditsAcrossDaylightSavingTime() async throws {
+        let session = try await openTrip()
+        let walk = try await session.call("create_entity", ["type": "schedule_item", "data": ["title": "Walk around Nara Park"]])["id"]!.string!
+        let sam = try await session.call("create_entity", ["type": "person", "data": ["title": "Sam"]])["id"]!.string!
+        // Hamburg moves its clocks forward on 28 March 2027: same local time and length on the new day.
+        try await session.schedule(walk, local: "2027-03-27T10:00:00", timezone: "Europe/Berlin", minutes: 100)
+        try await session.moveToDay(walk, day: "2027-03-28")
+        let entry = try await session.calendar().first { $0.item == walk }
+        XCTAssertEqual(entry?.start, "2027-03-28T08:00:00Z")
+        XCTAssertEqual(entry?.end, "2027-03-28T09:40:00Z")
+        do { try await session.schedule(walk, local: "2027-03-28T02:30:00", timezone: "Europe/Berlin"); XCTFail("A skipped time was accepted") }
+        catch let error as TravelRepoError { XCTAssertEqual(error.code, "time.gap") }
+
+        let copy = try await session.duplicate(walk, title: "Walk around Nara Park again")
+        let comment = try await session.addComment(on: copy, author: sam, body: "Deer crackers?")
+        let comments = try await session.comments(on: copy)
+        XCTAssertEqual(comments.first?.authorName, "Sam")
+        let preview = try await session.deletePreview([copy])
+        XCTAssertEqual(preview.dependents.map(\.id), [comment])
+        try await session.deleteEntities([copy])
+        let left = try await session.comments(on: copy)
+        XCTAssertTrue(left.isEmpty)
+
+        let vocabulary = try await session.vocabulary()
+        XCTAssertTrue(vocabulary.expenseCategories.contains("food"))
+        let category = try await session.suggestCategory(title: "Ryokan in Kyoto")
+        XCTAssertEqual(category, "accommodation")
+    }
+
     /// Real HTTPS on iOS: GitHub's API through .NET's HttpClient and a clone through libgit2's managed transport.
     /// Both only read libgit2's public test repository. Opt in with TRAVELREPO_NETWORK_TESTS=1.
     func testHttpsToGitHub() async throws {

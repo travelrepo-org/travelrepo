@@ -418,17 +418,152 @@ public sealed class NativeTests : IDisposable
         Assert.True(other["travelers"]!.AsArray().Single(t => t!["id"]!.GetValue<string>() == sam)!["claimed_by_someone_else"]!.GetValue<bool>());
     }
 
+    [Fact]
+    public async Task GitHealthRestoreHistoryAndDeletedVariantsWorkThroughTheInterface()
+    {
+        var created = await Ok(0, "create_trip", new JsonObject { ["root"] = Path.Combine(root, "nara"), ["title"] = "Nara", ["git_name"] = "Alex", ["git_email"] = "alex@example.invalid" });
+        var trip = created["root"]!.GetValue<string>();
+        var session = (await Ok(0, "open", new JsonObject { ["root"] = trip, ["recovery_root"] = Path.Combine(root, "recovery") }))["session"]!.GetValue<ulong>();
+        var first = (await Ok(session, "history"))["versions"]!.AsArray()[0]!["commit"]!.GetValue<string>();
+        var park = (await Ok(session, "create_entity", new JsonObject { ["type"] = "place", ["data"] = new JsonObject { ["title"] = "Nara Park" } }))["id"]!.GetValue<string>();
+        await Ok(session, "create_version", new JsonObject { ["message"] = "Add Nara Park" });
+        var versions = (await Ok(session, "history"))["versions"]!.AsArray();
+        Assert.Equal("Add Nara Park", versions[0]!["title"]!.GetValue<string>());
+        Assert.Equal(first, Assert.Single(versions[0]!["parents"]!.AsArray())!.GetValue<string>());
+        Assert.EndsWith("Z", versions[0]!["at"]!.GetValue<string>(), StringComparison.Ordinal);
+
+        // A lock file that a stopped Git left behind is found and removed; a young one is kept.
+        var health = await Ok(session, "git_health");
+        Assert.Null(health["stale_lock"]); Assert.Equal(0, health["trip_changes"]!.GetValue<int>());
+        var lockFile = Path.Combine(trip, ".git", "index.lock");
+        await File.WriteAllTextAsync(lockFile, "");
+        Assert.False((await Ok(session, "remove_stale_lock", new JsonObject { ["minimum_age_seconds"] = 600 }))["removed"]!.GetValue<bool>());
+        File.SetLastWriteTimeUtc(lockFile, DateTime.UtcNow.AddHours(-1));
+        Assert.Equal(".git/index.lock", (await Ok(session, "git_health"))["stale_lock"]!.GetValue<string>());
+        Assert.True((await Ok(session, "remove_stale_lock"))["removed"]!.GetValue<bool>());
+        Assert.False(File.Exists(lockFile));
+
+        // Restoring the first version removes the park, after the person saw what changes.
+        var preview = await Ok(session, "restore_preview", new JsonObject { ["commit"] = first });
+        Assert.Contains(preview["changes"]!.AsArray(), c => c!["path"]!.GetValue<string>() == "places/" + park + ".yaml" && c["kind"]!.GetValue<string>() == "removed");
+        Assert.Equal("repair.changed", await Failure(session, "restore_apply", new JsonObject { ["commit"] = first, ["plan"] = "0000000000000000" }));
+        await Ok(session, "restore_apply", new JsonObject { ["commit"] = first, ["plan"] = preview["plan"]!.DeepClone() });
+        Assert.Equal("command.invalid", await Failure(session, "get_entity", new JsonObject { ["id"] = park }));
+        await Ok(session, "recover");
+        await Ok(session, "create_version", new JsonObject { ["message"] = "Back to the start" });
+
+        Assert.Empty((await Ok(session, "remotes"))["remotes"]!.AsArray());
+        await Ok(session, "add_remote", new JsonObject { ["name"] = "origin", ["url"] = "https://example.invalid/alex-travels/nara.git" });
+        Assert.Equal("https://example.invalid/alex-travels/nara.git", Assert.Single((await Ok(session, "remotes"))["remotes"]!.AsArray())!["url"]!.GetValue<string>());
+
+        // A deleted variant waits in the recycle bin and comes back as a local branch.
+        await Ok(session, "update_variant", new JsonObject { ["title"] = "Nara in spring" });
+        var primary = (await Ok(session, "variants"))["variants"]!.AsArray().Single(v => v!["current"]!.GetValue<bool>())!;
+        Assert.Equal("Nara in spring", primary["title"]!.GetValue<string>());
+        await Ok(session, "create_variant", new JsonObject { ["branch"] = "variants/deer", ["title"] = "Deer first" });
+        await Ok(session, "switch_variant", new JsonObject { ["branch"] = primary["branch"]!.GetValue<string>() });
+        await Ok(session, "delete_variant", new JsonObject { ["branch"] = "variants/deer" });
+        var deleted = Assert.Single((await Ok(session, "deleted_variants"))["variants"]!.AsArray())!;
+        Assert.Equal("Deer first", deleted["title"]!.GetValue<string>());
+        Assert.Equal(0, (await Ok(session, "purge_deleted_variants"))["removed"]!.GetValue<int>());
+        Assert.Equal("variants/deer", (await Ok(session, "restore_variant", new JsonObject { ["reference"] = deleted["reference"]!.DeepClone() }))["branch"]!.GetValue<string>());
+        Assert.Empty((await Ok(session, "deleted_variants"))["variants"]!.AsArray());
+        Assert.Contains((await Ok(session, "variants"))["variants"]!.AsArray(), v => v!["branch"]!.GetValue<string>() == "variants/deer" && v["local_only"]!.GetValue<bool>());
+
+        // A copy elsewhere is a trip of its own with the same history.
+        var copy = (await Ok(session, "copy_trip", new JsonObject { ["destination"] = Path.Combine(root, "nara-copy") }))["root"]!.GetValue<string>();
+        var copied = (await Ok(0, "open", new JsonObject { ["root"] = copy, ["recovery_root"] = Path.Combine(root, "recovery-copy"), ["read_only"] = true }))["session"]!.GetValue<ulong>();
+        Assert.Equal("Rename variant", (await Ok(copied, "history"))["versions"]!.AsArray()[0]!["title"]!.GetValue<string>());
+        Assert.Equal("session.read_only", await Failure(copied, "restore_apply", new JsonObject { ["commit"] = first, ["plan"] = "x" }));
+        Assert.Equal("folder.not_empty", await Failure(session, "copy_trip", new JsonObject { ["destination"] = copy }));
+    }
+
+    [Fact]
+    public async Task PlanEditsKeepLocalTimesAcrossDaylightSavingTime()
+    {
+        var session = (await Ok(0, "open", new JsonObject { ["root"] = Sample("hamburg"), ["recovery_root"] = Path.Combine(root, "recovery") }))["session"]!.GetValue<ulong>();
+        const string walk = "73ae20df-9245-742c-b3f4-56c5f5765881";
+        async Task<JsonNode> Time(string id) => (await Ok(session, "get_entity", new JsonObject { ["id"] = id }))["entity"]!["time"]!;
+
+        // The day before the clocks go forward in Hamburg, then the day itself: same local time, same 100 minutes.
+        await Ok(session, "schedule", new JsonObject { ["id"] = walk, ["local"] = "2027-03-27T10:00:00", ["timezone"] = "Europe/Berlin", ["minutes"] = 100 });
+        Assert.Equal("+01", (await Time(walk))["start"]!["offset"]!.GetValue<string>());
+        await Ok(session, "move_to_day", new JsonObject { ["id"] = walk, ["day"] = "2027-03-28" });
+        var moved = await Time(walk);
+        Assert.Equal("2027-03-28T10:00:00", moved["start"]!["local"]!.GetValue<string>());
+        Assert.Equal("+02", moved["start"]!["offset"]!.GetValue<string>());
+        Assert.Equal("2027-03-28T11:40:00", moved["end"]!["local"]!.GetValue<string>());
+
+        // An hour that starts before the change ends an hour later on the clock.
+        await Ok(session, "schedule", new JsonObject { ["id"] = walk, ["local"] = "2027-03-28T01:30:00", ["timezone"] = "Europe/Berlin", ["minutes"] = 60 });
+        Assert.Equal("2027-03-28T03:30:00", (await Time(walk))["end"]!["local"]!.GetValue<string>());
+        // Skipped and repeated local times are refused until the app says which one is meant.
+        Assert.Equal("time.gap", await Failure(session, "schedule", new JsonObject { ["id"] = walk, ["local"] = "2027-03-28T02:30:00", ["timezone"] = "Europe/Berlin" }));
+        await Ok(session, "schedule", new JsonObject { ["id"] = walk, ["local"] = "2027-10-30T02:30:00", ["timezone"] = "Europe/Berlin" });
+        Assert.Equal("time.ambiguous", await Failure(session, "move_to_day", new JsonObject { ["id"] = walk, ["day"] = "2027-10-31" }));
+        await Ok(session, "move_to_day", new JsonObject { ["id"] = walk, ["day"] = "2027-10-31", ["offset"] = "+01" });
+        Assert.Equal("+01", (await Time(walk))["start"]!["offset"]!.GetValue<string>());
+        Assert.Equal("2027-10-31T03:30:00", (await Time(walk))["end"]!["local"]!.GetValue<string>());
+
+        var entry = (await Ok(session, "calendar"))["entries"]!.AsArray().Single(e => e!["item"]!.GetValue<string>() == walk)!;
+        Assert.Equal("2027-10-31T01:30:00Z", entry["start"]!.GetValue<string>());
+        Assert.False(entry["all_day"]!.GetValue<bool>());
+        Assert.Equal("argument.invalid", await Failure(session, "move_to_day", new JsonObject { ["id"] = walk, ["day"] = "31.10.2027" }));
+    }
+
+    [Fact]
+    public async Task AppsDuplicateDeleteCommentAndReadMail()
+    {
+        var session = (await Ok(0, "open", new JsonObject { ["root"] = Sample("hamburg"), ["recovery_root"] = Path.Combine(root, "recovery") }))["session"]!.GetValue<ulong>();
+        const string walk = "73ae20df-9245-742c-b3f4-56c5f5765881", alex = "f678cffe-8c4f-70c6-9a82-1236aadd31de";
+        var vocabulary = await Ok(session, "vocabulary");
+        Assert.Contains("food", vocabulary["expense_categories"]!.AsArray().Select(c => c!.GetValue<string>()));
+        Assert.Contains("ferry", vocabulary["transport_types"]!.AsArray().Select(c => c!.GetValue<string>()));
+        Assert.Equal("accommodation", (await Ok(session, "suggest_category", new JsonObject { ["title"] = "Hotel at Hamburg Hauptbahnhof" }))["category"]!.GetValue<string>());
+
+        var copy = (await Ok(session, "duplicate", new JsonObject { ["id"] = walk, ["title"] = "Explore Hamburg again" }))["id"]!.GetValue<string>();
+        Assert.Equal("Explore Hamburg again", (await Ok(session, "get_entity", new JsonObject { ["id"] = copy }))["entity"]!["title"]!.GetValue<string>());
+
+        var comment = (await Ok(session, "add_comment", new JsonObject { ["target"] = copy, ["author"] = alex, ["body"] = "Harbour tour at noon?" }))["id"]!.GetValue<string>();
+        var listed = Assert.Single((await Ok(session, "comments", new JsonObject { ["target"] = copy }))["comments"]!.AsArray())!;
+        Assert.Equal("Alex", listed["author_name"]!.GetValue<string>());
+        Assert.Equal("argument.invalid", await Failure(session, "add_comment", new JsonObject { ["target"] = copy, ["author"] = copy, ["body"] = "Hi" }));
+
+        // Deleting the copy takes its comment with it, which the preview shows first.
+        var preview = await Ok(session, "delete_preview", new JsonObject { ["ids"] = new JsonArray(copy) });
+        Assert.Equal(comment, Assert.Single(preview["dependents"]!.AsArray())!["id"]!.GetValue<string>());
+        await Ok(session, "delete_entities", new JsonObject { ["ids"] = new JsonArray(copy) });
+        Assert.Equal("command.invalid", await Failure(session, "get_entity", new JsonObject { ["id"] = comment }));
+
+        Assert.NotNull((await Ok(session, "cost_upgrade_preview"))["changes"]);
+
+        const string mail = "From: Alex <alex@example.com>\r\nTo: Sam <sam@example.com>\r\nSubject: Hotel near the Alster\r\nDate: Wed, 12 May 2027 09:00:00 +0200\r\n" +
+            "MIME-Version: 1.0\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<p>See you in Hamburg</p><script>alert(1)</script><img src=\"https://example.com/pixel.png\">\r\n";
+        var document = (await Ok(session, "import_document_data", new JsonObject { ["name"] = "hotel.eml", ["media_type"] = "message/rfc822", ["base64"] = Convert.ToBase64String(Encoding.UTF8.GetBytes(mail)) }))["id"]!.GetValue<string>();
+        var read = await Ok(session, "read_mail", new JsonObject { ["id"] = document });
+        Assert.Equal("Hotel near the Alster", read["subject"]!.GetValue<string>());
+        Assert.Equal("alex@example.com", read["from"]![0]!["address"]!.GetValue<string>());
+        Assert.Equal("2027-05-12T07:00:00Z", read["date"]!.GetValue<string>());
+        Assert.DoesNotContain("<script", read["html"]!.GetValue<string>(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("example.com/pixel", read["html"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.Equal(1, read["remote_images"]!.GetValue<int>());
+        Assert.Equal("document.not_mail", await Failure(session, "read_mail", new JsonObject { ["id"] = (await Ok(session, "import_document_data", new JsonObject { ["name"] = "note.txt", ["base64"] = Convert.ToBase64String("Hi"u8.ToArray()) }))["id"]!.DeepClone() }));
+    }
+
     private sealed class FakeGitHub(Func<HttpRequestMessage, HttpResponseMessage> answer) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => Task.FromResult(answer(request));
     }
 
-    private string Trip()
+    private string Trip() => Sample("tokyo");
+
+    private string Sample(string name)
     {
         var trip = Path.Combine(root, "trip-" + Guid.NewGuid().ToString("N")[..8]);
-        foreach (var file in Directory.EnumerateFiles(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "samples", "tokyo"), "*", SearchOption.AllDirectories))
+        var source = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "samples", name);
+        foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
         {
-            var target = Path.Combine(trip, Path.GetRelativePath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "samples", "tokyo"), file));
+            var target = Path.Combine(trip, Path.GetRelativePath(source, file));
             Directory.CreateDirectory(Path.GetDirectoryName(target)!); File.Copy(file, target);
         }
         return trip;

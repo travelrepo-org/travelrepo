@@ -12,7 +12,12 @@
  * Commands without a session (session 0): info, configure, create_trip, open, clone.
  * Commands of a session: snapshot, revision, apply, read_resource, agenda, find, variants, create_variant,
  * switch_variant, delete_variant, rollback, merge_preview, merge_apply, initialize_git, sync_status, sync, add_remote, watch,
- * costs, packing, bookings, stays, reminders, export, import_document_data, fetch_exchange_rates, fetch_weather,
+ * costs, packing, bookings, stays, reminders, export, import_document_data, fetch_exchange_rates, fetch_weather, me,
+ * claim_person, git_health, recover, remove_stale_lock, abort_operation, move_aside, restore_preview, restore_apply,
+ * history, remotes, pull, update_variant, deleted_variants, restore_variant, purge_deleted_variants, keep_local_only,
+ * share_variant, sync_variant, mark_merged, copy_trip, vocabulary, suggest_category, delete_preview, delete_entities,
+ * duplicate, schedule, move_to_day, comments, add_comment, calendar, cost_upgrade_preview, cost_upgrade_apply,
+ * read_mail, replace_document,
  * and the tools of the TravelRepo MCP server with the same names and arguments (docs/mcp.md).
  * See docs/native.md.
  */

@@ -123,8 +123,8 @@ internal static class NativeHost
                     ["commands"] = new JsonObject
                     {
                         ["global"] = new JsonArray(GlobalCommands.Concat(GitHubCommands.Names).Select(c => (JsonNode)c).ToArray()),
-                        ["session"] = new JsonArray(ClientCommands.Names.Concat(AppCommands.Names).Concat(Tools.All.Select(t => t.Name)).Select(c => (JsonNode)c).ToArray()),
-                        ["read_only"] = new JsonArray(ClientCommands.ReadOnly.Concat(AppCommands.ReadOnly).Concat(Tools.All.Where(t => t.ReadOnly).Select(t => t.Name)).Select(c => (JsonNode)c).ToArray())
+                        ["session"] = new JsonArray(ClientCommands.Names.Concat(AppCommands.Names).Concat(MaintenanceCommands.Names).Concat(PlanCommands.Names).Concat(Tools.All.Select(t => t.Name)).Select(c => (JsonNode)c).ToArray()),
+                        ["read_only"] = new JsonArray(ClientCommands.ReadOnly.Concat(AppCommands.ReadOnly).Concat(MaintenanceCommands.ReadOnly).Concat(PlanCommands.ReadOnly).Concat(Tools.All.Where(t => t.ReadOnly).Select(t => t.Name)).Select(c => (JsonNode)c).ToArray())
                     }
                 };
             case "configure":
@@ -240,6 +240,10 @@ internal static class NativeHost
         var (found, result) = await ClientCommands.RunAsync(session, command, args, ct);
         if (found) return result;
         (found, result) = await AppCommands.RunAsync(session, command, args, ct);
+        if (found) return result;
+        (found, result) = await MaintenanceCommands.RunAsync(session, command, args, ct);
+        if (found) return result;
+        (found, result) = await PlanCommands.RunAsync(session, command, args, ct);
         if (found) return result;
         if (!Tools.ByName.TryGetValue(command, out var tool)) throw Unknown(command, null);
         var text = await tool.Run(session.Tools, args, ct);
