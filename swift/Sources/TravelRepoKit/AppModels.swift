@@ -108,6 +108,11 @@ extension TravelRepoSession {
         struct Found: Decodable { let stays: [StayRun] }
         return try await call("stays", as: Found.self).stays
     }
+    /// Nights within the trip (yyyy-MM-dd) without a stay or an item through the night, such as a night flight.
+    public func missingNights() async throws -> [String] {
+        struct Found: Decodable { let missingNights: [String]; enum CodingKeys: String, CodingKey { case missingNights = "missing_nights" } }
+        return try await call("stays", as: Found.self).missingNights
+    }
 
     /// What is due: cancellation deadlines, payments, tasks and the like, as of `now`.
     public func reminders(now: Date = Date()) async throws -> [Reminder] {

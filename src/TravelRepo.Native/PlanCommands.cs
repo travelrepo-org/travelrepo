@@ -17,9 +17,9 @@ internal static class PlanCommands
 {
     public static readonly IReadOnlyList<string> Names =
         ["vocabulary", "suggest_category", "delete_preview", "delete_entities", "duplicate", "schedule", "move_to_day", "comments", "add_comment",
-         "calendar", "cost_upgrade_preview", "cost_upgrade_apply", "read_mail", "replace_document"];
+         "calendar", "cost_upgrade_preview", "cost_upgrade_apply", "read_mail", "read_pass", "replace_document", "plan_material", "align_stay"];
 
-    public static readonly IReadOnlyList<string> ReadOnly = ["vocabulary", "suggest_category", "delete_preview", "comments", "calendar", "cost_upgrade_preview", "read_mail"];
+    public static readonly IReadOnlyList<string> ReadOnly = ["vocabulary", "suggest_category", "delete_preview", "comments", "calendar", "cost_upgrade_preview", "read_mail", "read_pass"];
 
     public static async Task<(bool Found, JsonNode? Result)> RunAsync(NativeSession session, string command, Arguments args, CancellationToken ct)
     {
@@ -110,6 +110,12 @@ internal static class PlanCommands
                     comment.Data["author"] = author.Id.ToString();
                     comment.Data["created_at"] = InstantPattern.General.Format(SystemClock.Instance.GetCurrentInstant());
                     comment.Data["body"] = body;
+                    if (args.OptionalStrings("mentions") is { Length: > 0 } mentions)
+                    {
+                        var people = Ids(mentions).Distinct().ToArray();
+                        if (people.Any(id => trip.Find(id) is not { Type: "person" })) throw new DomainException("argument.invalid", "mentions must be people of this trip.");
+                        comment.Data["mentions"] = new JsonArray(people.Select(id => (JsonNode)id.ToString()).ToArray());
+                    }
                     var saved = await SaveAsync(session, state, [new(comment.Id, comment)], [], ct);
                     saved["id"] = comment.Id.ToString();
                     return (true, saved);
@@ -163,6 +169,22 @@ internal static class PlanCommands
                 }
             case "read_mail":
                 return (true, ReadMail(trip, args));
+            case "read_pass":
+                return (true, ReadPass(trip, args, session.Culture));
+            case "plan_material":
+                {
+                    var activity = Material(trip, Id(args.Required("id")), args);
+                    var saved = await SaveAsync(session, state, [new(activity.Id, activity)], [], ct);
+                    saved["id"] = activity.Id.ToString();
+                    return (true, saved);
+                }
+            case "align_stay":
+                {
+                    var item = Item(trip, args.Required("id"));
+                    var aligned = Stays.Align(trip, item);
+                    if (ReferenceEquals(aligned, item)) throw new DomainException("stay.unscheduled", "This item is not a stay with nights.");
+                    return (true, await SaveAsync(session, state, [new(item.Id, aligned)], [], ct));
+                }
             case "replace_document":
                 {
                     var entity = await session.Repository.ReplaceDocumentAsync(Id(args.Required("id")), args.Required("source"), args.Required("media_type"), args.Bool("allow_large", false), ct);
@@ -178,12 +200,8 @@ internal static class PlanCommands
     /// </summary>
     private static JsonObject ReadMail(TripSnapshot trip, Arguments args)
     {
-        var document = trip.Find(Id(args.Required("id")));
-        if (document is not { Type: "document" }) throw new DomainException("entity.missing", "There is no document " + args.Required("id") + ".");
-        if (!Mail.IsMail(document.Data["media_type"]?.ToString())) throw new DomainException("document.not_mail", "This document is not an e-mail.");
-        var hash = document.Data["blob"]?["hash"]?.ToString() ?? "";
-        var bytes = hash.Length == 64 ? trip.Resources.GetValueOrDefault("assets/sha256/" + hash[..2] + "/" + hash) : null;
-        if (bytes is null) throw new DomainException("resource.missing", "The e-mail's file is missing from the trip.");
+        var bytes = DocumentBytes(trip, args.Required("id"), out var media);
+        if (!Mail.IsMail(media)) throw new DomainException("document.not_mail", "This document is not an e-mail.");
         var mail = Mail.Read(bytes);
         var html = mail.Html is null ? null : MailHtml.Sanitize(mail.Html, args.Bool("allow_remote_images", false));
         static JsonArray Addresses(IEnumerable<MailAddress> list) => new(list.Select(a => (JsonNode)new JsonObject { ["name"] = a.Name, ["address"] = a.Address }).ToArray());
@@ -213,6 +231,60 @@ internal static class PlanCommands
                 ["base64"] = Convert.ToBase64String(a.Content)
             }).ToArray())
         };
+    }
+
+    /// <summary>
+    /// Puts an activity, a note or a document into the plan, as dragging it onto a day does in Jourfold: an activity
+    /// gets the time, a note or document becomes a new activity that shows it. Without <c>local</c> the activity stays
+    /// unscheduled. Giving an idea a time makes it planned.
+    /// </summary>
+    private static Entity Material(TripSnapshot trip, Guid id, Arguments args)
+    {
+        var source = trip.Find(id) ?? throw new DomainException("entity.missing", "There is no entity " + id + ".");
+        if (source.Type is not ("schedule_item" or "note" or "document")) throw new DomainException("schedule.material", "Choose an activity, note or document to schedule.");
+        var activity = source.Type == "schedule_item" ? source.Copy() : Entity.Create("schedule_item", source.Title);
+        if (source.Type == "note") activity.Data["content"] = new JsonArray(new JsonObject { ["type"] = "reference", ["entity"] = id.ToString() });
+        else if (source.Type == "document") activity.Data["content"] = new JsonArray(TripCommands.ContentEntry(source));
+        if (args.String("local") is { } local)
+        {
+            var zone = args.Required("timezone");
+            if (DateTimeZoneProviders.Tzdb.GetZoneOrNull(zone) is null) throw new DomainException("argument.invalid", "Unknown time zone " + zone + ".");
+            var minutes = args.Int("minutes", 60);
+            if (minutes < 0) throw new DomainException("argument.invalid", "minutes cannot be negative.");
+            activity = Scheduled(activity, new ZonedTime(local, zone, args.String("offset")), Duration.FromMinutes(minutes));
+            if (activity.Data["status"]?.ToString() == "idea") activity.Data["status"] = "planned";
+        }
+        else if (source.Type == "schedule_item") activity.Data["time"] = null;
+        return activity;
+    }
+
+    /// <summary>A Wallet pass as an app shows it offline, with labels in the session's language.</summary>
+    private static JsonObject ReadPass(TripSnapshot trip, Arguments args, CultureInfo? culture)
+    {
+        var bytes = DocumentBytes(trip, args.Required("id"), out var media);
+        if (media != WalletPass.MediaType || WalletPass.Read(bytes, args.String("language") ?? culture?.TwoLetterISOLanguageName ?? "en") is not { } pass)
+            throw new DomainException("document.not_pass", "This document is not a Wallet pass.");
+        return new JsonObject
+        {
+            ["description"] = pass.Description,
+            ["organization"] = pass.Organization,
+            ["style"] = pass.Style,
+            ["barcode"] = pass.Barcode is not { } code ? null : new JsonObject { ["message"] = code.Message, ["format"] = code.Format, ["alt_text"] = code.AltText, ["encoding"] = code.Encoding },
+            ["fields"] = new JsonArray(pass.Fields.Select(f => (JsonNode)new JsonObject { ["group"] = f.Group, ["label"] = f.Label, ["value"] = f.Value }).ToArray()),
+            ["relevant"] = pass.Relevant?.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
+            ["background"] = pass.Background,
+            ["foreground"] = pass.Foreground
+        };
+    }
+
+    private static byte[] DocumentBytes(TripSnapshot trip, string id, out string media)
+    {
+        var document = trip.Find(Id(id));
+        if (document is not { Type: "document" }) throw new DomainException("entity.missing", "There is no document " + id + ".");
+        media = document.Data["media_type"]?.ToString() ?? "";
+        var hash = document.Data["blob"]?["hash"]?.ToString() ?? "";
+        return (hash.Length == 64 ? trip.Resources.GetValueOrDefault("assets/sha256/" + hash[..2] + "/" + hash) : null)
+            ?? throw new DomainException("resource.missing", "The document's file is missing from the trip.");
     }
 
     /// <summary>

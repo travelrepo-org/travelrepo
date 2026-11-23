@@ -187,6 +187,14 @@ final class TravelRepoKitTests: XCTestCase {
         let left = try await session.comments(on: copy)
         XCTAssertTrue(left.isEmpty)
 
+        let idea = try await session.call("create_entity", ["type": "schedule_item", "data": ["title": "Deer park in Nara"]])["id"]!.string!
+        try await session.planMaterial(idea, local: "2027-05-18T10:00:00", timezone: "Asia/Tokyo")
+        let status = try await session.call("get_entity", ["id": .string(idea)])["entity"]?["status"]?.string
+        XCTAssertEqual(status, "planned")
+        try await session.addComment(on: idea, author: sam, body: "Bring crackers", mentions: [sam])
+        let missing = try await session.missingNights()
+        XCTAssertNotNil(missing)
+
         let vocabulary = try await session.vocabulary()
         XCTAssertTrue(vocabulary.expenseCategories.contains("food"))
         let category = try await session.suggestCategory(title: "Ryokan in Kyoto")

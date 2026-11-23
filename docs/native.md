@@ -116,7 +116,7 @@ With a session:
 | `costs` | optional `currency` (converted with the saved exchange rates); amounts are decimal strings such as `"198.92"`, as in trip files | `expenses` (amount, method, payers, shares, debts, issues), `open_debts`, `balances`, `settle_up` (the fewest payments that settle everything), `totals` per currency, `categories`, `budgets` |
 | `packing` | – | `lists` with their items (`group`, `quantity`, `everyone`, `assignees`, `packed_by`) |
 | `bookings` | – | every booking with its plans (`items`), paid and planned expenses and `coverage` |
-| `stays` | – | every stay with `first_night`, `nights`, `zone`, `check_in`, `check_out` and `issues` |
+| `stays` | – | every stay with `first_night`, `nights`, `zone`, `check_in`, `check_out` and `issues`, and the `missing_nights` of the trip without a stay or an item through the night |
 | `reminders` | optional `now` (ISO 8601 instant, default the current time) | what is due: `kind`, `entity`, `title`, `moment`, `urgent`, `dates` |
 | `export` | `kind` (`plan`, `costs`, `packing`), `format` (`text`, `html` and `ics` for plans; `text` and `csv` for costs and packing), optional `person` | `text`, written in the session's culture |
 | `import_document_data` | `name`, `base64`, optional `media_type` (from the name otherwise), `attach_to` | the new document's `id`, `media_type` and the new `revision` |
@@ -166,11 +166,14 @@ Plan edits beyond whole entities. Those that change the trip are one transaction
 | `schedule` | `id`, `local` (such as `2027-03-28T10:00:00`), `timezone`, optional `minutes` (default 60), `offset` | an exact time, saved with its offset; `time.gap` for a local time that is skipped and `time.ambiguous` for one that is repeated, unless `offset` (such as `+01`) says which |
 | `move_to_day` | `id`, `day`, optional `offset` | the same local time and length on another day, with the same errors; an item without a time keeps its kind of day |
 | `comments` | `target` | `comments` with `author`, `author_name`, `created_at` and `body`, oldest first |
-| `add_comment` | `target`, `author` (a person), `body` | the comment's `id` |
+| `add_comment` | `target`, `author` (a person), `body`, optional `mentions` (people) | the comment's `id` |
 | `calendar` | optional `stays_as_check_in_out` | `entries` for a device calendar: `uid`, `item`, `title`, `role`, `kind`, `all_day`, `start`, `end`, `date`, `zone`, `location`, `description`, `status` |
 | `cost_upgrade_preview` | optional `fallback_currency` | whether an upgrade of older cost data is `needed` and its `changes` |
 | `cost_upgrade_apply` | optional `fallback_currency`, `message` | saves it; a `version` of its own when nothing else was unsaved |
 | `read_mail` | `id` of an e-mail document, optional `allow_remote_images` | `subject`, `from`, `to`, `cc`, `date`, `text`, `html` cleaned for display (no scripts, frames or forms; remote images only when allowed), `remote_images`, `inline_images` and `attachments` as base64 |
+| `read_pass` | `id` of a Wallet pass, optional `language` (default the session's) | `description`, `organization`, `style`, `barcode` (`message`, `format`, `alt_text`, `encoding`), `fields` (`group`, `label`, `value`), `relevant`, `background`, `foreground` |
+| `plan_material` | `id` of an activity, note or document, optional `local`, `timezone`, `minutes`, `offset` | the activity's `id`; a note or document becomes a new activity that shows it, an idea with a time becomes planned, without `local` it is unscheduled |
+| `align_stay` | `id` of a stay | makes check-in, check-out and time agree, filling a missing one from the nights; `stay.unscheduled` for an item without nights |
 | `replace_document` | `id`, `source` (a file path), `media_type`, optional `allow_large` | the document's `id` and the new `revision` |
 
 Every tool of the [MCP server](mcp.md) also works as a session command, with the same name, arguments and results. For example: `get_trip`, `get_schedule`, `search`, `get_entity`, `create_entity`, `update_entity`, `delete_entity`, `get_costs`, `add_expense`, `export_text`, `create_version` and `list_versions`. Changes are validated and written as one transaction, as there. `info` lists all commands.

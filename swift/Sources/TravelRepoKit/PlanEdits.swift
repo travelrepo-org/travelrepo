@@ -65,6 +65,17 @@ public struct MailView: Decodable, Sendable {
     }
 }
 
+public struct WalletPassView: Decodable, Sendable {
+    public struct Barcode: Decodable, Sendable {
+        public let message: String; public let format: String; public let altText: String?; public let encoding: String
+        enum CodingKeys: String, CodingKey { case message, format, altText = "alt_text", encoding }
+    }
+    /// `group` is primary, secondary, auxiliary, header or back.
+    public struct Field: Decodable, Sendable { public let group: String; public let label: String?; public let value: String }
+    public let description: String?; public let organization: String?; public let style: String?; public let barcode: Barcode?
+    public let fields: [Field]; public let relevant: String?; public let background: String?; public let foreground: String?
+}
+
 private struct Saved: Decodable { let revision: String; let id: String? }
 
 extension TravelRepoSession {
@@ -106,8 +117,8 @@ extension TravelRepoSession {
         return try await call("comments", ["target": .string(target)], as: Comments.self).comments
     }
     @discardableResult
-    public func addComment(on target: String, author: String, body: String) async throws -> String {
-        try await call("add_comment", ["target": .string(target), "author": .string(author), "body": .string(body)], as: Saved.self).id ?? ""
+    public func addComment(on target: String, author: String, body: String, mentions: [String] = []) async throws -> String {
+        try await call("add_comment", ["target": .string(target), "author": .string(author), "body": .string(body), "mentions": .array(mentions.map(JSONValue.string))], as: Saved.self).id ?? ""
     }
 
     public func calendar(staysAsCheckInOut: Bool = false) async throws -> [CalendarEntry] {
@@ -128,6 +139,25 @@ extension TravelRepoSession {
     public func readMail(_ document: String, allowRemoteImages: Bool = false) async throws -> MailView {
         try await call("read_mail", ["id": .string(document), "allow_remote_images": .bool(allowRemoteImages)])
     }
+    /// A Wallet pass (.pkpass) with its fields and barcode, labels in the session's language unless `language` is given.
+    public func readPass(_ document: String, language: String? = nil) async throws -> WalletPassView {
+        var arguments: [String: JSONValue] = ["id": .string(document)]
+        if let language { arguments["language"] = .string(language) }
+        return try await call("read_pass", arguments)
+    }
+    /// Puts an activity, note or document into the plan and returns the activity's id. A note or document becomes a new
+    /// activity that shows it; without `local` the activity is unscheduled. An idea that gets a time becomes planned.
+    @discardableResult
+    public func planMaterial(_ id: String, local: String? = nil, timezone: String? = nil, minutes: Int = 60, offset: String? = nil) async throws -> String {
+        var arguments: [String: JSONValue] = ["id": .string(id), "minutes": .number(Double(minutes))]
+        if let local { arguments["local"] = .string(local) }
+        if let timezone { arguments["timezone"] = .string(timezone) }
+        if let offset { arguments["offset"] = .string(offset) }
+        return try await call("plan_material", arguments, as: Saved.self).id ?? ""
+    }
+    /// Makes a stay's check-in, check-out and time agree, filling a missing one from its nights.
+    @discardableResult
+    public func alignStay(_ id: String) async throws -> Applied { try await call("align_stay", ["id": .string(id)]) }
     /// Replaces a document's file with the file at `source`.
     public func replaceDocument(_ id: String, source: URL, mediaType: String, allowLarge: Bool = false) async throws {
         try await call("replace_document", ["id": .string(id), "source": .string(source.path), "media_type": .string(mediaType), "allow_large": .bool(allowLarge)])

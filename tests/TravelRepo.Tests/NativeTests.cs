@@ -550,6 +550,72 @@ public sealed class NativeTests : IDisposable
         Assert.Equal("document.not_mail", await Failure(session, "read_mail", new JsonObject { ["id"] = (await Ok(session, "import_document_data", new JsonObject { ["name"] = "note.txt", ["base64"] = Convert.ToBase64String("Hi"u8.ToArray()) }))["id"]!.DeepClone() }));
     }
 
+    [Fact]
+    public async Task StaysPassesMentionsAndPlanningMaterialWorkThroughTheInterface()
+    {
+        var session = (await Ok(0, "open", new JsonObject { ["root"] = Sample("hamburg"), ["recovery_root"] = Path.Combine(root, "recovery"), ["culture"] = "de-DE" }))["session"]!.GetValue<ulong>();
+        const string alex = "f678cffe-8c4f-70c6-9a82-1236aadd31de", hotel = "9985a1f1-5932-7f2b-bca5-3175da923284", walk = "73ae20df-9245-742c-b3f4-56c5f5765881";
+        var snapshot = await Ok(session, "snapshot");
+        var manifest = snapshot["entities"]!.AsArray().Single(e => e!["path"]!.GetValue<string>() == "travel.yaml")!["data"]!.AsObject();
+        manifest["dates"] = new JsonObject { ["start"] = "2027-05-11", ["end"] = "2027-05-14" };
+        await Ok(session, "apply", new JsonObject { ["revision"] = snapshot["revision"]!.DeepClone(), ["edits"] = new JsonArray(new JsonObject { ["id"] = manifest["id"]!.DeepClone(), ["data"] = manifest.DeepClone() }) });
+
+        // A stay with only its check-in covers one night; aligning it fills in the check-out, and the other nights are missing.
+        var stay = (await Ok(session, "create_entity", new JsonObject
+        {
+            ["type"] = "schedule_item",
+            ["data"] = new JsonObject
+            {
+                ["title"] = "Hotel by the Alster",
+                ["status"] = "planned",
+                ["components"] = new JsonObject { ["accommodation"] = new JsonObject { ["place"] = hotel, ["check_in"] = new JsonObject { ["local"] = "2027-05-11T15:00:00", ["timezone"] = "Europe/Berlin" } } }
+            }
+        }))["id"]!.GetValue<string>();
+        await Ok(session, "align_stay", new JsonObject { ["id"] = stay });
+        var aligned = (await Ok(session, "get_entity", new JsonObject { ["id"] = stay }))["entity"]!;
+        Assert.StartsWith("2027-05-12T", aligned["components"]!["accommodation"]!["check_out"]!["local"]!.GetValue<string>(), StringComparison.Ordinal);
+        var missing = (await Ok(session, "stays"))["missing_nights"]!.AsArray().Select(n => n!.GetValue<string>()).ToArray();
+        Assert.DoesNotContain("2027-05-11", missing);
+        Assert.Contains("2027-05-13", missing);
+        Assert.Equal("stay.unscheduled", await Failure(session, "align_stay", new JsonObject { ["id"] = walk }));
+
+        // A boarding pass, shown with its German labels, then put into the plan as an activity of its own.
+        var pass = new MemoryStream();
+        using (var zip = new System.IO.Compression.ZipArchive(pass, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+        {
+            using (var writer = new StreamWriter(zip.CreateEntry("pass.json").Open())) writer.Write("""
+                { "formatVersion": 1, "description": "Train ticket", "organizationName": "Example Rail",
+                  "barcodes": [ { "message": "HAMBURG-BERLIN-0042", "format": "PKBarcodeFormatQR", "messageEncoding": "iso-8859-1" } ],
+                  "boardingPass": { "transitType": "PKTransitTypeTrain", "auxiliaryFields": [ { "key": "car", "label": "car_label", "value": "7" } ] } }
+                """);
+            using (var writer = new StreamWriter(zip.CreateEntry("de.lproj/pass.strings").Open(), Encoding.Unicode)) writer.Write("\"car_label\" = \"Wagen\";");
+        }
+        var ticket = (await Ok(session, "import_document_data", new JsonObject { ["name"] = "ticket.pkpass", ["base64"] = Convert.ToBase64String(pass.ToArray()) }))["id"]!.GetValue<string>();
+        var read = await Ok(session, "read_pass", new JsonObject { ["id"] = ticket });
+        Assert.Equal("Example Rail", read["organization"]!.GetValue<string>());
+        Assert.Equal("qr", read["barcode"]!["format"]!.GetValue<string>());
+        Assert.Contains(read["fields"]!.AsArray(), f => f!["label"]!.GetValue<string>() == "Wagen" && f["value"]!.GetValue<string>() == "7");
+        Assert.Equal("document.not_pass", await Failure(session, "read_pass", new JsonObject { ["id"] = (await Ok(session, "import_document_data", new JsonObject { ["name"] = "seat.txt", ["base64"] = Convert.ToBase64String("7"u8.ToArray()) }))["id"]!.DeepClone() }));
+
+        var train = (await Ok(session, "plan_material", new JsonObject { ["id"] = ticket, ["local"] = "2027-05-14T09:00:00", ["timezone"] = "Europe/Berlin", ["minutes"] = 110 }))["id"]!.GetValue<string>();
+        var planned = (await Ok(session, "get_entity", new JsonObject { ["id"] = train }))["entity"]!;
+        Assert.Equal("ticket.pkpass", planned["title"]!.GetValue<string>());
+        Assert.Contains(ticket, planned["content"]!.ToJsonString(), StringComparison.Ordinal);
+        Assert.Equal("2027-05-14T10:50:00", planned["time"]!["end"]!["local"]!.GetValue<string>());
+        // An idea that gets a time becomes planned; one without a time stays unscheduled.
+        var idea = (await Ok(session, "create_entity", new JsonObject { ["type"] = "schedule_item", ["data"] = new JsonObject { ["title"] = "Elbphilharmonie Plaza" } }))["id"]!.GetValue<string>();
+        Assert.Equal(idea, (await Ok(session, "plan_material", new JsonObject { ["id"] = idea, ["local"] = "2027-05-13T11:00:00", ["timezone"] = "Europe/Berlin" }))["id"]!.GetValue<string>());
+        Assert.Equal("planned", (await Ok(session, "get_entity", new JsonObject { ["id"] = idea }))["entity"]!["status"]!.GetValue<string>());
+        await Ok(session, "plan_material", new JsonObject { ["id"] = idea });
+        Assert.Null((await Ok(session, "get_entity", new JsonObject { ["id"] = idea }))["entity"]!["time"]);
+        Assert.Equal("schedule.material", await Failure(session, "plan_material", new JsonObject { ["id"] = alex }));
+
+        // Comments can mention people of the trip, and only them.
+        var comment = (await Ok(session, "add_comment", new JsonObject { ["target"] = train, ["author"] = alex, ["body"] = "Seats in car 7", ["mentions"] = new JsonArray(alex) }))["id"]!.GetValue<string>();
+        Assert.Equal(alex, (await Ok(session, "get_entity", new JsonObject { ["id"] = comment }))["entity"]!["mentions"]![0]!.GetValue<string>());
+        Assert.Equal("argument.invalid", await Failure(session, "add_comment", new JsonObject { ["target"] = train, ["author"] = alex, ["body"] = "Hi", ["mentions"] = new JsonArray(train) }));
+    }
+
     private sealed class FakeGitHub(Func<HttpRequestMessage, HttpResponseMessage> answer) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => Task.FromResult(answer(request));

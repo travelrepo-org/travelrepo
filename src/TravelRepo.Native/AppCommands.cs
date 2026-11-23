@@ -195,7 +195,9 @@ internal static class AppCommands
             ["check_in"] = s.CheckIn?.ToJson(),
             ["check_out"] = s.CheckOut?.ToJson(),
             ["issues"] = Flags(s.Issues.ToString())
-        }))
+        })),
+        // Nights within the trip without a stay or an item through the night, such as a night flight.
+        ["missing_nights"] = Array(TravelRepo.Core.Stays.MissingNights(trip).Select(d => (JsonNode)Date(d)!))
     };
 
     private static JsonObject Weather(TripWeather weather)
