@@ -80,9 +80,9 @@ internal static class AppCommands
             ["from"] = d.From.ToString(),
             ["to"] = d.To.ToString(),
             ["currency"] = d.Currency,
-            ["amount"] = d.Amount,
-            ["settled"] = d.Settled,
-            ["open"] = d.Open,
+            ["amount"] = Dec(d.Amount),
+            ["settled"] = Dec(d.Settled),
+            ["open"] = Dec(d.Open),
             ["settled_on"] = Date(d.SettledOn)
         };
         return new JsonObject
@@ -96,14 +96,15 @@ internal static class AppCommands
                 ["planned"] = Expenses.IsPlanned(s.Expense),
                 ["category"] = ExpenseCategories.Of(trip, s.Expense),
                 ["payers"] = Array(s.Payers.Select(p => (JsonNode)p.ToString())),
-                ["shares"] = Array(s.Shares.Select(x => (JsonNode)new JsonObject { ["person"] = x.Person.ToString(), ["amount"] = x.Amount, ["value"] = x.Value })),
+                ["shares"] = Array(s.Shares.Select(x => (JsonNode)new JsonObject { ["person"] = x.Person.ToString(), ["amount"] = Dec(x.Amount), ["value"] = x.Value is { } v ? Dec(v) : null })),
                 ["debts"] = Array(s.Debts.Select(Debt)),
                 ["issues"] = Flags(s.Issues.ToString())
             })),
             ["open_debts"] = Array(Expenses.Open(trip).Select(Debt)),
-            ["balances"] = Array(Expenses.Balances(trip, currency, rates).Select(b => (JsonNode)new JsonObject { ["person"] = b.Person.ToString(), ["currency"] = b.Currency, ["net"] = b.Net })),
-            ["totals"] = Array(TripSummaries.Costs(trip).Select(t => (JsonNode)new JsonObject { ["currency"] = t.Currency, ["paid"] = t.Paid, ["estimated"] = t.Estimated, ["budget"] = t.Budget })),
-            ["categories"] = Array(ExpenseCategories.Totals(trip, currency, rates).Select(c => (JsonNode)new JsonObject { ["category"] = c.Category, ["currency"] = c.Currency, ["amount"] = c.Amount, ["estimated"] = c.Estimated })),
+            ["balances"] = Array(Expenses.Balances(trip, currency, rates).Select(b => (JsonNode)new JsonObject { ["person"] = b.Person.ToString(), ["currency"] = b.Currency, ["net"] = Dec(b.Net) })),
+            ["settle_up"] = Array(Expenses.SettleUp(trip, currency, rates).Select(t => (JsonNode)new JsonObject { ["from"] = t.From.ToString(), ["to"] = t.To.ToString(), ["currency"] = t.Currency, ["amount"] = Dec(t.Amount) })),
+            ["totals"] = Array(TripSummaries.Costs(trip).Select(t => (JsonNode)new JsonObject { ["currency"] = t.Currency, ["paid"] = Dec(t.Paid), ["estimated"] = Dec(t.Estimated), ["budget"] = Dec(t.Budget) })),
+            ["categories"] = Array(ExpenseCategories.Totals(trip, currency, rates).Select(c => (JsonNode)new JsonObject { ["category"] = c.Category, ["currency"] = c.Currency, ["amount"] = Dec(c.Amount), ["estimated"] = c.Estimated })),
             ["budgets"] = Array(Budgets.All(trip, rates).Select(b => (JsonNode)new JsonObject
             {
                 ["id"] = b.Budget.Id.ToString(),
@@ -111,8 +112,8 @@ internal static class AppCommands
                 ["scope"] = b.Scope,
                 ["target"] = b.Target,
                 ["amount"] = Money(b.Amount),
-                ["spent"] = b.Spent,
-                ["planned"] = b.Planned,
+                ["spent"] = Dec(b.Spent),
+                ["planned"] = Dec(b.Planned),
                 ["approximate"] = b.Approximate,
                 ["not_included"] = Array(b.NotIncluded.Select(n => Money(n)!))
             }))
@@ -258,6 +259,9 @@ internal static class AppCommands
             catch (DomainException ex) when (ex.Code == "repository.changed" && attempt < 2) { }
         }
     }
+
+    /// <summary>Amounts as decimal strings, as money is written in trip files, so no client loses digits to a double.</summary>
+    private static JsonNode Dec(decimal value) => JsonValue.Create(value.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
     private static JsonArray Array(IEnumerable<JsonNode> items) => new(items.ToArray());
     private static JsonArray Flags(string flags) => flags == "None" ? [] : Array(flags.Split(", ").Select(f => (JsonNode)ClientCommands.Snake(f)));

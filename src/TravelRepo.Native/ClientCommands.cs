@@ -19,7 +19,7 @@ internal static class ClientCommands
 {
     public static readonly IReadOnlyList<string> Names =
         ["snapshot", "revision", "apply", "read_resource", "agenda", "find", "variants", "create_variant", "switch_variant", "delete_variant", "rollback",
-         "merge_preview", "merge_apply", "initialize_git", "sync_status", "sync", "add_remote", "watch"];
+         "merge_preview", "merge_apply", "initialize_git", "set_identity", "sync_status", "sync", "add_remote", "watch"];
 
     public static readonly IReadOnlyList<string> ReadOnly = ["snapshot", "revision", "read_resource", "agenda", "find", "variants", "merge_preview", "sync_status", "watch"];
 
