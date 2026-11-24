@@ -74,7 +74,7 @@ public static class PackingLists
         components["packing"] = packing;
         var withPeople = Assign(task, assignees ?? [], everyone);
         var copy = list.Copy(); if (copy.Data["items"] is not JsonArray items) copy.Data["items"] = items = new JsonArray();
-        items.Add(withPeople.Id.ToString());
+        items.Add((JsonNode)withPeople.Id.ToString());
         return (withPeople, copy);
     }
 

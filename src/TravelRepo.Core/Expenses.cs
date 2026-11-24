@@ -981,7 +981,7 @@ public static class Expenses
         if (value is null) { if (entry is not null) settled.Remove(entry); }
         else
         {
-            if (entry is null) { entry = new JsonObject { ["person"] = from.ToString(), ["to"] = to.ToString() }; settled.Add(entry); }
+            if (entry is null) { entry = new JsonObject { ["person"] = from.ToString(), ["to"] = to.ToString() }; settled.Add((JsonNode)entry); }
             // A transfer in another currency is recorded again by the caller when there is one; a stale one would mislead.
             if (entry["value"]?.ToString() != value) entry.Remove("converted");
             entry["value"] = value;

@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using TravelRepo.Core;
 using TravelRepo.Serialization;
 
@@ -129,13 +130,13 @@ public sealed partial class TravelRepository
     public static bool SameFiles(RepositoryState a, RepositoryState b) => a.Trip.Resources.Count == b.Trip.Resources.Count && a.Trip.Resources.All(p => b.Trip.Resources.TryGetValue(p.Key, out var bytes) && Equal(p.Value, bytes)) && a.Files.Count == b.Files.Count && a.Files.All(p => b.Files.TryGetValue(p.Key, out var f) && p.Value.Hash == f.Hash && p.Value.Path == f.Path);
     private static string EntityPath(Entity e) => e.Type == "trip" ? "travel.yaml" : (Folders.GetValueOrDefault(e.Type) ?? ".travelrepo") + "/" + e.Id + ".yaml";
     private sealed record FileChange(string Path, byte[]? Bytes);
-    private sealed record Backup(string Path, byte[]? Before, byte[]? After);
+    internal sealed record Backup(string Path, byte[]? Before, byte[]? After);
     private async Task WriteTransactionAsync(IReadOnlyList<FileChange> changes, CancellationToken cancellationToken)
     {
         var backups = new List<Backup>();
         foreach (var c in changes) { var p = SafePath(c.Path); backups.Add(new(c.Path, File.Exists(p) ? await File.ReadAllBytesAsync(p, cancellationToken) : null, c.Bytes)); }
         var journal = Path.Combine(RecoveryRoot, Guid.NewGuid() + ".json");
-        await ReplaceAsync(journal, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(backups)));
+        await ReplaceAsync(journal, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(backups, JournalJson.Default.ListBackup)));
         try
         {
             foreach (var c in changes) { cancellationToken.ThrowIfCancellationRequested(); await ReplaceAsync(SafePath(c.Path), c.Bytes); }
@@ -153,7 +154,7 @@ public sealed partial class TravelRepository
         if (!Directory.Exists(RecoveryRoot)) return;
         foreach (var file in Directory.EnumerateFiles(RecoveryRoot, "*.json"))
         {
-            var backups = JsonSerializer.Deserialize<List<Backup>>(await File.ReadAllTextAsync(file, cancellationToken))!;
+            var backups = JsonSerializer.Deserialize(await File.ReadAllTextAsync(file, cancellationToken), JournalJson.Default.ListBackup)!;
             foreach (var b in backups)
             {
                 var p = SafePath(b.Path); var bytes = File.Exists(p) ? await File.ReadAllBytesAsync(p, cancellationToken) : null;
@@ -209,3 +210,11 @@ public sealed partial class TravelRepository
         return SafePath("assets/sha256/" + hash[..2] + "/" + hash);
     }
 }
+
+/// <summary>
+/// The write journal (<see cref="TravelRepository.RecoverAsync"/>), source generated so it also works under NativeAOT.
+/// Metadata mode: the fast path of .NET 10 writes a null byte[] as "", which would turn a file that did not exist into an empty one.
+/// </summary>
+[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]
+[JsonSerializable(typeof(List<TravelRepository.Backup>))]
+internal sealed partial class JournalJson : JsonSerializerContext;

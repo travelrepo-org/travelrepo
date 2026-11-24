@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Compiles the TravelRepo libraries with NativeAOT for the machine it runs on and runs them on the samples, as iOS and
+    other clients without a JIT do. Not part of TravelRepo.sln: eng/aot-smoke.py publishes and runs it. The runtime
+    identifier is set here, not on the command line, so the libraries restore as usual and their lock files stay as they are.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <PublishAot>true</PublishAot>
+    <RuntimeIdentifier>$(NETCoreSdkPortableRuntimeIdentifier)</RuntimeIdentifier>
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
+    <TrimmerSingleWarn>false</TrimmerSingleWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/TravelRepo.Repository/TravelRepo.Repository.csproj" />
+    <ProjectReference Include="../../src/TravelRepo.Merge/TravelRepo.Merge.csproj" />
+    <ProjectReference Include="../../src/TravelRepo.Documents/TravelRepo.Documents.csproj" />
+    <ProjectReference Include="../../src/TravelRepo.Git.LibGit2/TravelRepo.Git.LibGit2.csproj" />
+    <ProjectReference Include="../../src/TravelRepo.Providers.Weather/TravelRepo.Providers.Weather.csproj" />
+    <ProjectReference Include="../../src/TravelRepo.Providers.GitHub/TravelRepo.Providers.GitHub.csproj" />
+    <ProjectReference Include="../../src/TravelRepo.Plugins.Abstractions/TravelRepo.Plugins.Abstractions.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using NodaTime;
 using NodaTime.Text;
 
@@ -11,13 +13,12 @@ namespace TravelRepo.Providers.Weather;
 /// </summary>
 public sealed class WeatherCache(string directory)
 {
-    private static readonly JsonSerializerOptions Json = new() { WriteIndented = false };
     private readonly object gate = new();
     public string Directory { get; } = directory;
 
-    private sealed record HourDto(long T, int H, double? C, int? P, double? Mm, double? W, double? G, int K);
-    private sealed record ForecastDto(long Fetched, long Expires, List<HourDto> Hours);
-    private sealed record ClimateDto(string D, double Max, double Min, double Rain, double Mm, int Y);
+    internal sealed record HourDto(long T, int H, double? C, int? P, double? Mm, double? W, double? G, int K);
+    internal sealed record ForecastDto(long Fetched, long Expires, List<HourDto> Hours);
+    internal sealed record ClimateDto(string D, double Max, double Min, double Rain, double Mm, int Y);
 
     private static string Name(GeoPoint point) => point.Latitude.ToString("0.####", CultureInfo.InvariantCulture) + "_" + point.Longitude.ToString("0.####", CultureInfo.InvariantCulture);
     private string ForecastFile(string provider, GeoPoint point) => Path.Combine(Directory, "forecast", provider, Name(point) + ".json");
@@ -26,18 +27,18 @@ public sealed class WeatherCache(string directory)
 
     public WeatherForecast? Forecast(string provider, GeoPoint point)
     {
-        var dto = Read<ForecastDto>(ForecastFile(provider, point)); if (dto is null) return null;
+        var dto = Read(ForecastFile(provider, point), WeatherJson.Default.ForecastDto); if (dto is null) return null;
         return new(provider, point, Instant.FromUnixTimeSeconds(dto.Fetched), Instant.FromUnixTimeSeconds(dto.Expires),
             dto.Hours.Select(h => new WeatherHour(Instant.FromUnixTimeSeconds(h.T), h.H, h.C, h.P, h.Mm, h.W, h.G, (WeatherCondition)h.K)).ToArray());
     }
 
     public void Store(WeatherForecast forecast) =>
         Write(ForecastFile(forecast.Provider, forecast.Point), new ForecastDto(forecast.Fetched.ToUnixTimeSeconds(), forecast.Expires.ToUnixTimeSeconds(),
-            forecast.Hours.Select(h => new HourDto(h.Time.ToUnixTimeSeconds(), h.Hours, h.TemperatureC, h.PrecipitationChance, h.PrecipitationMm, h.WindKmh, h.GustKmh, (int)h.Condition)).ToList()));
+            forecast.Hours.Select(h => new HourDto(h.Time.ToUnixTimeSeconds(), h.Hours, h.TemperatureC, h.PrecipitationChance, h.PrecipitationMm, h.WindKmh, h.GustKmh, (int)h.Condition)).ToList()), WeatherJson.Default.ForecastDto);
 
     /// <summary>Climate averages stored for a point, by date.</summary>
     public IReadOnlyDictionary<LocalDate, ClimateDay> Climate(GeoPoint point) =>
-        (Read<List<ClimateDto>>(ClimateFile(point)) ?? []).Select(d => LocalDatePattern.Iso.Parse(d.D).TryGetValue(default, out var date) ? new ClimateDay(date, d.Max, d.Min, d.Rain, d.Mm, d.Y) : null)
+        (Read(ClimateFile(point), WeatherJson.Default.ListClimateDto) ?? []).Select(d => LocalDatePattern.Iso.Parse(d.D).TryGetValue(default, out var date) ? new ClimateDay(date, d.Max, d.Min, d.Rain, d.Mm, d.Y) : null)
             .OfType<ClimateDay>().GroupBy(d => d.Date).ToDictionary(g => g.Key, g => g.Last());
 
     public void Store(GeoPoint point, IEnumerable<ClimateDay> days)
@@ -45,7 +46,7 @@ public sealed class WeatherCache(string directory)
         lock (gate)
         {
             var all = Climate(point).ToDictionary(); foreach (var day in days) all[day.Date] = day;
-            Write(ClimateFile(point), all.Values.OrderBy(d => d.Date).Select(d => new ClimateDto(LocalDatePattern.Iso.Format(d.Date), d.MaxC, d.MinC, d.RainDayShare, d.PrecipitationMm, d.Years)).ToList());
+            Write(ClimateFile(point), all.Values.OrderBy(d => d.Date).Select(d => new ClimateDto(LocalDatePattern.Iso.Format(d.Date), d.MaxC, d.MinC, d.RainDayShare, d.PrecipitationMm, d.Years)).ToList(), WeatherJson.Default.ListClimateDto);
         }
     }
 
@@ -62,7 +63,7 @@ public sealed class WeatherCache(string directory)
     // Parsed files, kept while the file on disk is unchanged: clients rebuild the trip's weather after every edit.
     private readonly Dictionary<string, (DateTime Written, object? Value)> parsed = [];
 
-    private T? Read<T>(string file) where T : class
+    private T? Read<T>(string file, JsonTypeInfo<T> type) where T : class
     {
         lock (gate)
         {
@@ -71,20 +72,25 @@ public sealed class WeatherCache(string directory)
                 if (!File.Exists(file)) { parsed.Remove(file); return null; }
                 var written = File.GetLastWriteTimeUtc(file);
                 if (parsed.TryGetValue(file, out var known) && known.Written == written && known.Value is T value) return value;
-                var result = JsonSerializer.Deserialize<T>(File.ReadAllText(file), Json); parsed[file] = (written, result);
+                var result = JsonSerializer.Deserialize(File.ReadAllText(file), type); parsed[file] = (written, result);
                 return result;
             }
             catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException) { return null; }
         }
     }
 
-    private void Write<T>(string file, T value)
+    private void Write<T>(string file, T value, JsonTypeInfo<T> type)
     {
         lock (gate)
         {
             System.IO.Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-            var temporary = file + ".tmp"; File.WriteAllText(temporary, JsonSerializer.Serialize(value, Json)); File.Move(temporary, file, true);
+            var temporary = file + ".tmp"; File.WriteAllText(temporary, JsonSerializer.Serialize(value, type)); File.Move(temporary, file, true);
             parsed.Remove(file);
         }
     }
 }
+
+[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]
+[JsonSerializable(typeof(WeatherCache.ForecastDto))]
+[JsonSerializable(typeof(List<WeatherCache.ClimateDto>))]
+internal sealed partial class WeatherJson : JsonSerializerContext;
