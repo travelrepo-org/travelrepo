@@ -60,7 +60,7 @@ let state = try await trip.sync()
 
 - Every function is `async` and runs on a TravelRepo thread. Cancelling the Swift task cancels the call (`call.cancelled`).
 - Failures throw `TravelRepoError` with the TravelRepo code and an English message. Apps show their own text for the codes.
-- `TravelRepoSession` has typed results for `snapshot`, `apply`, `agenda`, `find`, `syncStatus`, `sync`, `mergePreview` and `mergeApply`.
+- `TravelRepoSession` has typed results for `snapshot`, `apply`, `agenda`, `find`, `costs`, `packingLists`, `bookings`, `stays`, `reminders`, `export`, `importDocument`, `fetchExchangeRates`, `fetchWeather`, `syncStatus`, `sync`, `mergePreview` and `mergeApply`.
 - Every other command, including all MCP tools, goes through `call(_:_:)`. It returns `JSONValue`, or decodes into your own `Decodable` type.
 - `JSONValue` keeps entity data as it is, including unknown fields and extensions. Write the whole entity back through `apply`.
 - A session closes when the `TravelRepoSession` is released.
