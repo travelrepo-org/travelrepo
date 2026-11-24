@@ -116,7 +116,7 @@ With a session:
 | `costs` | optional `currency` (converted with the saved exchange rates); amounts are decimal strings such as `"198.92"`, as in trip files | `expenses` (amount, method, payers, shares, debts, issues), `open_debts`, `balances`, `settle_up` (the fewest payments that settle everything), `totals` per currency, `categories`, `budgets` |
 | `packing` | – | `lists` with their items (`group`, `quantity`, `everyone`, `assignees`, `packed_by`) |
 | `bookings` | – | every booking with its plans (`items`), paid and planned expenses and `coverage` |
-| `stays` | – | every stay with `first_night`, `nights`, `zone`, `check_in`, `check_out` and `issues` |
+| `stays` | – | every stay with `first_night`, `nights`, `zone`, `check_in`, `check_out` and `issues`, and the `missing_nights` of the trip without a stay or an item through the night |
 | `reminders` | optional `now` (ISO 8601 instant, default the current time) | what is due: `kind`, `entity`, `title`, `moment`, `urgent`, `dates` |
 | `export` | `kind` (`plan`, `costs`, `packing`), `format` (`text`, `html` and `ics` for plans; `text` and `csv` for costs and packing), optional `person` | `text`, written in the session's culture |
 | `import_document_data` | `name`, `base64`, optional `media_type` (from the name otherwise), `attach_to` | the new document's `id`, `media_type` and the new `revision` |
@@ -129,6 +129,52 @@ With a session:
 | `sync_status` | optional `remote` | `branch`, `ahead`, `behind`, `has_local_changes`, `state` (`local_only`, `synced`, `local_changes`, `diverged`, `remote_changes`) |
 | `sync` | optional `remote` (default `origin`) | `state`; fetches, takes fast-forwards and sends own versions |
 | `add_remote` | `name`, `url` | `{}` |
+
+Repair, history and variants that are not open:
+
+| Command | Arguments | Result |
+| --- | --- | --- |
+| `git_health` | optional `remote` | `branch`, `detached`, an unfinished `operation` (`merge`, `rebase`, …), a `stale_lock` with `lock_age_seconds`, `trip_changes`, `other_files`, `ahead`, `behind` and a plain-text `summary` for bug reports, without addresses or credentials |
+| `recover` | – | the new `revision`; finishes writes that were interrupted, for example when the app was stopped while saving |
+| `remove_stale_lock` | optional `minimum_age_seconds` (default 60) | `removed`; a younger lock may belong to a running Git and stays |
+| `abort_operation` | – | `{}`; cancels a merge or rebase started outside the app, losing what was changed during it, so ask first |
+| `move_aside` | `paths` | the `folder` below the recovery folder the files were moved to; nothing is deleted |
+| `restore_preview` | `commit` | the `changes` (`path`, `kind`: `added`, `changed` or `removed`) that make the trip look as at that version, and the `plan` to confirm them |
+| `restore_apply` | `commit`, `plan` | `revision` and `diagnostics`; fails with `repair.changed` when the trip changed since the preview |
+| `history` | optional `limit` (at most 100) | `versions` with `commit`, `parents`, `author`, `email`, `at`, `title`, `message`, `application_generated` and `refs` |
+| `remotes` | – | `remotes` with `name` and `url` |
+| `pull` | optional `remote` | `state`; takes the remote's versions only as a fast-forward and never sends, for updates in the background |
+| `update_variant` | optional `title`, `archive` | `{}`; renames or archives the open variant with a small version |
+| `deleted_variants` | – | the recycle bin: `reference`, `branch`, `title`, `deleted_at`, `commit` |
+| `restore_variant` | `reference` | the restored `branch`, kept on this device until it is shared |
+| `purge_deleted_variants` | optional `older_than_days` (default 30) | how many were `removed` |
+| `keep_local_only` | `branch` | `{}`; a variant deleted on the remote stays here and is no longer uploaded |
+| `share_variant` | `branch`, optional `remote` | `{}`; uploads such a variant and syncs it again |
+| `sync_variant` | `branch`, optional `remote` | `state` of a variant that is not open; a `diverged` one needs a merge |
+| `mark_merged` | `into_variant_id`, `into_commit` | `{}`; archives the open variant as taken over by another |
+| `copy_trip` | `destination` (an empty folder) | the copy's `root`, with history, refs and remotes |
+
+Plan edits beyond whole entities. Those that change the trip are one transaction each and return `revision` and `diagnostics`:
+
+| Command | Arguments | Result |
+| --- | --- | --- |
+| `vocabulary` | – | the standard `schedule_categories`, `transport_types`, `statuses`, `expense_categories` and the trip's `custom_expense_categories` |
+| `suggest_category` | `title` | the expense `category` for a title, or null |
+| `delete_preview` | `ids` | what deleting them changes: `deleted`, `dependents` (such as comments on them), `updated` (references removed), `removed_resources` and `unused` places, notes, documents and bookings |
+| `delete_entities` | `ids` | deletes them as previewed; add ids from `unused` to delete those too |
+| `duplicate` | `id`, optional `title` | the copy's `id`, with everything nested in it |
+| `schedule` | `id`, `local` (such as `2027-03-28T10:00:00`), `timezone`, optional `minutes` (default 60), `offset` | an exact time, saved with its offset; `time.gap` for a local time that is skipped and `time.ambiguous` for one that is repeated, unless `offset` (such as `+01`) says which |
+| `move_to_day` | `id`, `day`, optional `offset` | the same local time and length on another day, with the same errors; an item without a time keeps its kind of day |
+| `comments` | `target` | `comments` with `author`, `author_name`, `created_at` and `body`, oldest first |
+| `add_comment` | `target`, `author` (a person), `body`, optional `mentions` (people) | the comment's `id` |
+| `calendar` | optional `stays_as_check_in_out` | `entries` for a device calendar: `uid`, `item`, `title`, `role`, `kind`, `all_day`, `start`, `end`, `date`, `zone`, `location`, `description`, `status` |
+| `cost_upgrade_preview` | optional `fallback_currency` | whether an upgrade of older cost data is `needed` and its `changes` |
+| `cost_upgrade_apply` | optional `fallback_currency`, `message` | saves it; a `version` of its own when nothing else was unsaved |
+| `read_mail` | `id` of an e-mail document, optional `allow_remote_images` | `subject`, `from`, `to`, `cc`, `date`, `text`, `html` cleaned for display (no scripts, frames or forms; remote images only when allowed), `remote_images`, `inline_images` and `attachments` as base64 |
+| `read_pass` | `id` of a Wallet pass, optional `language` (default the session's) | `description`, `organization`, `style`, `barcode` (`message`, `format`, `alt_text`, `encoding`), `fields` (`group`, `label`, `value`), `relevant`, `background`, `foreground` |
+| `plan_material` | `id` of an activity, note or document, optional `local`, `timezone`, `minutes`, `offset` | the activity's `id`; a note or document becomes a new activity that shows it, an idea with a time becomes planned, without `local` it is unscheduled |
+| `align_stay` | `id` of a stay | makes check-in, check-out and time agree, filling a missing one from the nights; `stay.unscheduled` for an item without nights |
+| `replace_document` | `id`, `source` (a file path), `media_type`, optional `allow_large` | the document's `id` and the new `revision` |
 
 Every tool of the [MCP server](mcp.md) also works as a session command, with the same name, arguments and results. For example: `get_trip`, `get_schedule`, `search`, `get_entity`, `create_entity`, `update_entity`, `delete_entity`, `get_costs`, `add_expense`, `export_text`, `create_version` and `list_versions`. Changes are validated and written as one transaction, as there. `info` lists all commands.
 
