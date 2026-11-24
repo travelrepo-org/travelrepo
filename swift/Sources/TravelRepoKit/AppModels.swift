@@ -143,3 +143,31 @@ extension TravelRepoSession {
     /// Updates the weather cache for the trip's places and dates and returns the weather by day and plan.
     public func fetchWeather(refresh: Bool = false) async throws -> JSONValue { try await call("fetch_weather", ["refresh": .bool(refresh)]) }
 }
+
+/// Who the person using the app is in a trip (`me`), and the travellers to choose from when nobody matches.
+public struct Me: Decodable, Sendable {
+    public struct Traveler: Decodable, Sendable {
+        public let id: String; public let name: String; public let claimedBySomeoneElse: Bool
+        enum CodingKeys: String, CodingKey { case id, name, claimedBySomeoneElse = "claimed_by_someone_else" }
+    }
+    public let person: String?; public let name: String?; public let source: String?; public let travelers: [Traveler]
+}
+
+extension TravelRepoSession {
+    /// Finds the person using the app by their GitHub login or Git e-mail address.
+    public func me(githubLogin: String? = nil, gitEmail: String? = nil) async throws -> Me {
+        var arguments: [String: JSONValue] = [:]
+        if let githubLogin { arguments["github_login"] = .string(githubLogin) }
+        if let gitEmail { arguments["git_email"] = .string(gitEmail) }
+        return try await call("me", arguments)
+    }
+
+    /// "That's me": stores the user's identities on `person`, so `me` finds them on every device.
+    public func claimPerson(_ person: String, githubLogin: String? = nil, gitName: String? = nil, gitEmail: String? = nil) async throws {
+        var arguments: [String: JSONValue] = ["person": .string(person)]
+        if let githubLogin { arguments["github_login"] = .string(githubLogin) }
+        if let gitName { arguments["git_name"] = .string(gitName) }
+        if let gitEmail { arguments["git_email"] = .string(gitEmail) }
+        try await call("claim_person", arguments)
+    }
+}
