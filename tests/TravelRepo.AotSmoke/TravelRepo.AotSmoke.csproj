@@ -11,6 +11,7 @@
     <RuntimeIdentifier>$(NETCoreSdkPortableRuntimeIdentifier)</RuntimeIdentifier>
     <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
     <TrimmerSingleWarn>false</TrimmerSingleWarn>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/TravelRepo.Repository/TravelRepo.Repository.csproj" />
@@ -20,5 +21,6 @@
     <ProjectReference Include="../../src/TravelRepo.Providers.Weather/TravelRepo.Providers.Weather.csproj" />
     <ProjectReference Include="../../src/TravelRepo.Providers.GitHub/TravelRepo.Providers.GitHub.csproj" />
     <ProjectReference Include="../../src/TravelRepo.Plugins.Abstractions/TravelRepo.Plugins.Abstractions.csproj" />
+    <ProjectReference Include="../../src/TravelRepo.Native/TravelRepo.Native.csproj" />
   </ItemGroup>
 </Project>
