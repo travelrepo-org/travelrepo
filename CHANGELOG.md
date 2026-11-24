@@ -2,6 +2,21 @@
 
 All notable changes to TravelRepo. Generated from `docs/releases` by `python eng/changelog.py`; do not edit by hand.
 
+## 0.14.0 – 2026-11-25
+
+### Changes
+
+- New: `TravelRepo.Native`, a C interface for apps that are not written in .NET. It is compiled with NativeAOT into a native library; a command name and JSON go in, and every call answers once through a callback. It covers what Jourfold uses from TravelRepo: opening, cloning and creating trips, all MCP tools, validated edits as one transaction, the plan by day, search, costs with settle-up payments, packing, bookings, stays, reminders, exports, documents, mail and Wallet passes, exchange rates and weather, variants, merges (also "keep both"), history, restore and repair, GitHub sign-in and sync, and who the person using the app is. Events report clone progress and changes to a watched trip. The library is built from source with `eng/build-native.sh`; it is not published to nuget.org. See `docs/native.md`.
+- New: the Swift package `TravelRepoKit` for iOS apps, with async Swift functions and typed models for the whole C interface and a privacy manifest for the App Store. Releases attach `TravelRepo.xcframework.zip` and `git2.xcframework.zip`, and tag a commit without "v" (`0.14.0`) whose `Package.swift` uses them, so an app adds `.package(url: "https://github.com/travelrepo-org/travelrepo", from: "0.14.0")`. See `docs/swift.md`.
+- The libraries compile with NativeAOT and are marked trimmable, without trim or AOT warnings. JSON that TravelRepo writes (exchange rates, weather cache, write journal, plugin manifests, schema results) now uses source-generated serialization and stays byte for byte as before; files written by earlier versions read the same. Apps that trim, such as Android and iOS builds, get smaller.
+- New API: `LibGit2Backend.ReportProgress` reports the progress of a clone as `GitTransferProgress` to the caller that asked for it.
+- MCP: tool errors keep their TravelRepo error code (`TripToolException.Code`); clients see the same messages as before.
+- CI and releases build with .NET SDK 10.0.404 and runtime 10.0.15. Runtime 10.0.12 is affected by GHSA-p3jp-9v83-76w9 (Brotli decoder).
+
+### Fixes
+
+- With NativeAOT, the libgit2 backend no longer fails to find a repository after `init` and no longer stores empty commit messages. LibGit2Sharp's calls that fill a libgit2 buffer return nothing there, so the backend finds the repository and cleans up messages itself. Builds without NativeAOT behave as before.
+
 ## 0.13.1 – 2026-11-18
 
 ### Changes
