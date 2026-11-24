@@ -332,6 +332,68 @@ public sealed class NativeTests : IDisposable
         finally { AppCommands.Http = new HttpClient(); }
     }
 
+    [Fact]
+    public async Task EventsReportCloneProgressAndTripChanges()
+    {
+        var events = new ConcurrentQueue<JsonNode>();
+        NativeHost.Events = text => events.Enqueue(JsonNode.Parse(text)!);
+        try
+        {
+            // A trip with Git history on a bare remote, cloned through the interface.
+            var remote = Path.Combine(root, "remote.git");
+            using (var bare = new LibGit2Sharp.Repository(LibGit2Sharp.Repository.Init(remote, isBare: true))) bare.Refs.UpdateTarget("HEAD", "refs/heads/main");
+            var created = await Ok(0, "create_trip", new JsonObject { ["root"] = Path.Combine(root, "alex"), ["recovery_root"] = Path.Combine(root, "recovery"), ["title"] = "Spring in Japan", ["git_name"] = "Alex", ["git_email"] = "alex@example.invalid" });
+            var alex = (await Ok(0, "open", new JsonObject { ["root"] = created["root"]!.DeepClone(), ["recovery_root"] = Path.Combine(root, "recovery") }))["session"]!.GetValue<ulong>();
+            await Ok(alex, "add_remote", new JsonObject { ["name"] = "origin", ["url"] = remote });
+            Assert.Equal("synced", (await Ok(alex, "sync"))["state"]!.GetValue<string>());
+            await Ok(0, "clone", new JsonObject { ["url"] = remote, ["destination"] = Path.Combine(root, "sam") });
+            var progress = events.Where(e => e["type"]!.GetValue<string>() == "clone_progress").ToArray();
+            Assert.NotEmpty(progress);
+            // A local clone copies the objects without a transfer; its checkout is still reported, up to the last file.
+            Assert.All(progress, e => Assert.Equal(progress[0]["call"]!.GetValue<ulong>(), e["call"]!.GetValue<ulong>()));
+            Assert.True(progress[^1]["checkout_total"]!.GetValue<int>() > 0 && progress[^1]["checkout_completed"]!.GetValue<int>() == progress[^1]["checkout_total"]!.GetValue<int>(), progress[^1].ToJsonString());
+
+            // An edit by someone else, here a second session on the clone, reaches a session that watches.
+            var sam = (await Ok(0, "open", new JsonObject { ["root"] = Path.Combine(root, "sam"), ["recovery_root"] = Path.Combine(root, "recovery-sam") }))["session"]!.GetValue<ulong>();
+            Assert.True((await Ok(sam, "watch", new JsonObject { ["interval_seconds"] = 1 }))["watching"]!.GetValue<bool>());
+            var editor = new TravelRepo.Repository.TravelRepository(Path.Combine(root, "sam"), Path.Combine(root, "recovery-editor"));
+            var nara = TravelRepo.Core.Entity.Create("place", "Nara Park");
+            await editor.ApplyAsync(await editor.ReadAsync(), [new(nara.Id, nara)]);
+            var deadline = DateTime.UtcNow.AddSeconds(15);
+            while (DateTime.UtcNow < deadline && !events.Any(e => e["type"]!.GetValue<string>() == "trip_changed" && e["session"]!.GetValue<ulong>() == sam)) await Task.Delay(100);
+            var changed = Assert.Single(events, e => e["type"]!.GetValue<string>() == "trip_changed" && e["session"]!.GetValue<ulong>() == sam)!;
+            Assert.Equal((await Ok(sam, "revision"))["revision"]!.GetValue<string>(), changed["revision"]!.GetValue<string>());
+            Assert.False((await Ok(sam, "watch", new JsonObject { ["enabled"] = false }))["watching"]!.GetValue<bool>());
+        }
+        finally { NativeHost.Events = null; }
+    }
+
+    [Fact]
+    public async Task KeepBothKeepsTheCurrentEntityAndAddsTheIncomingOne()
+    {
+        var created = await Ok(0, "create_trip", new JsonObject { ["root"] = Path.Combine(root, "nara"), ["recovery_root"] = Path.Combine(root, "recovery"), ["title"] = "Nara", ["git_name"] = "Alex", ["git_email"] = "alex@example.invalid" });
+        var session = (await Ok(0, "open", new JsonObject { ["root"] = created["root"]!.DeepClone(), ["recovery_root"] = Path.Combine(root, "recovery") }))["session"]!.GetValue<ulong>();
+        var lunch = (await Ok(session, "create_entity", new JsonObject { ["type"] = "schedule_item", ["data"] = new JsonObject { ["title"] = "Lunch" } }))["id"]!.GetValue<string>();
+        await Ok(session, "create_version", new JsonObject { ["message"] = "Add lunch" });
+        async Task Rename(string title)
+        {
+            var entity = (await Ok(session, "get_entity", new JsonObject { ["id"] = lunch }))["entity"]!.AsObject(); entity["title"] = title;
+            await Ok(session, "apply", new JsonObject { ["revision"] = (await Ok(session, "revision"))["revision"]!.DeepClone(), ["edits"] = new JsonArray(new JsonObject { ["id"] = lunch, ["data"] = entity.DeepClone() }) });
+            await Ok(session, "create_version", new JsonObject { ["message"] = "Lunch: " + title });
+        }
+        await Ok(session, "create_variant", new JsonObject { ["branch"] = "variants/deer-park", ["title"] = "Deer park" });
+        await Rename("Lunch by the deer park");
+        var primary = (await Ok(session, "variants"))["variants"]!.AsArray().First(v => v!["primary"]!.GetValue<bool>())!["branch"]!.GetValue<string>();
+        await Ok(session, "switch_variant", new JsonObject { ["branch"] = primary });
+        await Rename("Lunch at Kasuga Taisha");
+
+        Assert.True((await Ok(session, "merge_preview", new JsonObject { ["branch"] = "variants/deer-park", ["keep_both"] = new JsonArray(lunch) }))["can_apply"]!.GetValue<bool>());
+        await Ok(session, "merge_apply", new JsonObject { ["branch"] = "variants/deer-park", ["keep_both"] = new JsonArray(lunch) });
+        var titles = (await Ok(session, "snapshot"))["entities"]!.AsArray().Select(e => e!["data"]!["title"]?.GetValue<string>()).ToArray();
+        Assert.Contains("Lunch at Kasuga Taisha", titles);
+        Assert.Contains("Lunch by the deer park", titles);
+    }
+
     private sealed class FakeGitHub(Func<HttpRequestMessage, HttpResponseMessage> answer) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => Task.FromResult(answer(request));

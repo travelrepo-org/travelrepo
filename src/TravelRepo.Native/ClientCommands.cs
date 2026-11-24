@@ -19,9 +19,9 @@ internal static class ClientCommands
 {
     public static readonly IReadOnlyList<string> Names =
         ["snapshot", "revision", "apply", "read_resource", "agenda", "find", "variants", "create_variant", "switch_variant", "delete_variant", "rollback",
-         "merge_preview", "merge_apply", "initialize_git", "sync_status", "sync", "add_remote"];
+         "merge_preview", "merge_apply", "initialize_git", "sync_status", "sync", "add_remote", "watch"];
 
-    public static readonly IReadOnlyList<string> ReadOnly = ["snapshot", "revision", "read_resource", "agenda", "find", "variants", "merge_preview", "sync_status"];
+    public static readonly IReadOnlyList<string> ReadOnly = ["snapshot", "revision", "read_resource", "agenda", "find", "variants", "merge_preview", "sync_status", "watch"];
 
     /// <summary>Runs <paramref name="command"/>, or returns false when it is not one of these.</summary>
     public static async Task<(bool Found, JsonNode? Result)> RunAsync(NativeSession session, string command, Arguments args, CancellationToken ct)
@@ -145,8 +145,22 @@ internal static class ClientCommands
             ?? throw new DomainException("variant.missing", "There is no variant " + branch + ".");
         var baseline = await session.Git.SnapshotAsync(await session.Git.MergeBaseAsync(other.Commit, ct), ct);
         var incoming = await session.Git.SnapshotAsync(other.Commit, ct);
-        var resolutions = args.Object("resolutions")?.ToDictionary(p => p.Key, p => p.Value?.DeepClone());
-        return (SemanticMerge.Plan(baseline, (await session.ReadAsync(ct)).Trip, incoming, resolutions), other);
+        var current = (await session.ReadAsync(ct)).Trip;
+        var resolutions = args.Object("resolutions")?.ToDictionary(p => p.Key, p => p.Value?.DeepClone()) ?? [];
+        // "Keep both": the current entity stays as it is and the incoming one is added as a copy with new ids, with
+        // everything nested below it, as the merge dialog in Jourfold offers it.
+        var keepBoth = new HashSet<Guid>();
+        foreach (var id in args.OptionalStrings("keep_both") ?? [])
+            keepBoth.Add(Guid.TryParse(id, out var entity) ? entity : throw new DomainException("argument.invalid", "keep_both holds entity ids."));
+        if (keepBoth.Count > 0)
+            foreach (var conflict in SemanticMerge.Plan(baseline, current, incoming).Conflicts.Where(c => keepBoth.Contains(c.Entity)))
+                resolutions[conflict.Entity + conflict.Path] = conflict.Current?.DeepClone();
+        var plan = SemanticMerge.Plan(baseline, current, incoming, resolutions);
+        if (keepBoth.Count == 0) return (plan, other);
+        var entities = plan.Result.Entities.ToDictionary(p => p.Key, p => p.Value);
+        foreach (var id in keepBoth.Where(id => incoming.Find(id) is not null))
+            foreach (var copy in TripCommands.DuplicateSubtree(incoming, id)) entities[copy.Id] = copy;
+        return (plan with { Result = plan.Result with { Entities = entities } }, other);
     }
 
     private static async Task<JsonNode> ApplyAsync(NativeSession session, Arguments args, CancellationToken ct)

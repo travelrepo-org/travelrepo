@@ -11,7 +11,8 @@
  *
  * Commands without a session (session 0): info, configure, create_trip, open, clone.
  * Commands of a session: snapshot, revision, apply, read_resource, agenda, find, variants, create_variant,
- * switch_variant, delete_variant, rollback, merge_preview, merge_apply, initialize_git, sync_status, sync, add_remote,
+ * switch_variant, delete_variant, rollback, merge_preview, merge_apply, initialize_git, sync_status, sync, add_remote, watch,
+ * costs, packing, bookings, stays, reminders, export, import_document_data, fetch_exchange_rates, fetch_weather,
  * and the tools of the TravelRepo MCP server with the same names and arguments (docs/mcp.md).
  * See docs/native.md.
  */
@@ -41,6 +42,9 @@ void tr_close(uint64_t session);
 
 /* Sets the function Git asks for credentials (origin such as https://github.com); NULL removes it. */
 void tr_set_credential_handler(tr_credential_handler handler, void *context);
+
+/* Sets the function that receives events as JSON: clone_progress during clone, trip_changed for watched sessions. */
+void tr_set_event_handler(tr_callback handler, void *context);
 
 /* Answers a credential request with {"username":"...","password":"..."}, or NULL for none. */
 void tr_credential_reply(uint64_t request, const char *credential_json);
