@@ -9,15 +9,19 @@
  *   {"ok":false,"error":{"code":"session.unknown","message":"..."}}
  * Never block the callback on the main thread of an app; hand the response over to it instead.
  *
- * Commands without a session (session 0): info, configure, open, clone.
- * Commands of a session: snapshot, sync_status, sync, add_remote, and the tools of the TravelRepo MCP server with the
- * same names and arguments (docs/mcp.md), such as get_trip, get_schedule, create_entity, update_entity, create_version.
+ * Commands without a session (session 0): info, configure, create_trip, open, clone.
+ * Commands of a session: snapshot, revision, apply, read_resource, agenda, find, variants, create_variant,
+ * switch_variant, delete_variant, rollback, merge_preview, merge_apply, initialize_git, sync_status, sync, add_remote,
+ * and the tools of the TravelRepo MCP server with the same names and arguments (docs/mcp.md).
  * See docs/native.md.
  */
 #ifndef TRAVELREPO_H
 #define TRAVELREPO_H
 
 #include <stdint.h>
+
+/* The version of this interface and of its JSON; info reports it as abi_version. */
+#define TRAVELREPO_ABI_VERSION 1
 
 #ifdef __cplusplus
 extern "C" {
