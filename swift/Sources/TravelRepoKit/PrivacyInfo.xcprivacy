@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Privacy manifest of TravelRepoKit (TravelRepo and the .NET runtime in TravelRepo.xcframework). TravelRepo tracks
+  nobody and collects no data; it reads and writes trip files where the app tells it to. The reasons cover the
+  required-reason APIs the linked binary calls (docs/swift.md#app-store).
+-->
+<plist version="1.0">
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<!-- stat, fstat, lstat: trip files, the recovery journal and caches in the app's container, and trip folders the user picks. -->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+				<string>3B52.1</string>
+			</array>
+		</dict>
+		<dict>
+			<!-- clock_gettime: the .NET runtime measures elapsed time (timeouts, Stopwatch). -->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>35F9.1</string>
+			</array>
+		</dict>
+		<dict>
+			<!-- statfs, fstatfs: the .NET runtime checks the file system before it writes files. -->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryDiskSpace</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>E174.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

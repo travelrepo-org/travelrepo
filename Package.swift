@@ -9,7 +9,7 @@ let package = Package(
     products: [.library(name: "TravelRepoKit", targets: ["TravelRepoKit"])],
     targets: [
         .binaryTarget(name: "CTravelRepo", path: "artifacts/native/TravelRepo.xcframework"),
-        .target(name: "TravelRepoKit", dependencies: ["CTravelRepo"], path: "swift/Sources/TravelRepoKit"),
+        .target(name: "TravelRepoKit", dependencies: ["CTravelRepo"], path: "swift/Sources/TravelRepoKit", resources: [.copy("PrivacyInfo.xcprivacy")]),
         .testTarget(name: "TravelRepoKitTests", dependencies: ["TravelRepoKit"], path: "swift/Tests/TravelRepoKitTests")
     ]
 )

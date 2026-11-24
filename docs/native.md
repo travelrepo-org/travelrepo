@@ -81,6 +81,18 @@ Without a session (pass 0):
 | `create_trip` | `root` (an empty or new folder), `title`, optional `language`, `timezone`, `recovery_root`, `git_name` and `git_email` to start Git history | `root`, `id` |
 | `open` | `root`, optional `recovery_root`, `read_only`, `culture` (such as `de-DE`), `client_name`, `weather_cache`, `weather_provider`, `exchange_rates` | `session` |
 | `clone` | `url`, `destination` | `destination` |
+| `github_configure` | `client_id` of the GitHub App, optional `app_slug` | `{}` |
+| `github_set_token` | `token` from an earlier sign-in, or `null` to forget it | `{}` |
+| `github_status` | – | `connected`, `account` (`login`, `name`, `avatar_url`, `profile_url`) |
+| `github_begin_sign_in` | – | `device_code`, `user_code`, `verification_uri`, `expires_in`, `interval` |
+| `github_poll_sign_in` | the object `github_begin_sign_in` returned | `state` (`pending`, `slow_down`, `connected`) and, when connected, the `token` to store |
+| `github_sign_out` | – | `{}` |
+| `github_repository_access` | – | `has_access`, `install_url` of the GitHub App |
+| `github_repositories` | – | the repositories the GitHub App may see that hold a trip |
+| `github_create_repository` | `name` | the new private repository (`full_name`, `clone_url`, `web_url`, `private`) |
+| `github_inspect_repository` | `full_name` | the repository |
+| `github_invite` | `full_name`, `username` | `{}` |
+| `github_search_users` | `query` | `logins` |
 
 With a session:
 
@@ -130,9 +142,13 @@ To answer a merge conflict, put the value that should win under the conflict's `
 
 TravelRepo does not send change notifications. Apps ask for `revision` when they come to the foreground or after a sync, and read again when it differs.
 
+## GitHub
+
+The GitHub commands use the GitHub App configured with `github_configure` (see [providers](providers.md)). TravelRepo keeps the token only in memory. The app stores the token that `github_poll_sign_in` returns, for example in the Keychain, and passes it to `github_set_token` on every start. Poll no faster than the `interval`, and wait 5 seconds longer after `slow_down`.
+
 ## Git credentials
 
-Git asks the app for credentials through the handler set with `tr_set_credential_handler`. The handler gets a request id and the origin, such as `https://github.com`. The app answers with `tr_credential_reply(request, "{\"username\":\"x-access-token\",\"password\":\"…\"}")`, or with `NULL` when it has none. The token comes from wherever the app keeps it, such as the Keychain. TravelRepo does not store it.
+Without a handler of its own, Git uses the GitHub token from `github_set_token` or the sign-in for `github.com`. With a handler, Git asks the app for credentials through the handler set with `tr_set_credential_handler`. The handler gets a request id and the origin, such as `https://github.com`. The app answers with `tr_credential_reply(request, "{\"username\":\"x-access-token\",\"password\":\"…\"}")`, or with `NULL` when it has none. The token comes from wherever the app keeps it, such as the Keychain. TravelRepo does not store it.
 
 ## Checks
 

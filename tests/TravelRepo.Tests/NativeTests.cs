@@ -201,6 +201,71 @@ public sealed class NativeTests : IDisposable
         Assert.Contains((await Ok(session, "list_versions"))["versions"]!.AsArray(), v => v!["message"]!.GetValue<string>().StartsWith("Merge Early start", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task GitHubSignInAndRepositoriesWorkThroughTheInterface()
+    {
+        var yaml = TravelRepo.Serialization.YamlCodec.Write(TravelRepo.Core.Entity.CreateTrip("Spring in Japan"));
+        var polls = 0; var requests = new System.Collections.Concurrent.ConcurrentBag<string>();
+        static HttpResponseMessage Json(string json) => new(System.Net.HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
+        GitHubCommands.Http = new HttpClient(new FakeGitHub(r =>
+        {
+            requests.Add(r.Method + " " + r.RequestUri!.AbsolutePath);
+            return r.RequestUri!.AbsolutePath switch
+            {
+                "/login/device/code" => Json("""{"device_code":"device","user_code":"WDJB-MJHT","verification_uri":"https://github.com/login/device","expires_in":900,"interval":5}"""),
+                "/login/oauth/access_token" => Json(Interlocked.Increment(ref polls) == 1 ? """{"error":"authorization_pending"}""" : """{"access_token":"test-token"}"""),
+                "/user" => Json("""{"login":"alex-travels","name":"Alex","avatar_url":"https://example.org/alex.png","html_url":"https://github.com/alex-travels"}"""),
+                "/user/installations" => Json("""{"installations":[{"id":7}]}"""),
+                "/user/installations/7/repositories" => Json("""{"repositories":[{"full_name":"alex-travels/spring","clone_url":"https://github.com/alex-travels/spring.git","html_url":"https://github.com/alex-travels/spring","private":true,"size":3}]}"""),
+                "/repos/alex-travels/spring/contents/travel.yaml" => Json("{\"content\":\"" + Convert.ToBase64String(Encoding.UTF8.GetBytes(yaml)) + "\"}"),
+                "/user/repos" => Json("""{"full_name":"alex-travels/kyoto","clone_url":"https://github.com/alex-travels/kyoto.git","html_url":"https://github.com/alex-travels/kyoto","private":true}"""),
+                "/search/users" => Json("""{"items":[{"login":"sam-travels"}]}"""),
+                _ => Json("{}")
+            };
+        }));
+        GitHubCommands.Reset();
+        try
+        {
+            await Ok(0, "github_configure", new JsonObject { ["client_id"] = "" });
+            Assert.Equal("github.setup", await Failure(0, "github_begin_sign_in"));
+            await Ok(0, "github_configure", new JsonObject { ["client_id"] = "test-client", ["app_slug"] = "travelrepo-test" });
+            Assert.False((await Ok(0, "github_status"))["connected"]!.GetValue<bool>());
+
+            var authorization = await Ok(0, "github_begin_sign_in");
+            Assert.Equal("WDJB-MJHT", authorization["user_code"]!.GetValue<string>());
+            Assert.Equal("pending", (await Ok(0, "github_poll_sign_in", authorization.AsObject().DeepClone().AsObject()))["state"]!.GetValue<string>());
+            var connected = await Ok(0, "github_poll_sign_in", authorization.AsObject().DeepClone().AsObject());
+            Assert.Equal("connected", connected["state"]!.GetValue<string>());
+            Assert.Equal("test-token", connected["token"]!.GetValue<string>());
+            Assert.Equal("alex-travels", (await Ok(0, "github_status"))["account"]!["login"]!.GetValue<string>());
+
+            // Git uses the sign-in for github.com when the app has no credential handler of its own.
+            Assert.Equal(new GitCredential("x-access-token", "test-token"), await NativeHost.Credentials.GetAsync(new Uri("https://github.com/alex-travels/spring.git")));
+            Assert.Null(await NativeHost.Credentials.GetAsync(new Uri("https://example.org/spring.git")));
+
+            Assert.Equal("alex-travels/spring", Assert.Single((await Ok(0, "github_repositories"))["repositories"]!.AsArray())!["full_name"]!.GetValue<string>());
+            Assert.True((await Ok(0, "github_create_repository", new JsonObject { ["name"] = "kyoto" }))["private"]!.GetValue<bool>());
+            await Ok(0, "github_invite", new JsonObject { ["full_name"] = "alex-travels/kyoto", ["username"] = "sam-travels" });
+            Assert.Contains("PUT /repos/alex-travels/kyoto/collaborators/sam-travels", requests);
+            Assert.Equal("sam-travels", (await Ok(0, "github_search_users", new JsonObject { ["query"] = "sam" }))["logins"]![0]!.GetValue<string>());
+
+            await Ok(0, "github_sign_out");
+            Assert.False((await Ok(0, "github_status"))["connected"]!.GetValue<bool>());
+            await Ok(0, "github_set_token", new JsonObject { ["token"] = "stored-token" });
+            Assert.True((await Ok(0, "github_status"))["connected"]!.GetValue<bool>());
+        }
+        finally
+        {
+            await Ok(0, "github_set_token", new JsonObject { ["token"] = null });
+            GitHubCommands.Http = new HttpClient(); GitHubCommands.Reset();
+        }
+    }
+
+    private sealed class FakeGitHub(Func<HttpRequestMessage, HttpResponseMessage> answer) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => Task.FromResult(answer(request));
+    }
+
     private string Trip()
     {
         var trip = Path.Combine(root, "trip-" + Guid.NewGuid().ToString("N")[..8]);

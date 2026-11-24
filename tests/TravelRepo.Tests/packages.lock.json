@@ -242,7 +242,8 @@
         "type": "Project",
         "dependencies": {
           "TravelRepo.Git.LibGit2": "[0.13.1, )",
-          "TravelRepo.Mcp": "[0.13.1, )"
+          "TravelRepo.Mcp": "[0.13.1, )",
+          "TravelRepo.Providers.GitHub": "[0.13.1, )"
         }
       },
       "travelrepo.plugins.abstractions": {
