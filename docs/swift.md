@@ -35,8 +35,6 @@ Unzip `git2.xcframework` into the app project and embed it (Embed & Sign) withou
 
 On `main` and in feature branches, `Package.swift` uses the local `artifacts/native/TravelRepo.xcframework`. `eng/swift-release.py` is the step that swaps that line on the tagged commit.
 
-`TravelRepo.Native` is also published to nuget.org with the other packages, for apps that build their own native library from it.
-
 ## Using it
 
 ```swift
