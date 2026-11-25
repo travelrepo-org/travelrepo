@@ -5,7 +5,7 @@ import PackageDescription
 
 // On a release, eng/swift-release.py replaces this line with the downloadable xcframework (url and checksum) on the
 // commit that SwiftPM resolves for that version (docs/swift.md#using-a-released-version). Keep it on one line.
-let binary: Target = .binaryTarget(name: "CTravelRepo", path: "artifacts/native/TravelRepo.xcframework")
+let binary: Target = .binaryTarget(name: "CTravelRepo", url: "https://github.com/travelrepo-org/travelrepo/releases/download/v0.14.0/TravelRepo.xcframework.zip", checksum: "5afe815bb3540d686da64d1076a60afcfc788f9346c433561e76a2db3a459177")
 
 let package = Package(
     name: "TravelRepoKit",
